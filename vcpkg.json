@@ -1,0 +1,21 @@
+{
+  "name": "descent",
+  "version-string": "0.1.0",
+  "description": "Descent-style 6DOF shooter, OpenGL 4.6, stencil shadow volumes",
+  "dependencies": [
+    "glfw3",
+    "glad",
+    "glm",
+    {
+      "name": "imgui",
+      "features": [
+        "glfw-binding",
+        "opengl3-binding"
+      ]
+    },
+    "stb",
+    "nlohmann-json",
+    "tinyobjloader"
+  ],
+  "builtin-baseline": "a1cae005c39be7b18ba319fced856b68d7276271"
+}

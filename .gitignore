@@ -1,0 +1,14 @@
+# build output
+build/
+out/
+.vs/
+.cache/
+
+# machine-local CMake preset (sets VCPKG_ROOT for this machine)
+CMakeUserPresets.json
+
+# vcpkg manifest-mode install tree
+vcpkg_installed/
+
+# screenshots written by --screenshot
+*.screenshot.png
