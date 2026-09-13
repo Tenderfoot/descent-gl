@@ -19,9 +19,18 @@ add_executable(descent
     src/core/log.cpp
     src/core/options.cpp
     src/core/window.cpp
+    src/render/debug.cpp
+    src/render/mesh.cpp
+    src/render/renderer.cpp
+    src/render/screenshot.cpp
+    src/render/shader.cpp
+    src/render/stb_impl.cpp
+    src/render/target.cpp
+    src/render/texture.cpp
 )
 
-target_include_directories(descent PRIVATE src ${Stb_INCLUDE_DIR})
+target_include_directories(descent PRIVATE src)
+target_include_directories(descent SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
 target_link_libraries(descent PRIVATE
     glfw
     glad::glad
@@ -33,6 +42,7 @@ target_link_libraries(descent PRIVATE
 target_compile_definitions(descent PRIVATE
     GLFW_INCLUDE_NONE
     GLM_FORCE_DEPTH_ZERO_TO_ONE
+    GLM_ENABLE_EXPERIMENTAL
     $<$<CONFIG:Debug>:DVK_DEBUG=1>
 )
 if(MSVC)

@@ -16,6 +16,8 @@ Options Options::parse(int argc, char** argv) {
             o.frames = std::atoi(argv[++i]);
         } else if (a == "--screenshot" && hasNext) {
             o.screenshot = argv[++i];
+        } else if (a == "--resize-test") {
+            o.resizeTest = true;
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }
