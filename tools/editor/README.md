@@ -39,10 +39,41 @@ lighting is something a browser cannot do; structure is what this owns.
 
 ## State
 
-E0 (viewer), E1 (validation parity) and E2 (round trip and server) are done.
-The editor reads, draws, checks and writes; it does not yet modify geometry.
-E3 adds extrude, join, delete and vertex dragging; E4 the entity tools; E5
-authoring quality of life.
+E0 (viewer), E1 (validation parity), E2 (round trip and server) and E3
+(geometry editing) are done. The editor reads, draws, checks, edits and
+writes. E4 adds the entity tools; E5 authoring quality of life.
+
+## Editing (E3)
+
+Three selection modes — **1** segment, **2** side, **3** vertex.
+
+| Tool | |
+| --- | --- |
+| **Extrude** | Grows a new segment out of a wall. The wall's four vertices become four of the new segment's, *by index*, so the portal is exact by construction. Depth defaults to the depth of the segment it grew from. |
+| **Join** | Makes two walls that are already in the same place into one portal, by rewriting one segment's four vertex indices to the other's. It does not move geometry: if the corners are not already coincident it refuses and says how far off they are. |
+| **Split portal** | Turns a portal back into two walls. |
+| **Delete segment** | Seals the neighbours, reindexes the graph, the doors and every entity, and takes the lights, pickups and objects inside it with it. The player start and the exit are not furniture and are left pointing at nothing, loudly. |
+| **Texture** | Per wall, from the five tiles in `procedural.h`. |
+| **Vertex drag** | Moves one vertex; every segment referencing it deforms together, which is the shared vertex array doing its job. Optional grid snap, off by default. |
+
+Undo and redo are Ctrl+Z and Ctrl+Shift+Z, by snapshot through the writer and
+reader — so an undone level is byte-identical to one loaded from the file.
+
+Every edit goes through one function, `edit()` in `main.js`, which records
+undo, applies the operation, revalidates and redraws. Nothing calls `ops.js`
+directly, so there is no way to change a level and forget to re-check it.
+
+### What the editor will not do for you
+
+**It will not make a portal by moving vertices until they coincide.** That is
+precisely the level file that validates, renders, walks — and leaks light.
+Join rewrites indices or refuses.
+
+**It will not hide a pinched surface.** Removing a segment from the middle of
+a cluster can leave four faces meeting along one edge, which the shadow
+volumes cannot use. No cleverness in the delete fixes that — the geometry
+genuinely pinches — so the closure check reports it, Save refuses, and undo is
+one keystroke away.
 
 ## Layout
 
@@ -54,19 +85,23 @@ authoring quality of life.
 | `src/level.js` | reading and writing the JSON |
 | `src/json_emit.js` | the number and layout rules the level files use |
 | `src/validate.js` | every structural rule, plus two the game does not check |
+| `src/ops.js` | extrude, join, delete and the rest of the structural edits |
+| `src/history.js` | undo and redo, by snapshot |
 | `src/view.js` | the only module that imports three.js |
 | `src/main.js` | the application |
 | `serve.py` | static files, level read/write, and the Verify endpoint |
 | `tests/conformance.mjs` | the editor's validator against the game's |
+| `tests/ops.mjs` | the structural edits, checked for shape and not just legality |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
 ## Verification
 
 ```
-node tools/editor/tests/conformance.mjs
+node tools/editor/tests/conformance.mjs   # the validator, against the game's
+node tools/editor/tests/ops.mjs           # the structural edits
 ```
 
-Needs a Linux debug build (`cmake --preset linux && cmake --build --preset
+Both need a Linux debug build (`cmake --preset linux && cmake --build --preset
 linux-debug`); without one it runs the editor half of each case and says the
 game half was skipped. It checks three things:
 
@@ -79,6 +114,18 @@ game half was skipped. It checks three things:
   must reject each one, the game must abort on it, and both must blame the
   same segment and side. The two `editorOnly` rules invert the assertion: the
   editor must warn and the game must load the level without complaint.
+
+`ops.mjs` checks the edits. The one that matters is extrude: its corner
+correspondence is the only place in the editor where a bug produces a level
+that passes every structural rule and is still wrong — a twisted segment.
+Every rule in the format is about indices, and a twist is about which index
+went in which slot, so "it validates" is not evidence. So extrude runs in all
+six directions and the result is checked for *shape*: eight distinct corners,
+no edge shorter than a unit, every face planar, and the four shared indices
+matching the wall it grew from. The correspondence table itself is derived
+from the cube's corner coordinates rather than written down, because a
+hand-built table is right for the side it was checked on and quietly twisted
+for the other five.
 
 ## Two validators
 

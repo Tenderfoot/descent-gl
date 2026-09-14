@@ -35,7 +35,7 @@ export class LevelView {
         this.root = new THREE.Group();
         this.groups = {};
         for (const name of ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
-                            'pickups', 'start', 'exit', 'highlight']) {
+                            'pickups', 'start', 'exit', 'vertices', 'highlight']) {
             this.groups[name] = new THREE.Group();
             this.groups[name].name = name;
             this.root.add(this.groups[name]);
@@ -86,8 +86,27 @@ export class LevelView {
         this.buildPortals(level);
         this.buildLights(level);
         this.buildEntities(level);
+        this.buildVertices(level);
         this.setXray(this.xray);
         return this;
+    }
+
+    // Every level vertex as a pickable point. Dragging one deforms every
+    // segment that references it, which is the shared vertex array doing its
+    // job: a portal cannot come apart because there is nothing to come apart.
+    buildVertices(level) {
+        const positions = [];
+        for (const v of level.vertices) positions.push(v[0], v[1], v[2]);
+        const geometry = this.track(new THREE.BufferGeometry());
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const material = this.track(new THREE.PointsMaterial({
+            color: 0xffe066, size: 7, sizeAttenuation: false, depthTest: false,
+        }));
+        const points = new THREE.Points(geometry, material);
+        points.renderOrder = 998;
+        points.name = 'vertices';
+        this.groups.vertices.add(points);
+        this.groups.vertices.visible = false;
     }
 
     // The eight corners of one segment, for framing the camera on it.
@@ -107,13 +126,15 @@ export class LevelView {
 
         for (const wall of level.walls) {
             const tile = level.segments[wall.segment].sides[wall.side].texture;
-            if (!byTile.has(tile)) byTile.set(tile, { positions: [], normals: [], segments: [] });
+            if (!byTile.has(tile)) byTile.set(tile, { positions: [], normals: [], faces: [] });
             const bucket = byTile.get(tile);
             for (const p of wall.p) {
                 bucket.positions.push(p[0], p[1], p[2]);
                 bucket.normals.push(wall.normal[0], wall.normal[1], wall.normal[2]);
             }
-            bucket.segments.push(wall.segment);
+            // Per triangle, so a raycast hit becomes a segment AND a side
+            // without searching. Extrude and the texture tools need the side.
+            bucket.faces.push({ segment: wall.segment, side: wall.side });
         }
 
         for (const [tile, bucket] of byTile) {
@@ -136,7 +157,7 @@ export class LevelView {
 
             const mesh = new THREE.Mesh(geometry, material);
             mesh.name = `walls:${WALL_TILE_NAMES[tile] ?? tile}`;
-            mesh.userData.segments = bucket.segments;
+            mesh.userData.faces = bucket.faces;
             this.groups.walls.add(mesh);
         }
 
@@ -316,19 +337,70 @@ export class LevelView {
         this.groups.highlight.add(lines);
     }
 
+    // Fills one side, so "this is the wall you are about to extrude" is not a
+    // guess. Drawn on top of everything, because the point is to see it even
+    // when it is behind another segment.
+    highlightSide(si, side, color = 0x6ad0e0) {
+        this.groups.highlight.clear();
+        if (!this.level || si < 0) return;
+        const c = sideCorners(this.level, si, side);
+        const positions = [];
+        for (const [a, b, d] of [[0, 1, 2], [0, 2, 3]]) {
+            for (const k of [a, b, d]) positions.push(c[k][0], c[k][1], c[k][2]);
+        }
+        const geometry = this.track(new THREE.BufferGeometry());
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        const material = this.track(new THREE.MeshBasicMaterial({
+            color, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthTest: false,
+        }));
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.renderOrder = 999;
+        this.groups.highlight.add(mesh);
+    }
+
+    highlightVertex(index, color = 0xff8844) {
+        this.groups.highlight.clear();
+        if (!this.level || index < 0) return;
+        const mesh = new THREE.Mesh(
+            this.track(new THREE.SphereGeometry(1.1, 12, 8)),
+            this.track(new THREE.MeshBasicMaterial({ color, depthTest: false })));
+        mesh.position.copy(v3(this.level.vertices[index]));
+        mesh.renderOrder = 999;
+        this.groups.highlight.add(mesh);
+    }
+
     lightReach(index) {
         const light = this.level?.lights[index];
         return light ? lightSegments(this.level, light) : [];
     }
 
-    // Which segment a click landed in: raycast the wall meshes and read the
-    // per-triangle segment recorded when they were built.
-    pickSegment(raycaster) {
+    // Which wall a click landed on: raycast the wall meshes and read the
+    // per-triangle record built with them. Returns { segment, side } or null.
+    pickFace(raycaster) {
         for (const hit of raycaster.intersectObjects(this.groups.walls.children, false)) {
-            const segments = hit.object.userData.segments;
-            if (segments && hit.faceIndex !== undefined) return segments[hit.faceIndex];
+            const faces = hit.object.userData.faces;
+            if (faces && hit.faceIndex !== undefined && faces[hit.faceIndex]) {
+                return { ...faces[hit.faceIndex] };
+            }
         }
-        return -1;
+        return null;
+    }
+
+    pickSegment(raycaster) {
+        return this.pickFace(raycaster)?.segment ?? -1;
+    }
+
+    // Nearest level vertex under the cursor. The threshold is in world units
+    // and set by the caller from the camera distance, so a vertex stays
+    // clickable whether the view is on one segment or the whole mine.
+    pickVertex(raycaster, threshold) {
+        const points = this.groups.vertices.children[0];
+        if (!points) return -1;
+        const previous = raycaster.params.Points.threshold;
+        raycaster.params.Points.threshold = threshold;
+        const hits = raycaster.intersectObject(points, false);
+        raycaster.params.Points.threshold = previous;
+        return hits.length > 0 ? hits[0].index : -1;
     }
 
     pickEntity(raycaster) {

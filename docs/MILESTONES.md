@@ -1120,8 +1120,68 @@ which turns `0.86` into `0.8600000143051147`.
 ### Not done here
 
 E3 (extrude, join, delete, vertex dragging), E4 (entity tools, OBJ preview),
-E5 (2D map view, undo/redo, the checklist panel). The riskiest piece is E3's
-corner correspondence: getting the mapping from a new segment's eight corner
-slots onto four existing and four new vertices wrong produces a twisted
-segment that still validates. It gets tested against the validator in every
-rotation.
+E5 (2D map view, the checklist panel). The riskiest piece is E3's corner
+correspondence: getting the mapping from a new segment's eight corner slots
+onto four existing and four new vertices wrong produces a twisted segment that
+still validates. It gets tested against the validator in every rotation.
+
+---
+
+## E3 — The level editor: geometry editing ✅
+
+Extrude, join, split, delete, vertex dragging, textures, undo and redo.
+`tools/editor/src/ops.js` and `history.js`. Still no change to the game.
+
+The primitive is **extrude**: a wall grows into a new segment whose matching
+face reuses the wall's four vertex *indices*, so the portal is exact because it
+was never built any other way. **Join** is the same rule from the other end —
+two walls already in the same place become a portal by rewriting one segment's
+indices to the other's. It never moves geometry to close a gap, because a
+portal made by nudging vertices until they coincide is exactly the file that
+validates, renders, walks, and leaks light.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| Extrude in all six directions | ✅ each produces a **box**: 8 distinct corners, no edge under 1 unit, every face planar to 1e-3, four indices shared with the wall it grew from |
+| Extrude refuses a side that is already a portal | ✅ |
+| Extrude depth defaults to the source segment's | ✅ 20.00 wanted, 20.00 got |
+| Join, shared-index path | ✅ two extrudes that meet already share four corners; joining closes the surface |
+| Join, rewrite path | ✅ two wings with different indices for the same four places: rewritten, seam closed, **24 → 20 vertices** |
+| Join refuses sides that are not coincident | ✅ names the distance (27.618 in the UI run) |
+| Join refuses a side that is already a portal | ✅ |
+| Delete undoes an extrude exactly | ✅ back to 3 segments and 16 vertices, orphans dropped |
+| Delete from the middle reindexes everything | ✅ graph, doors, entities, player start |
+| Delete takes the entities inside with it | ✅ 1 light, 1 object on `test01` segment 2 |
+| Delete does not relocate the player start | ✅ goes to −1 and the validator says so |
+| A delete that pinches the surface is reported | ✅ `test01` segment 2: 0 open, **1 over-shared**, Save refused |
+| A level built from extrude + join + delete | ✅ validates, surface closed, round-trips, **and the game loads it** |
+| `tests/ops.mjs` | ✅ 25 assertions, 0 failures |
+| `tests/conformance.mjs` still passes | ✅ 36 assertions |
+| Extrude in the browser | ✅ 124→128 vertices, 34→35 segments, 244→252 wall triangles, surface still closed |
+| Undo / redo in the browser | ✅ exact restore both ways, then Save byte-identical (30418 bytes) and all three game checks PASS |
+| Vertex drag with snap | ✅ vertex 55 moved and snapped, surface stayed closed, one undo entry per drag |
+| Join handshake in the UI | ✅ arm → select → *Join to 28 top* → refusal surfaced, level untouched, Cancel offered |
+| No console or page errors | ✅ |
+
+### The one algorithm that matters
+
+Which of a new segment's eight corner slots takes which existing vertex. Get
+it wrong and you get a twisted segment that passes every structural rule —
+every rule in the format is about indices, and a twist is about which index
+went in which slot, so "it validates" is not evidence.
+
+So the permutation is **derived** from the cube's corner coordinates rather
+than written down, and the test checks shape rather than legality. A
+hand-built table would be right for the side it was checked on and quietly
+twisted for the other five; the first version of the test caught nothing
+because it only asked whether the result validated, which it did.
+
+### Two things the editor refuses to paper over
+
+- **Two extrudes that meet** leave two walls in the same place until they are
+  joined — an over-shared surface. That is reported, not hidden, and it is how
+  the author is told to join them.
+- **A delete that pinches** leaves four faces on one edge. Nothing in the
+  delete can fix it; the closure check reports it and Save refuses.

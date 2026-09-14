@@ -103,3 +103,19 @@ pre {
     color: var(--dim);
     pointer-events: none;
 }
+
+.modes { display: flex; gap: 4px; margin-bottom: 10px; }
+.modes button { flex: 1; padding: 5px 4px; font-size: 12px; }
+.modes button[aria-pressed="true"] { background: #2b4149; border-color: var(--accent); color: #eaf6f8; }
+
+.tools { display: grid; gap: 4px; margin-bottom: 10px; }
+.tools button { text-align: left; }
+.tools .hint { color: var(--dim); font-size: 12px; padding: 2px 0; }
+.tools .textures { display: flex; gap: 4px; }
+.tools .textures button { flex: 1; text-align: center; padding: 4px 2px; font-size: 11px; }
+.tools .textures button[aria-pressed="true"] { border-color: var(--accent); background: #2b4149; }
+
+.snap { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+.snap input { flex: 1; font: inherit; padding: 4px 6px; color: var(--text); background: #262b33; border: 1px solid var(--line); border-radius: 4px; }
+
+.dirty { color: var(--warn); }

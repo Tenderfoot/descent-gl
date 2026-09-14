@@ -230,6 +230,56 @@ then confirmed to still be inside `tools/editor/`, and a save parses the body
 before replacing the file — unreadable JSON in `assets/levels/` makes every
 later game start fatal, editor or not.
 
+### Editing, and the one algorithm that matters (E3)
+
+The primitive is **extrude**: a wall grows into a new segment whose matching
+face reuses the wall's four vertex *indices*. The portal is exact because it
+was never built any other way.
+
+Which of the new segment's eight corner slots takes which existing vertex is
+the whole of the problem, and it is the only place in the editor where a bug
+produces a level that passes every structural rule and is still wrong — a
+twisted segment. Every rule in the format is about indices; a twist is about
+which index went in which slot. So the correspondence is **derived** from the
+cube's corner coordinates (the permutation that reflects the cube through that
+side's plane) rather than written down: a hand-built table is right for the
+side it was checked on and quietly twisted for the other five. `tests/ops.mjs`
+extrudes in all six directions and checks the result is a *box* — eight
+distinct corners, no degenerate edge, every face planar — not merely a legal
+one.
+
+**Join** is the same rule from the other end. Two walls already in the same
+place become a portal by rewriting one segment's four indices to the other's,
+across the whole level, and dropping what that makes redundant. It never moves
+geometry to close a gap: a portal made by nudging vertices until they coincide
+is exactly the file that validates, renders, walks, and leaks light. If the
+corners are not already coincident it refuses and says how far off they are.
+
+Two consequences worth knowing, both of which the editor reports rather than
+hides:
+
+- Extruding into a space where a vertex already exists **reuses** it, so two
+  extrudes that meet already share their four corners and the join between
+  them only has to set the portals. In between, the level has two walls in the
+  same place — an over-shared surface — and the closure check is what tells
+  the author to join them.
+- Deleting a segment from the middle of a cluster can leave four faces meeting
+  along one edge. The shadow volumes cannot use that, and no cleverness in the
+  delete fixes it, because the geometry genuinely pinches. The closure check
+  reports it, Save refuses, and undo is one keystroke away.
+
+Delete also takes the lights, pickups and objects inside the segment with it —
+keeping the lamp floating in the rock the room became is not what anyone means
+— but not the player start or the exit, which are the level rather than
+furniture and are left pointing at nothing, loudly.
+
+Every edit goes through one function that records undo, applies the operation,
+revalidates and redraws. Nothing calls the operations directly, so there is no
+path that changes a level and forgets to re-check it. Undo is by snapshot
+through the writer and reader, which means an undone level is byte-identical
+to one loaded from the file — and that a bug in the writer surfaces here
+rather than a week later in a diff.
+
 ### What it is not
 
 Not the renderer. No shadows, no falloff, no reversed-Z, and the colours are
