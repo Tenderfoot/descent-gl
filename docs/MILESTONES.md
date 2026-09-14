@@ -663,7 +663,8 @@ Worth recording, because all three were the tests and not the code:
 
 - ~~**The raycast diagonal case above**~~ — fixed; it was the test's oracle, not
   the collision code.
-- `ARCHITECTURE.md` sections for doors, the HUD and the game flow.
+- ~~`ARCHITECTURE.md` sections for doors, the HUD and the game flow.~~ — done;
+  doors landed with the door fixes, the game loop and the HUD after that.
 - Playtesting `mine01` end to end, which needs the real machine: whether the
   key routing is legible, whether 45 seconds is the right countdown, and
   whether 16 robots is too many or too few.
@@ -878,3 +879,38 @@ the `ARCHITECTURE.md` work for doors, the HUD and the game flow, and playing
 `mine01` end to end on the dev machine — key routing, the 45-second countdown,
 and whether 16 robots is the right number. None of that can be settled in the
 container.
+
+---
+
+## M7 documentation — the game loop and the HUD
+
+The last of M7's paperwork. `docs/ARCHITECTURE.md` gains two sections, written
+against the code rather than from the milestone prompt:
+
+- **The game loop** — `GameState` as trivially copyable data inside `SimState`,
+  the four phases and the one direction through them, the reactor as a robot
+  with an `isReactor` flag rather than a special object type, the shake as a
+  `RenderState` offset read from wall-clock so it never moves the ship or banks
+  motion across a stall, and why a locked door does not twitch.
+- **The HUD** — `HudData` as a flat struct the game layer fills, so `src/render`
+  stays free of simulation types; the 37-glyph 5x7 font generated into an atlas
+  at startup instead of adding a font dependency; and the two state changes
+  (culling and depth test) that silently draw nothing when left on.
+
+Doors were already documented when they were fixed, so that part of the list was
+already closed.
+
+### Verified
+
+Docs only — no source change, so nothing to re-measure. Checked that every claim
+in the new text matches the code, which caught two of my own: `GameState` is not
+pointer-free (`endReason` points at string literals), and the shake reads
+`clock.seconds()` rather than the simulation's elapsed time. Both corrected
+before commit.
+
+### What is left in M7
+
+Playing `mine01` end to end on the dev machine: whether the key routing reads,
+whether 45 seconds is the right countdown, and whether 16 robots is too many or
+too few. That is a judgement call at a keyboard, not something the container can
+answer.

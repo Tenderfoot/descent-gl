@@ -763,6 +763,103 @@ changes segment.
 
 ---
 
+## The game loop (M7)
+
+`src/sim/gameflow.h`. Find the reactor, destroy it, get out before the mine
+does. One `stepGame` runs doors, pickups and the win/lose flow inside the fixed
+step, in that order, and it is the only place `GamePhase` changes.
+
+`GameState` holds the whole of it: the phase, the countdown, elapsed time, the
+shake, the robot tally, which pickups are gone, which keys are held, and the
+`DoorField`. It lives inside `SimState`, which is **copied every step**, so it is
+fixed-capacity arrays and scalars throughout — trivially copyable, with nothing
+that owns memory. The one pointer in it is `endReason`, and that points into
+string literals rather than at anything it has to free.
+
+### Four phases, and one direction through them
+
+`Playing → Countdown → Won`, or either of the first two → `Lost`. `stepGame`
+returns immediately in `Won` and `Lost`, so an end screen is a frozen
+simulation rather than a separate mode with its own loop. The phase never runs
+backwards; restarting rebuilds the state from the level instead of unwinding it.
+
+The reactor is not a special object type. It is a **robot whose definition sets
+`isReactor`**, which means it already has health, line of sight, a weapon and a
+shadow-casting mesh, and the flow only has to ask whether any live robot has
+that flag. Destroying it starts the countdown, unlocks the exit, and leaves
+every other robot fighting.
+
+The three endings are `escaped`, `the mine went up with you still in it`, and
+`shields gone`.
+
+### The countdown is felt before it is read
+
+`shake` ramps as `fraction * fraction` over the countdown, fraction being how
+much of it has gone. `main.cpp` turns that into two things: a camera offset whose
+three axes each sum sines at unrelated frequencies, so it never settles into a
+visible rhythm, and `staticLightScale`, a flicker that only ever **dips** —
+the lights are failing, not sparkling.
+
+Both read `clock.seconds()` directly rather than integrating per frame, and both
+land on `RenderState` rather than on the ship. So the shake looks the same at 30
+fps as at 300, cannot bank motion across a stall, and never moves the ship's
+actual position — it is a view of the mine coming apart, not a force on the
+player. A player who never looks at the timer still knows how long is left.
+
+### Keys open one door each
+
+A door names a key colour; `hasKey` gates it. A locked door does not
+acknowledge the player at all without the key — it does not begin to open and
+then stop, because a door that twitches reads as broken rather than locked. The
+loop test holds **every wrong key** against every door, not just the right one,
+which is what catches a mask or index slip that a single positive test would
+pass.
+
+Pickups are a touch test against `player.radius + 2.4` with a `collected` flag,
+so a pickup cannot be taken twice and the level file stays immutable. Keys
+persist until the level ends; everything else applies its effect to
+`CombatState::player` on contact.
+
+---
+
+## The HUD
+
+`src/render/hud.h`. Screen-space quads and text, built by the game layer into a
+`HudData` struct and drawn after the MSAA resolve, on the default framebuffer,
+alongside ImGui. It is axis-aligned and gains nothing from multisampling, so
+resolving first costs nothing and keeps the HUD out of the shadow and lighting
+passes entirely.
+
+`HudData` is a **flat struct of values the game layer fills in** — bars, weapon
+name, ammo, keys, countdown, phase, message. The renderer never reaches into
+`GameState` or `CombatState` to draw the HUD, which is what keeps `src/render`
+free of simulation types.
+
+### The font is generated, not shipped
+
+Text needs digits, a colon and capitals: 37 glyphs. Those are a 5x7 bitmap per
+glyph in a table in `hud.cpp`, blitted into one RGBA8 atlas at startup with a
+pixel of padding per cell so linear filtering cannot bleed neighbours together.
+No font library, no shipped atlas, and the dependency allowlist stays where
+CLAUDE.md puts it.
+
+### Two state changes that produce nothing, silently
+
+Both were found by an empty HUD and no error anywhere, and both are commented at
+the call site because neither fails loudly:
+
+- **Culling must be off.** The shader flips y to put the HUD's origin at the
+  top-left, which is how a HUD is naturally laid out — and which reverses the
+  winding of every quad. With culling on, the entire HUD is culled.
+- **Depth test must be off**, since the HUD is drawn after the resolve with no
+  depth buffer attached that would pass.
+
+ImGui is debug-only from this milestone and starts hidden; F3 toggles it,
+`--debug-ui` starts with it open, and `--no-ui` keeps it shut so a screenshot
+shows the game.
+
+---
+
 ## Robots
 
 `src/sim/robots.h`. Three types from `assets/config/robots.json`, placed in the
