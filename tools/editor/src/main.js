@@ -61,6 +61,52 @@ const app = {
 // --- scene ------------------------------------------------------------------
 
 const viewport = $('viewport');
+const panelResizer = $('panel-resizer');
+const PANEL_MIN = 280;
+const PANEL_MAX = 720;
+const VIEWPORT_MIN = 240;
+
+function setPanelWidth(width, remember = true) {
+    const available = Math.max(PANEL_MIN, window.innerWidth - VIEWPORT_MIN - panelResizer.offsetWidth);
+    const next = Math.round(Math.min(Math.max(width, PANEL_MIN), PANEL_MAX, available));
+    document.documentElement.style.setProperty('--panel-width', `${next}px`);
+    panelResizer.setAttribute('aria-valuemax', String(Math.min(PANEL_MAX, available)));
+    panelResizer.setAttribute('aria-valuenow', String(next));
+    if (remember) localStorage.setItem('descent-editor-panel-width', String(next));
+}
+
+const savedPanelWidth = Number(localStorage.getItem('descent-editor-panel-width'));
+setPanelWidth(Number.isFinite(savedPanelWidth) && savedPanelWidth > 0 ? savedPanelWidth : 340, false);
+
+let resizingPanel = false;
+panelResizer.addEventListener('pointerdown', (e) => {
+    resizingPanel = true;
+    panelResizer.classList.add('dragging');
+    panelResizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+});
+panelResizer.addEventListener('pointermove', (e) => {
+    if (resizingPanel) setPanelWidth(window.innerWidth - e.clientX);
+});
+const finishPanelResize = (e) => {
+    resizingPanel = false;
+    panelResizer.classList.remove('dragging');
+    if (panelResizer.hasPointerCapture(e.pointerId)) panelResizer.releasePointerCapture(e.pointerId);
+};
+panelResizer.addEventListener('pointerup', finishPanelResize);
+panelResizer.addEventListener('pointercancel', finishPanelResize);
+panelResizer.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const width = Number.parseFloat(getComputedStyle(document.documentElement)
+        .getPropertyValue('--panel-width')) || 340;
+    setPanelWidth(width + (e.key === 'ArrowLeft' ? 20 : -20));
+    e.preventDefault();
+});
+window.addEventListener('resize', () => {
+    const width = Number(panelResizer.getAttribute('aria-valuenow')) || 340;
+    setPanelWidth(width, false);
+});
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 viewport.appendChild(renderer.domElement);
@@ -652,6 +698,7 @@ function renderEntityTools(container, button, hint) {
         app.selection = { kind: 'light', index };
     }));
 
+    row('objects');
     const objectRow = document.createElement('div');
     objectRow.className = 'textures';
     for (const type of app.models) {
@@ -666,6 +713,7 @@ function renderEntityTools(container, button, hint) {
     }
     container.appendChild(objectRow);
 
+    row('pickups');
     const pickupRow = document.createElement('div');
     pickupRow.className = 'textures';
     PICKUP_NAMES.forEach((name, kind) => {
