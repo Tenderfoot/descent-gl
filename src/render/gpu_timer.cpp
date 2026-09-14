@@ -33,15 +33,18 @@ void GpuTimers::issue(int region, bool end) {
 void GpuTimers::beginFrame() {
     issued_[static_cast<size_t>(frame_)].fill(false);
     lightsThisFrame_[static_cast<size_t>(frame_)] = 0;
+    timedLightsThisFrame_[static_cast<size_t>(frame_)] = 0;
     lightsSeen_ = 0;
+    timedLightsSeen_ = 0;
 }
 
 void GpuTimers::passBegin(Pass p) { issue(static_cast<int>(p), false); }
 void GpuTimers::passEnd(Pass p) { issue(static_cast<int>(p), true); }
 
 void GpuTimers::stencilBegin(int index) {
+    ++lightsSeen_;
     if (index < 0 || index >= kMaxLights) return;
-    lightsSeen_ = std::max(lightsSeen_, index + 1);
+    timedLightsSeen_ = std::max(timedLightsSeen_, index + 1);
     issue(stencilRegion(index), false);
 }
 void GpuTimers::stencilEnd(int index) {
@@ -50,7 +53,6 @@ void GpuTimers::stencilEnd(int index) {
 }
 void GpuTimers::lightBegin(int index) {
     if (index < 0 || index >= kMaxLights) return;
-    lightsSeen_ = std::max(lightsSeen_, index + 1);
     issue(lightingRegion(index), false);
 }
 void GpuTimers::lightEnd(int index) {
@@ -60,6 +62,7 @@ void GpuTimers::lightEnd(int index) {
 
 void GpuTimers::endFrame() {
     lightsThisFrame_[static_cast<size_t>(frame_)] = lightsSeen_;
+    timedLightsThisFrame_[static_cast<size_t>(frame_)] = timedLightsSeen_;
     frame_ = (frame_ + 1) % kFrames;
     // The frame about to be overwritten is the oldest, so its results are the
     // ones most likely to be ready. Read them before reusing its queries.
@@ -70,15 +73,25 @@ void GpuTimers::resolve(int frame) {
     const auto& q = queries_[static_cast<size_t>(frame)];
     const auto& used = issued_[static_cast<size_t>(frame)];
 
+    // Resolve a frame as one snapshot. Mixing ready regions from this frame
+    // with retained regions from an older frame makes both the total and the
+    // per-light comparison meaningless.
+    for (int region = 0; region < kQueriesPerFrame / 2; ++region) {
+        const int b = region * 2;
+        const int e = b + 1;
+        if (!used[static_cast<size_t>(b)] || !used[static_cast<size_t>(e)]) continue;
+        GLint ready = 0;
+        glGetQueryObjectiv(q[static_cast<size_t>(e)], GL_QUERY_RESULT_AVAILABLE, &ready);
+        if (!ready) return;
+    }
+
     const auto read = [&](int region, float& out) {
         const int b = region * 2;
         const int e = b + 1;
-        out = 0.0f;
-        if (!used[static_cast<size_t>(b)] || !used[static_cast<size_t>(e)]) return false;
-
-        GLint ready = 0;
-        glGetQueryObjectiv(q[static_cast<size_t>(e)], GL_QUERY_RESULT_AVAILABLE, &ready);
-        if (!ready) return false;
+        if (!used[static_cast<size_t>(b)] || !used[static_cast<size_t>(e)]) {
+            out = 0.0f;
+            return false;
+        }
 
         GLuint64 t0 = 0, t1 = 0;
         glGetQueryObjectui64v(q[static_cast<size_t>(b)], GL_QUERY_RESULT, &t0);
@@ -97,13 +110,13 @@ void GpuTimers::resolve(int frame) {
     worstLight_ = -1;
     worstMs_ = 0.0f;
     resolvedLights_ = lightsThisFrame_[static_cast<size_t>(frame)];
+    resolvedTimedLights_ = timedLightsThisFrame_[static_cast<size_t>(frame)];
 
     for (int i = 0; i < kMaxLights; ++i) {
-        float s = 0.0f, l = 0.0f;
+        float& s = stencilMs_[static_cast<size_t>(i)];
+        float& l = lightingMs_[static_cast<size_t>(i)];
         const bool gotS = read(stencilRegion(i), s);
         const bool gotL = read(lightingRegion(i), l);
-        stencilMs_[static_cast<size_t>(i)] = s;
-        lightingMs_[static_cast<size_t>(i)] = l;
         stencilTotal_ += s;
         lightingTotal_ += l;
         if ((gotS || gotL) && s + l > worstMs_) {
