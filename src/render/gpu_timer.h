@@ -21,10 +21,11 @@ namespace dvk::gl {
 // last good numbers stay on screen.
 class GpuTimers {
 public:
-    enum Pass { Prepass, Unlit, PassCount };
+    enum Pass { Prepass, Lights, Unlit, PassCount };
 
-    // Per-light timings stop at this many lights. Beyond it the passes still
-    // run and are still counted in the totals; they just are not broken out.
+    // Per-light timings stop at this many lights. The whole Lights pass is
+    // timed separately, so lights beyond this limit are still included in the
+    // frame total even though they are not broken out individually.
     static constexpr int kMaxLights = 16;
 
     GpuTimers();
@@ -49,8 +50,10 @@ public:
     float stencil(int index) const;
     float lighting(int index) const;
     int lightCount() const { return resolvedLights_; }
+    int timedLightCount() const { return resolvedTimedLights_; }
 
-    // Everything the per-light passes cost, whether or not it was broken out.
+    // The stencil and lighting subtotals cover the per-light detail slots only.
+    // Use pass(Lights) for the complete cost of every light drawn this frame.
     float stencilTotal() const { return stencilTotal_; }
     float lightingTotal() const { return lightingTotal_; }
     // The light that cost the most, stencil plus lighting, and what it cost.
@@ -70,9 +73,11 @@ private:
     std::array<std::array<GLuint, kQueriesPerFrame>, kFrames> queries_{};
     std::array<std::array<bool, kQueriesPerFrame>, kFrames> issued_{};
     std::array<int, kFrames> lightsThisFrame_{};
+    std::array<int, kFrames> timedLightsThisFrame_{};
 
     int frame_ = 0;
     int lightsSeen_ = 0;
+    int timedLightsSeen_ = 0;
     bool valid_ = false;
 
     std::array<float, PassCount> ms_{};
@@ -81,6 +86,7 @@ private:
     float stencilTotal_ = 0.0f;
     float lightingTotal_ = 0.0f;
     int resolvedLights_ = 0;
+    int resolvedTimedLights_ = 0;
     int worstLight_ = -1;
     float worstMs_ = 0.0f;
 };

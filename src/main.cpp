@@ -817,12 +817,16 @@ int main(int argc, char** argv) {
                 ImGui::TextUnformatted("waiting for the first results...");
                 ImGui::TextUnformatted("(read back two frames late, so nothing stalls)");
             } else {
-                const float perLight = gt.stencilTotal() + gt.lightingTotal();
-                const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + perLight +
+                const float total = gt.pass(dvk::gl::GpuTimers::Prepass) +
+                                    gt.pass(dvk::gl::GpuTimers::Lights) +
                                     gt.pass(dvk::gl::GpuTimers::Unlit);
                 ImGui::Text("depth prepass %6.3f ms", gt.pass(dvk::gl::GpuTimers::Prepass));
-                ImGui::Text("stencil       %6.3f ms   (all lights)", gt.stencilTotal());
-                ImGui::Text("lighting      %6.3f ms   (all lights)", gt.lightingTotal());
+                ImGui::Text("all lights    %6.3f ms   (%d drawn)",
+                            gt.pass(dvk::gl::GpuTimers::Lights), gt.lightCount());
+                ImGui::Text("  stencil     %6.3f ms   (first %d slots)", gt.stencilTotal(),
+                            gt.timedLightCount());
+                ImGui::Text("  lighting    %6.3f ms   (first %d slots)", gt.lightingTotal(),
+                            gt.timedLightCount());
                 ImGui::Text("unlit         %6.3f ms", gt.pass(dvk::gl::GpuTimers::Unlit));
                 ImGui::Separator();
                 ImGui::Text("gpu total     %6.3f ms", total);
@@ -832,7 +836,7 @@ int main(int argc, char** argv) {
                 }
                 ImGui::Separator();
                 ImGui::BeginChild("per light gpu", ImVec2(0, 150), true);
-                for (int li = 0; li < gt.lightCount(); ++li) {
+                for (int li = 0; li < gt.timedLightCount(); ++li) {
                     ImGui::Text("%2d  stencil %6.3f   light %6.3f", li, gt.stencil(li),
                                 gt.lighting(li));
                 }
@@ -1205,14 +1209,17 @@ int main(int argc, char** argv) {
     {
         const dvk::gl::GpuTimers& gt = renderer.timers();
         if (gt.valid()) {
-            const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + gt.stencilTotal() +
-                                gt.lightingTotal() + gt.pass(dvk::gl::GpuTimers::Unlit);
+            const float total = gt.pass(dvk::gl::GpuTimers::Prepass) +
+                                gt.pass(dvk::gl::GpuTimers::Lights) +
+                                gt.pass(dvk::gl::GpuTimers::Unlit);
             dvk::log::info(
-                "gpu (last frame): prepass {:.3f} ms, stencil {:.3f}, lighting {:.3f}, unlit "
-                "{:.3f}, total {:.3f} ms over {} light(s); worst light {} at {:.3f} ms",
-                gt.pass(dvk::gl::GpuTimers::Prepass), gt.stencilTotal(), gt.lightingTotal(),
-                gt.pass(dvk::gl::GpuTimers::Unlit), total, gt.lightCount(), gt.worstLight(),
-                gt.worstLightMs());
+                "gpu (last frame): prepass {:.3f} ms, all lights {:.3f}, unlit {:.3f}, total "
+                "{:.3f} ms over {} light(s); first {} slots: stencil {:.3f}, lighting {:.3f}; "
+                "worst timed light {} at {:.3f} ms",
+                gt.pass(dvk::gl::GpuTimers::Prepass), gt.pass(dvk::gl::GpuTimers::Lights),
+                gt.pass(dvk::gl::GpuTimers::Unlit), total, gt.lightCount(),
+                gt.timedLightCount(), gt.stencilTotal(), gt.lightingTotal(),
+                gt.worstLight(), gt.worstLightMs());
         } else {
             dvk::log::info("gpu: no timestamp results resolved (too few frames, or unsupported)");
         }

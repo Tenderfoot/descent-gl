@@ -1104,7 +1104,9 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     timers_.passBegin(GpuTimers::Prepass);
     depthPrepass(rs, walk);
     timers_.passEnd(GpuTimers::Prepass);
+    timers_.passBegin(GpuTimers::Lights);
     lightPasses(rs, walk);
+    timers_.passEnd(GpuTimers::Lights);
     timers_.passBegin(GpuTimers::Unlit);
     unlitPass(rs, level, walk);
     timers_.passEnd(GpuTimers::Unlit);
