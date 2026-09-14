@@ -1462,13 +1462,25 @@ square edges.
 
 ### Ambient channels
 
-Two, named rather than handles: `Engine` and `Alarm`. The engine loop runs
-whenever a device is open; what changes is gain and playback rate, driven by the
-ship's **speed** rather than by the throttle key — a ship coasting with the
-throttle released still sounds like it is moving, which is what a player
-watching the walls go past expects. Re-setting a channel updates the running
-voice rather than restarting it, or the engine would stutter every time the
-throttle moved.
+Two, named rather than handles: `Engine` and `Alarm`. Both are gained and
+pitched by the game rather than started and stopped by it; re-setting a channel
+updates the running voice rather than restarting it, or the engine would stutter
+every time the throttle moved.
+
+The drive is driven by the ship's **speed**, not by the throttle key — a ship
+coasting with the throttle released still sounds like it is moving, which is
+what a player watching the walls go past expects.
+
+**There is no idle hum.** Below half a unit per second the channel is stopped
+outright. M9 shipped an idle gain of 0.16 and it was wrong: a parked ship
+droning away is one more sound competing with the mine, and the drive is meant
+to be information about motion. The ramp is measured from that threshold rather
+than from zero, so the drive fades in from silence as the ship moves off; the
+restart therefore happens at zero gain and cannot be heard, which is what makes
+stopping the channel safe rather than a click every time the ship comes to rest.
+
+The gain at top speed is 0.275, half what M9 shipped. At 0.55 the engine sat on
+top of the guns instead of under them.
 
 Loops must be seamless. `engine.wav` and `alarm.wav` are built with every
 partial at an integer number of cycles over the loop length and the tail

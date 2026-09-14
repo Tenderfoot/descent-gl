@@ -60,13 +60,19 @@ constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
 
-// How the ship's drive is heard. The engine loop is always running once a
-// device is open; what changes is how loud it is and how fast it is played, so
-// the throttle is audible without the loop ever restarting.
-constexpr float kEngineIdleGain = 0.16f;
-constexpr float kEngineFullGain = 0.55f;
-constexpr float kEngineIdlePitch = 0.72f;
-constexpr float kEngineFullPitch = 1.28f;
+// How the ship's drive is heard.
+//
+// Silent at rest. There is no idle hum: a parked ship droning away is one more
+// sound competing with the mine for the player's attention, and the drive is
+// meant to be information about motion. Below kEngineSilentBelow the channel is
+// stopped outright rather than played quietly.
+//
+// The gain is what the drive reaches at top speed, and it is half what M9
+// shipped - at 0.55 the engine sat on top of the guns rather than under them.
+constexpr float kEngineSilentBelow = 0.5f;   // units/s, out of a top speed of 20
+constexpr float kEngineGain = 0.275f;
+constexpr float kEngineLowPitch = 0.72f;
+constexpr float kEngineHighPitch = 1.28f;
 
 // The headlight. In a game with no ambient term this is the player's primary
 // way of seeing anything at all, so it is deliberately generous: a wide enough
@@ -496,12 +502,19 @@ int main(int argc, char** argv) {
         // key, so a ship coasting with the throttle released still sounds like
         // it is moving, which is what a player watching the walls go past
         // expects to hear.
+        //
+        // k is measured from kEngineSilentBelow rather than from zero, so the
+        // drive fades in from nothing as the ship starts moving instead of
+        // snapping on at some audible level. A gain of zero stops the channel;
+        // because the ramp starts at zero, the restart when the ship moves off
+        // again happens at silence and cannot be heard.
         {
-            const float top = std::max(1.0f, flight.maxSpeed);
-            const float k = std::clamp(rs.speed / top, 0.0f, 1.0f);
-            audio.setAmbient(dvk::audio::Ambient::Engine,
-                             kEngineIdleGain + (kEngineFullGain - kEngineIdleGain) * k,
-                             kEngineIdlePitch + (kEngineFullPitch - kEngineIdlePitch) * k);
+            const float top = std::max(kEngineSilentBelow + 1.0f, flight.maxSpeed);
+            const float k = std::clamp((rs.speed - kEngineSilentBelow) /
+                                           (top - kEngineSilentBelow),
+                                       0.0f, 1.0f);
+            audio.setAmbient(dvk::audio::Ambient::Engine, kEngineGain * k,
+                             kEngineLowPitch + (kEngineHighPitch - kEngineLowPitch) * k);
         }
         // The klaxon runs for exactly as long as the countdown does. Gained by
         // how far the mine has come apart, so it arrives under the first
