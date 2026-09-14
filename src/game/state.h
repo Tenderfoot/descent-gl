@@ -1,35 +1,204 @@
 #pragma once
 
+#include "sim/combat.h"
+#include "sim/gameflow.h"
+#include "sim/robots.h"
+#include "sim/ship.h"
+
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+
 namespace dvk {
+
+// Which camera the renderer builds its view matrix from. First person is the
+// game; chase exists so the ship model is visible while its flight constants
+// are being tuned.
+enum class CameraMode { FirstPerson, Chase };
 
 // State advanced by the fixed 120 Hz step. Everything the renderer needs to
 // interpolate lives here and nowhere else.
 struct SimState {
-    float cubeAngle = 0.0f;          // radians
-    glm::vec3 camPos{0.0f, 0.0f, 3.5f};
-    float camYaw = 0.0f;             // radians, +Y axis
-    float camPitch = 0.0f;           // radians, clamped to +/- 85 degrees
+    sim::ShipState ship;
+    // Fixed-capacity pools held by value: SimState is copied every step, and a
+    // vector here would allocate in the simulation loop.
+    sim::CombatState combat;
+    sim::RobotState robots;
+    sim::GameState game;
 };
 
 // What the renderer draws: SimState interpolated between the two most recent
 // steps. Keeping it a distinct type is what stops render code from quietly
 // reading or mutating simulation state.
+//
+// The camera mode is set by main after interpolation rather than simulated: it
+// is a view of the world, not part of it.
 struct RenderState {
-    float cubeAngle = 0.0f;
-    glm::vec3 camPos{0.0f};
-    float camYaw = 0.0f;
-    float camPitch = 0.0f;
+    glm::vec3 shipPos{0.0f};
+    glm::quat shipOrientation{1.0f, 0.0f, 0.0f, 0.0f};
+    CameraMode camera = CameraMode::FirstPerson;
+    int shipSegment = 0;
+
+    // Readouts, not used to draw the scene.
+    float speed = 0.0f;         // units/s
+    float angularSpeed = 0.0f;  // rad/s
+
+    // What the unlit pass draws. Interpolated by pool slot, which is stable
+    // because the pools never compact.
+    struct Bolt {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 0.5f;
+    };
+    struct Flash {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        float fade = 1.0f;   // 1 at birth, 0 at death
+    };
+    std::array<Bolt, sim::kMaxProjectiles> bolts{};
+    int boltCount = 0;
+    std::array<Flash, sim::kMaxEffects> flashes{};
+    int flashCount = 0;
+
+    // Which level objects are still standing, so a destroyed target stops
+    // being drawn and stops casting.
+    std::array<bool, sim::kMaxObjects> objectAlive{};
+    int objectCount = 0;
+
+    // Robots, interpolated by slot.
+    struct RobotView {
+        glm::vec3 position{0.0f};
+        glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+        int type = 0;
+        int slot = 0;
+    };
+    std::array<RobotView, sim::kMaxRobots> robots{};
+    // Indexed by robot slot, so the light and shadow passes can cull a robot
+    // to the segments a light actually reaches.
+    std::array<int, sim::kMaxRobots> robotSegments{};
+    int robotCount = 0;
+
+    // Pickups still on the floor, as emissive markers.
+    struct PickupView {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        bool present = false;
+    };
+    std::array<PickupView, sim::kMaxPickups> pickups{};
+    int pickupCount = 0;
+
+    // How far each door has slid open, so the renderer can place the slabs.
+    std::array<float, sim::kMaxDoors> doorOpenness{};
+    int doorCount = 0;
+
+    // The mine coming apart during the countdown: a world-space offset added
+    // to the camera, and a multiplier on every static light so they flicker.
+    glm::vec3 shakeOffset{0.0f};
+    float staticLightScale = 1.0f;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
     RenderState r;
-    r.cubeAngle = glm::mix(a.cubeAngle, b.cubeAngle, t);
-    r.camPos = glm::mix(a.camPos, b.camPos, t);
-    r.camYaw = glm::mix(a.camYaw, b.camYaw, t);
-    r.camPitch = glm::mix(a.camPitch, b.camPitch, t);
+    r.shipPos = glm::mix(a.ship.body.position, b.ship.body.position, t);
+    // slerp, not mix: the shortest arc on the unit sphere. Component-wise
+    // interpolation of a quaternion is only approximately a rotation, and the
+    // error shows as a hitch at high turn rates.
+    r.shipOrientation = glm::slerp(a.ship.orientation, b.ship.orientation, t);
+    r.shipSegment = b.ship.body.segment;
+    r.speed = glm::length(glm::mix(a.ship.body.velocity, b.ship.body.velocity, t));
+    r.angularSpeed = glm::length(glm::mix(a.ship.angularVelocity(), b.ship.angularVelocity(), t));
+
+    // Projectiles interpolate by slot. A slot that was empty last step has no
+    // previous position to blend from, so it is drawn where it is - which is
+    // correct, since it was just created.
+    for (size_t i = 0; i < sim::kMaxProjectiles; ++i) {
+        const sim::Projectile& cur = b.combat.projectiles.items[i];
+        if (!cur.alive) continue;
+        const sim::Projectile& prev = a.combat.projectiles.items[i];
+        RenderState::Bolt bolt;
+        bolt.position = prev.alive ? glm::mix(prev.position, cur.position, t) : cur.position;
+        bolt.color = cur.color;
+        bolt.size = cur.kind == sim::ProjectileKind::Flare ? 0.8f : cur.radius * 2.2f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    // Flares that have landed do not move, so they need no interpolation - but
+    // they do need drawing, and they live in a different pool.
+    for (const sim::Flare& f : b.combat.flares.items) {
+        if (!f.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = f.position;
+        const float remaining = f.lifetime - f.age;
+        bolt.color = glm::vec3(1.0f, 0.72f, 0.36f) * std::min(1.0f, remaining / 4.0f);
+        bolt.size = 0.7f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    for (const sim::Effect& e : b.combat.effects.items) {
+        if (!e.alive) continue;
+        RenderState::Flash flash;
+        flash.position = e.position;
+        flash.color = e.color;
+        const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
+        flash.fade = std::max(0.0f, 1.0f - k);
+        // Expanding as it fades reads as an explosion rather than a fading dot.
+        flash.size = e.size * (0.55f + 0.85f * k);
+        r.flashes[static_cast<size_t>(r.flashCount++)] = flash;
+    }
+
+    for (int i = 0; i < b.robots.count; ++i) {
+        const sim::Robot& cur = b.robots.robots[static_cast<size_t>(i)];
+        if (!cur.alive) continue;
+        const sim::Robot& prev = a.robots.robots[static_cast<size_t>(i)];
+        RenderState::RobotView view;
+        view.type = cur.type;
+        view.slot = i;
+        view.position =
+            prev.alive ? glm::mix(prev.body.position, cur.body.position, t) : cur.body.position;
+        view.orientation =
+            prev.alive ? glm::slerp(prev.orientation, cur.orientation, t) : cur.orientation;
+        r.robotSegments[static_cast<size_t>(i)] = cur.body.segment;
+        r.robots[static_cast<size_t>(r.robotCount++)] = view;
+    }
+
+    // Debris and drops ride the bolt list: they are small emissive things and
+    // the unlit pass draws them identically.
+    for (const sim::Debris& d : b.robots.debris) {
+        if (!d.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = d.body.position;
+        bolt.color = d.color * std::max(0.0f, 1.0f - d.age / d.lifetime);
+        bolt.size = 0.45f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+    for (const sim::Drop& drop : b.robots.drops) {
+        if (!drop.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = drop.position;
+        bolt.color = drop.kind == sim::DropKind::Energy ? glm::vec3(0.4f, 0.9f, 1.0f)
+                                                        : glm::vec3(0.5f, 1.0f, 0.5f);
+        // Pulses, so a drop in a dark corridor catches the eye.
+        bolt.size = 0.9f + 0.25f * std::sin(drop.age * 5.0f);
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    r.doorCount = static_cast<int>(sim::kMaxDoors);
+    for (int i = 0; i < r.doorCount; ++i) {
+        r.doorOpenness[static_cast<size_t>(i)] =
+            glm::mix(a.game.doors[static_cast<size_t>(i)].openness,
+                     b.game.doors[static_cast<size_t>(i)].openness, t);
+    }
+
+    r.objectCount = b.combat.objects.count;
+    for (int i = 0; i < r.objectCount; ++i) {
+        r.objectAlive[static_cast<size_t>(i)] = b.combat.objects.alive[static_cast<size_t>(i)];
+    }
+
     return r;
 }
 

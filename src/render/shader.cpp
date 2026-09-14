@@ -70,9 +70,41 @@ Shader::~Shader() {
     if (program_) glDeleteProgram(program_);
 }
 
-void Shader::setMat4(const char* name, const glm::mat4& m) const {
+GLint Shader::location(const char* name) const {
+    if (auto it = locations_.find(name); it != locations_.end()) return it->second;
     const GLint loc = glGetUniformLocation(program_, name);
+    locations_.emplace(name, loc);
+    return loc;
+}
+
+void Shader::setMat4(const char* name, const glm::mat4& m) const {
+    const GLint loc = location(name);
     if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(m));
+}
+
+void Shader::setVec3(const char* name, const glm::vec3& v) const {
+    const GLint loc = location(name);
+    if (loc >= 0) glUniform3f(loc, v.x, v.y, v.z);
+}
+
+void Shader::setVec2(const char* name, const glm::vec2& v) const {
+    const GLint loc = location(name);
+    if (loc >= 0) glUniform2f(loc, v.x, v.y);
+}
+
+void Shader::setVec4(const char* name, const glm::vec4& v) const {
+    const GLint loc = location(name);
+    if (loc >= 0) glUniform4f(loc, v.x, v.y, v.z, v.w);
+}
+
+void Shader::setFloat(const char* name, float v) const {
+    const GLint loc = location(name);
+    if (loc >= 0) glUniform1f(loc, v);
+}
+
+void Shader::setInt(const char* name, int v) const {
+    const GLint loc = location(name);
+    if (loc >= 0) glUniform1i(loc, v);
 }
 
 } // namespace dvk::gl

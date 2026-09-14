@@ -1,0 +1,139 @@
+{
+  "energyRecharge": 0.0,
+  "flareColor": [
+    1.0,
+    0.7200000286102295,
+    0.36000001430511475
+  ],
+  "flareFade": 4.0,
+  "flareIntensity": 3.0,
+  "flareLifetime": 30.0,
+  "flareRadius": 26.0,
+  "flareSpeed": 34.0,
+  "headlightDrain": 1.600000023841858,
+  "laserLevels": [
+    {
+      "color": [
+        1.0,
+        0.3499999940395355,
+        0.25
+      ],
+      "damage": 8.0
+    },
+    {
+      "color": [
+        1.0,
+        0.699999988079071,
+        0.20000000298023224
+      ],
+      "damage": 12.0
+    },
+    {
+      "color": [
+        0.44999998807907104,
+        1.0,
+        0.4000000059604645
+      ],
+      "damage": 17.0
+    },
+    {
+      "color": [
+        0.6000000238418579,
+        0.550000011920929,
+        1.0
+      ],
+      "damage": 23.0
+    }
+  ],
+  "shadowBudget": 8,
+  "weapons": {
+    "concussion": {
+      "ammoCost": 1,
+      "color": [
+        1.0,
+        0.550000011920929,
+        0.25
+      ],
+      "damage": 40.0,
+      "energyCost": 0.0,
+      "fireInterval": 0.6499999761581421,
+      "lifetime": 6.0,
+      "lightIntensity": 3.0,
+      "lightRadius": 26.0,
+      "radius": 0.6000000238418579,
+      "seekCone": 0.0,
+      "seekRange": 0.0,
+      "speed": 55.0,
+      "splashDamage": 28.0,
+      "splashRadius": 12.0,
+      "spread": 0.0,
+      "turnRate": 0.0
+    },
+    "homing": {
+      "ammoCost": 1,
+      "color": [
+        0.5,
+        0.8500000238418579,
+        1.0
+      ],
+      "damage": 34.0,
+      "energyCost": 0.0,
+      "fireInterval": 0.800000011920929,
+      "lifetime": 6.0,
+      "lightIntensity": 3.0,
+      "lightRadius": 26.0,
+      "radius": 0.6000000238418579,
+      "seekCone": 0.8999999761581421,
+      "seekRange": 140.0,
+      "speed": 46.0,
+      "splashDamage": 22.0,
+      "splashRadius": 10.0,
+      "spread": 0.0,
+      "turnRate": 2.5999999046325684
+    },
+    "laser": {
+      "ammoCost": 0,
+      "color": [
+        1.0,
+        0.3499999940395355,
+        0.25
+      ],
+      "damage": 8.0,
+      "energyCost": 0.699999988079071,
+      "fireInterval": 0.18000000715255737,
+      "lifetime": 3.0,
+      "lightIntensity": 2.5999999046325684,
+      "lightRadius": 20.0,
+      "radius": 0.3499999940395355,
+      "seekCone": 0.0,
+      "seekRange": 0.0,
+      "speed": 140.0,
+      "splashDamage": 0.0,
+      "splashRadius": 0.0,
+      "spread": 0.0,
+      "turnRate": 0.0
+    },
+    "vulcan": {
+      "ammoCost": 1,
+      "color": [
+        1.0,
+        0.8799999952316284,
+        0.550000011920929
+      ],
+      "damage": 3.0,
+      "energyCost": 0.0,
+      "fireInterval": 0.05000000074505806,
+      "lifetime": 2.0,
+      "lightIntensity": 1.5,
+      "lightRadius": 11.0,
+      "radius": 0.20000000298023224,
+      "seekCone": 0.0,
+      "seekRange": 0.0,
+      "speed": 220.0,
+      "splashDamage": 0.0,
+      "splashRadius": 0.0,
+      "spread": 0.02199999988079071,
+      "turnRate": 0.0
+    }
+  }
+}

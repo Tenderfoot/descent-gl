@@ -1,0 +1,14 @@
+{
+  "forwardThrust": 60.0,
+  "strafeThrust": 42.0,
+  "liftThrust": 42.0,
+  "linearDamping": 3.0,
+  "maxSpeed": 20.0,
+  "mouseSensitivity": 0.0315,
+  "rollTorque": 20.0,
+  "pitchTorque": 14.0,
+  "yawTorque": 14.0,
+  "angularDamping": 8.0,
+  "maxAngularSpeed": 4.0,
+  "invertPitch": false
+}

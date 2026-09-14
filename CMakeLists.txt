@@ -5,13 +5,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(glfw3 CONFIG REQUIRED)
-find_package(glad CONFIG REQUIRED)
-find_package(glm CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
-find_package(Stb REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(tinyobjloader CONFIG REQUIRED)
+# The shipping build resolves dependencies through vcpkg (see CMakePresets.json).
+# A Linux dev container has no vcpkg; cmake/LinuxDeps.cmake defines the same
+# target names from distribution packages plus .deps/. Same dependency set
+# either way -- see the allowlist in CLAUDE.md.
+if(VCPKG_TOOLCHAIN OR MSVC)
+    find_package(glfw3 CONFIG REQUIRED)
+    find_package(glad CONFIG REQUIRED)
+    find_package(glm CONFIG REQUIRED)
+    find_package(imgui CONFIG REQUIRED)
+    find_package(Stb REQUIRED)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    find_package(tinyobjloader CONFIG REQUIRED)
+else()
+    include(${CMAKE_SOURCE_DIR}/cmake/LinuxDeps.cmake)
+endif()
 
 add_executable(descent
     src/main.cpp
@@ -19,14 +27,36 @@ add_executable(descent
     src/core/log.cpp
     src/core/options.cpp
     src/core/window.cpp
+    src/game/collision_test.cpp
+    src/game/level.cpp
+    src/game/visibility.cpp
+    src/game/loop_test.cpp
+    src/game/robots_test.cpp
+    src/game/weapons_test.cpp
+    src/game/world_test.cpp
     src/render/debug.cpp
+    src/render/billboards.cpp
+    src/render/debug_lines.cpp
+    src/render/hud.cpp
+    src/render/level_mesh.cpp
     src/render/mesh.cpp
+    src/render/model.cpp
+    src/render/procedural.cpp
     src/render/renderer.cpp
     src/render/screenshot.cpp
     src/render/shader.cpp
+    src/render/shadow.cpp
     src/render/stb_impl.cpp
     src/render/target.cpp
-    src/render/texture.cpp
+    src/render/texture_array.cpp
+    src/sim/collision.cpp
+    src/sim/combat.cpp
+    src/sim/flight.cpp
+    src/sim/flight_test.cpp
+    src/sim/gameflow.cpp
+    src/sim/robots.cpp
+    src/sim/ship.cpp
+    src/sim/weapons.cpp
 )
 
 target_include_directories(descent PRIVATE src)
@@ -47,15 +77,25 @@ target_compile_definitions(descent PRIVATE
 )
 if(MSVC)
     target_compile_options(descent PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+else()
+    target_compile_options(descent PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT descent)
 set_target_properties(descent PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:descent>")
 
-# Shaders and assets are loaded at runtime relative to the executable, so
-# copy them next to it after every build.
-add_custom_command(TARGET descent POST_BUILD
+# Shaders and assets are loaded at runtime relative to the executable, so they
+# are copied next to it.
+#
+# A separate always-run target rather than a POST_BUILD step on `descent`:
+# POST_BUILD only fires when the executable relinks, so editing a level or a
+# shader and rebuilding would leave the old copy in place and the change would
+# appear not to have happened. That is an unusually annoying bug to chase,
+# because the source on disk is right and the running program disagrees.
+add_custom_target(descent_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/shaders" "$<TARGET_FILE_DIR:descent>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets"  "$<TARGET_FILE_DIR:descent>/assets"
     COMMENT "Copying shaders/ and assets/ next to the executable"
+    VERBATIM
 )
+add_dependencies(descent_assets descent)

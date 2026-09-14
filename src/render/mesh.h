@@ -15,7 +15,8 @@ struct Vertex {
 };
 
 // Indexed triangle mesh in a single VAO. Attribute locations match
-// shaders/textured.vert: 0 = position, 1 = normal, 2 = uv.
+// the lit shaders: 0 = position, 1 = normal, 2 = uv. Level geometry carries a
+// fourth attribute and lives in LevelMesh instead.
 class Mesh {
 public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<GLuint>& indices);

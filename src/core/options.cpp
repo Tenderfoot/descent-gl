@@ -18,6 +18,39 @@ Options Options::parse(int argc, char** argv) {
             o.screenshot = argv[++i];
         } else if (a == "--resize-test") {
             o.resizeTest = true;
+        } else if (a == "--chase") {
+            o.chase = true;
+        } else if (a == "--flight-test") {
+            o.flightTest = true;
+        } else if (a == "--world-test") {
+            o.worldTest = true;
+        } else if (a == "--collision-test") {
+            o.collisionTest = true;
+        } else if (a == "--weapons-test") {
+            o.weaponsTest = true;
+        } else if (a == "--robots-test") {
+            o.robotsTest = true;
+        } else if (a == "--loop-test") {
+            o.loopTest = true;
+        } else if (a == "--segment" && hasNext) {
+            o.startSegment = std::atoi(argv[++i]);
+        } else if (a == "--wireframe-volumes") {
+            o.wireframeVolumes = true;
+        } else if (a == "--stencil-view") {
+            o.stencilView = true;
+        } else if (a == "--level" && hasNext) {
+            o.level = argv[++i];
+        } else if (a == "--no-ui") {
+            o.noUi = true;
+        } else if (a == "--debug-ui") {
+            o.debugUi = true;
+        } else if (a == "--autofire" && hasNext) {
+            o.autofire = std::atoi(argv[++i]);
+        } else if (a == "--debug-lines") {
+            o.debugLines = true;
+        } else if (a == "--size" && i + 2 < argc) {
+            o.width = std::atoi(argv[++i]);
+            o.height = std::atoi(argv[++i]);
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }
