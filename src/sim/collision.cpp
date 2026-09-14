@@ -46,6 +46,19 @@ bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
     return false;
 }
 
+bool doorOpaque(const SolidDoors* doors, int segment, int neighbour) {
+    if (!doors) return false;
+    for (int i = 0; i < doors->count; ++i) {
+        const SolidDoors::Face& f = doors->faces[static_cast<size_t>(i)];
+        if (((f.segmentA == segment && f.segmentB == neighbour) ||
+             (f.segmentB == segment && f.segmentA == neighbour)) &&
+            f.opaque) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
                      ContactLog* log, const SolidDoors* doors) {
     if (log) log->clear();
@@ -207,12 +220,14 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
 
         // The nearest portal the ray leaves through, if it leaves before it
         // meets a wall.
-        // A shut door stops a ray exactly as a wall does, which is what keeps a
-        // robot from seeing through one and a bolt from flying through it.
+        // A fully shut door stops a ray exactly as a wall does. Once it starts
+        // moving the portal is visible, and rays follow visibility through it.
         if (doors) {
             for (int fi = 0; fi < doors->count; ++fi) {
                 const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
-                if (face.segmentA != segment && face.segmentB != segment) continue;
+                if (!face.opaque || (face.segmentA != segment && face.segmentB != segment)) {
+                    continue;
+                }
                 const float t = rayTriangleDistance(origin + dir * travelled, dir, face.p[0],
                                                     face.p[1], face.p[2]);
                 if (t > kEpsilon && t < bestWall) {
@@ -228,7 +243,7 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
             if (!sd.isPortal()) continue;
-            if (doorShut(doors, segment, sd.neighbour)) continue;
+            if (doorOpaque(doors, segment, sd.neighbour)) continue;
             glm::vec3 tri[6];
             portalTriangles(level, segment, side, tri);
             for (int t2 = 0; t2 < 2; ++t2) {
@@ -309,7 +324,7 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
         int candidateCount = 0;
         candidates[candidateCount++] = segment;
         for (const SideData& sd : seg.sides) {
-            if (sd.isPortal() && !doorShut(doors, segment, sd.neighbour)) {
+            if (sd.isPortal() && !doorOpaque(doors, segment, sd.neighbour)) {
                 candidates[candidateCount++] = sd.neighbour;
             }
         }
@@ -332,12 +347,15 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
             }
         }
 
-        // Shut doors are surfaces too, and a bolt has to stop at one.
+        // Fully shut doors are surfaces too. A moving door remains in the set
+        // for body collision, but a projectile can cross its visible portal.
         bool nearestIsDoor = false;
         if (doors) {
             for (int fi = 0; fi < doors->count; ++fi) {
                 const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
-                if (face.segmentA != segment && face.segmentB != segment) continue;
+                if (!face.opaque || (face.segmentA != segment && face.segmentB != segment)) {
+                    continue;
+                }
                 const float d = distanceToTriangle(p, face.p[0], face.p[1], face.p[2]);
                 if (d < nearest) {
                     nearest = d;
