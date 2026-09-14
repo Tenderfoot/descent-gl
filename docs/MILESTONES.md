@@ -273,6 +273,100 @@ numbers on the real machine.
 
 ---
 
-## M3 — Stencil shadow volumes ⬜
+## M3 — Stencil shadow volumes ✅
+
+The visual identity. Every light now casts pixel-exact hard shadows from every
+mesh and from the mine walls themselves, plus a shadow-casting headlight.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| Debug / Release build clean | ✅ no warnings |
+| Every mesh closed | ✅ ship 13v/22t/33e, drone 12v/20t/30e, pillar 16v/28t/42e |
+| **Mine walls are one closed surface** | ✅ V 58 − E 168 + F 112 = **2** (genus 0) |
+| Silhouette extraction live | ✅ 30 silhouette edges across the 8 level lights |
+| Hard shadow from a drone between a light and a wall | ✅ |
+| Headlight sweeps shadows as the ship turns | ✅ 34° cone, shadow casting, H toggles |
+| Camera inside a shadow volume | ✅ depth-fail; all 14 segments flown, nothing breaks |
+| Every segment, no GL errors | ✅ 14/14 clean in Debug (fatal-on-high) |
+| Volume wireframe view | ✅ `--wireframe-volumes` |
+| Stencil visualiser | ✅ `--stencil-view` |
+| Per-light shadow disable | ✅ checkbox per light in the shadows panel |
+| `--world-test`, `--flight-test` | ✅ PASS in both configs |
+| `--resize-test` | ✅ completes, both configs |
+
+### Silhouette edges per light, on the mine walls
+
+From `--world-test`, computed on the CPU with no GL:
+
+| Light | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Silhouette edges | 0 | 0 | 6 | 6 | 9 | 3 | 6 | 0 |
+| Segments in set | 2 | 3 | 5 | 4 | 8 | 7 | 6 | 3 |
+
+Lights 0, 1 and 7 produce **zero** wall silhouettes, and that is correct rather
+than broken: they sit in straight stretches whose interior is star-shaped about
+them, so every wall faces the light and nothing occludes. The lights at bends
+and in the room are the ones with silhouettes. A total of zero would mean the
+extraction was broken, and `--world-test` fails on exactly that.
+
+In the room with the headlight on: 25 casters, 206 silhouette edges, 1322
+volume triangles per frame.
+
+### Three bugs, in the order they appeared
+
+**1. Crawling stripes of false shadow on every wall.** The volume's front cap is
+the occluder's own light-facing triangles, exactly coincident with the geometry
+the depth prepass drew. `shadow.vert` computed its position by a different
+association than `depth.vert`, so the last bit differed and scattered pixels
+counted as "behind". Fixed with `invariant gl_Position` and an always-identity
+`uModel` so the expression is character-for-character the same. (The same class
+of bug as M2's shredded walls — a third pass that draws into this depth, a
+third time it mattered.)
+
+**2. The entire mine rendered black.** With the stripes gone, *every* lit
+surface shadowed itself. Depth-fail counts faces strictly behind the surface, so
+the coincident front cap must be counted to cancel the back cap at infinity. A
+conventional `GL_LESS` buffer fails a coincident fragment and cancels
+automatically; **reversed-Z with `GL_GEQUAL` makes equal pass**, so the cap
+stopped counting. Fixed by using `glDepthFunc(GL_GREATER)` for the volume pass
+only. This is a direct consequence of the M0 reversed-Z decision and is the kind
+of thing that is invisible until the whole screen is black.
+
+**3. The player shadowing themselves.** In first person the camera is inside the
+ship's hull, so the ship's shadow volume began at the eye and blacked out most
+of the view. The ship is now an occluder only in the chase camera, where it is
+actually drawn, and never for its own headlight.
+
+### Step rate, and the frame clamp
+
+Software rendering at 1600×900 with shadow volumes runs at about 2 fps, which is
+slower than the loop's 0.25 s frame clamp. The clamp then discards the excess,
+so the reported step rate is bounded by the clamp rather than by the simulation:
+
+| Run | Step rate |
+| --- | --- |
+| 1600×900, 8–25 frames | 46–93 / 120 (clamp-bound) |
+| 640×360, 200 frames, Debug | **119.9 / 120** |
+| 640×360, 400 frames, Release | **120.0 / 120** |
+| 320×180, 300 frames | **119.9 / 120** |
+| `--resize-test` (peaks at 1920×1080) | 95–96 / 120 (clamp-bound at the large sizes) |
+
+`--size W H` was added for exactly this: at any size where a frame fits inside
+the clamp, the rate sits on 120. On the dev machine's GPU none of this arises.
+
+### Not verified here
+
+- **Light leaks at segment boundaries.** All 14 segments were flown and rendered
+  without artifacts, and the mine wall occluder validates as one closed surface,
+  which is the structural precondition. Whether a leak is visible anywhere in
+  practice is a judgement for the real machine.
+- Iconify/restore, as before — Xvfb has no window manager.
+- Performance. M8 takes those numbers on the 4070 Ti.
+
+---
+
+## M4 — Collision ⬜
 
 Not started.

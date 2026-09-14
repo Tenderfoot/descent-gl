@@ -83,6 +83,10 @@ struct Light {
     float coneDegrees = 45.0f;
 
     int segment = 0;
+    // Debug toggle, not a level property: lets one light's shadows be turned
+    // off to see what it is contributing. Not written back to the file.
+    bool castsShadows = true;
+
     // Every segment this light can possibly reach, flood-filled from `segment`
     // and stopped at any portal whose nearest point is farther away than
     // `radius`. A light is only ever considered against segments in here, which
@@ -101,10 +105,25 @@ struct PlayerStart {
 // shadow volumes all use these and never the quad they came from.
 struct WallTriangle {
     std::array<glm::vec3, 3> p;
+    // The same three corners as indices into Level::vertices. Shadow volumes
+    // need the welded topology - two segments meeting at a portal share these
+    // indices, which is what makes the union of all wall triangles a closed
+    // surface rather than a pile of coincident faces.
+    std::array<int, 3> vi{};
     glm::vec3 normal{0.0f};  // inward
     float d = 0.0f;
     int segment = 0;
     int side = 0;
+};
+
+// A static thing standing in the mine. M3 places these purely as shadow
+// casters; M6 turns the same entries into robots.
+struct LevelObject {
+    std::string type;   // names a mesh in assets/models/
+    glm::vec3 position{0.0f};
+    glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    float scale = 1.0f;
+    int segment = -1;
 };
 
 struct Level {
@@ -112,6 +131,7 @@ struct Level {
     std::vector<glm::vec3> vertices;
     std::vector<Segment> segments;
     std::vector<Light> lights;
+    std::vector<LevelObject> objects;
     PlayerStart start;
 
     // Wall triangles grouped by segment, with the range each segment owns, so
@@ -136,7 +156,20 @@ Level loadLevel(const std::string& path);
 // whatever the ImGui light editor changed.
 bool saveLevel(const std::string& path, const Level& level);
 
-// Recomputes one light's segment set. Call after moving it or changing radius.
+// Scratch space for the flood fill, so a light whose set is rebuilt every frame
+// (the headlight) does not allocate in the frame loop.
+struct LightFlood {
+    std::vector<uint32_t> mark;
+    std::vector<int> queue;
+    uint32_t stamp = 0;
+};
+
+// Recomputes one light's segment set. Call after moving it or changing radius;
+// a stale set is how a light ends up lighting a room through a wall.
+void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch);
+
+// Convenience for load time and the editor, where one more allocation does not
+// matter.
 void rebuildLightSegments(Level& level, Light& light);
 
 // Which segment contains p, or -1. `hint` is tried first and its neighbours

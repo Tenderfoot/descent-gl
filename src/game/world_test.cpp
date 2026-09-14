@@ -4,6 +4,8 @@
 #include "game/level.h"
 #include "game/visibility.h"
 #include "render/camera.h"
+#include "render/model.h"
+#include "render/shadow.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -160,6 +162,83 @@ int runWorldTest(const char* levelPath) {
     } else {
         log::info("portal culling is live: at most {} of {} segments visible from any segment",
                   maxVisible, n);
+    }
+
+    // --- shadow occluders -------------------------------------------------
+    //
+    // buildOccluder is fatal on an open edge, so reaching the log line below at
+    // all means every mesh in the level is closed. That matters more than it
+    // sounds: depth-fail counting is only correct for a closed volume, and an
+    // open occluder produces a shadow that flickers or inverts with the camera
+    // rather than one that is obviously missing.
+    log::info("shadow occluders:");
+    {
+        std::vector<glm::uvec3> triangles;
+        std::vector<int> segments;
+        triangles.reserve(level.walls.size());
+        segments.reserve(level.walls.size());
+        for (const WallTriangle& w : level.walls) {
+            triangles.emplace_back(static_cast<unsigned>(w.vi[0]), static_cast<unsigned>(w.vi[1]),
+                                   static_cast<unsigned>(w.vi[2]));
+            segments.push_back(w.segment);
+        }
+        const gl::OccluderMesh mine =
+            gl::buildOccluder(level.vertices, triangles, segments, "mine walls");
+
+        // Euler characteristic 2 says the union of every segment's walls is one
+        // closed surface of genus 0 - a sphere - which is exactly the claim the
+        // segment-graph format makes: portals are interior, walls are the
+        // boundary, and the two sides of a portal share their vertices.
+        const int euler = static_cast<int>(mine.positions.size()) -
+                          static_cast<int>(mine.edges.size()) +
+                          static_cast<int>(mine.triangles.size());
+        log::info("  mine walls: V {} - E {} + F {} = {}", mine.positions.size(),
+                  mine.edges.size(), mine.triangles.size(), euler);
+        if (euler != 2) {
+            log::error("the mine's wall surface has Euler characteristic {}, not 2: it is not one "
+                       "closed surface, and shadow volumes will be wrong somewhere",
+                       euler);
+            ok = false;
+        }
+
+        gl::Occluder mineOccluder;
+        mineOccluder.reset(&mine, glm::mat4(1.0f));
+
+        std::vector<uint8_t> mask(level.segments.size(), 0);
+        int totalEdges = 0;
+        for (size_t i = 0; i < level.lights.size(); ++i) {
+            const Light& l = level.lights[i];
+            std::fill(mask.begin(), mask.end(), uint8_t{0});
+            for (int seg : l.segments) mask[static_cast<size_t>(seg)] = 1;
+            const int edges = gl::silhouetteEdgeCount(mineOccluder, l.position, &mask);
+            totalEdges += edges;
+            log::info("  light {:2}: {:3} silhouette edges on the mine walls ({} segments)", i,
+                      edges, l.segments.size());
+        }
+
+        // A light with no silhouette edges anywhere casts nothing from the
+        // walls, which in a mine with bends means the extraction is broken.
+        if (totalEdges == 0) {
+            log::error("no light produces a single silhouette edge on the mine walls: "
+                       "silhouette extraction is not working");
+            ok = false;
+        } else {
+            log::info("  {} silhouette edges in total across {} lights", totalEdges,
+                      level.lights.size());
+        }
+    }
+
+    for (const LevelObject& obj : level.objects) {
+        const std::string path = "assets/models/" + obj.type + ".obj";
+        static std::vector<std::string> seen;
+        if (std::find(seen.begin(), seen.end(), path) != seen.end()) continue;
+        seen.push_back(path);
+        const gl::ModelData model = gl::loadObj(path);
+        gl::buildOccluder(model.positions, model.triangles, {}, path);   // fatal if open
+    }
+    {
+        const gl::ModelData ship = gl::loadObj("assets/models/ship.obj");
+        gl::buildOccluder(ship.positions, ship.triangles, {}, "assets/models/ship.obj");
     }
 
     // --- editor round trip -----------------------------------------------

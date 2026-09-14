@@ -71,6 +71,9 @@ milestone rather than describing what the code should do:
 | `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
 | `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
 | `--segment N` | Start in segment N's centre rather than at the player start, so a screenshot can be taken anywhere in the mine without flying there. |
+| `--size W H` | Window size. Mostly for software-rendering verification: at full size a shadowed frame can be slower than the loop's 0.25 s frame clamp, and the reported step rate is then bounded by the clamp rather than by the simulation. |
+| `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
+| `--stencil-view` | Start in the stencil visualiser, which tints whatever the stencil marks as shadowed. Also an ImGui toggle. |
 
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
@@ -88,6 +91,7 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 | Q / E | Roll left / right |
 | Arrow keys | Pitch and yaw without the mouse |
 | F1 | Toggle chase camera |
+| H | Toggle the headlight |
 | Escape | Toggle mouse capture |
 
 All of these come from one table in `src/game/bindings.h`; nothing else in the

@@ -5,15 +5,19 @@
 #include "render/mesh.h"
 #include "render/model.h"
 #include "render/shader.h"
+#include "render/shadow.h"
 #include "render/target.h"
 #include "render/texture_array.h"
 
 #include <glm/mat4x4.hpp>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace dvk {
 struct Level;
+struct Light;
 struct RenderState;
 class PortalWalk;
 }
@@ -22,14 +26,15 @@ namespace dvk::gl {
 
 // Owns every GL object and draws one frame.
 //
-// Frame shape from M2 on:
+// Frame shape from M3 on:
 //
 //   bind MSAA target, clear to black
 //   depth prepass                    all visible geometry, depth only
 //   for each light reaching the visible set:
-//       [M3 inserts the stencil clear and the shadow volume pass here]
-//       additive lighting pass       blend ONE,ONE; depth EQUAL; only this
-//                                    light's segments
+//       clear stencil
+//       shadow volume pass           no colour write, depth-fail counting
+//       additive lighting pass       blend ONE,ONE; depth EQUAL; stencil == 0;
+//                                    only this light's segments
 //   unlit pass                       emissive and debug geometry
 //   resolve (blit) to default -> ImGui -> swap
 //
@@ -47,7 +52,11 @@ public:
     explicit Renderer(const Level& level);
 
     void beginFrame(int fbWidth, int fbHeight);
-    void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk);
+    // `headlight` is the ship's own spotlight, or null when it is switched
+    // off. It is passed in rather than stored because it is simulation state:
+    // it moves with the ship and its segment set is rebuilt every step.
+    void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
+                   const Light* headlight);
     void resolve();
 
     // The same view-projection the frame will be drawn with. The portal walk
@@ -57,18 +66,33 @@ public:
 
     // Per-frame counters for the debug overlay.
     struct Stats {
-        int segmentsDrawn = 0;     // in the depth prepass
+        int segmentsDrawn = 0;
         int lightsConsidered = 0;
         int lightsDrawn = 0;
-        int lightSegmentDraws = 0; // segment draw calls across every light pass
+        int lightSegmentDraws = 0;
+        int shadowCasters = 0;
+        int silhouetteEdges = 0;
+        int volumeTriangles = 0;
     };
     const Stats& stats() const { return stats_; }
 
+    // What each light contributed, for the per-light debug readout.
+    struct LightStats {
+        int silhouetteEdges = 0;
+        int volumeTriangles = 0;
+        int segments = 0;
+    };
+    const std::vector<LightStats>& lightStats() const { return lightStats_; }
+
     // Debug toggles, driven from ImGui.
     bool drawLightGizmos = true;
+    bool shadowsEnabled = true;
+    bool drawVolumeWireframe = false;
+    bool showStencil = false;
 
     size_t shipTriangleCount() const { return shipModel_.triangleCount(); }
     int levelTriangleCount() const { return levelMesh_->triangleCount(); }
+    size_t mineOccluderTriangles() const { return mineMesh_.triangleCount(); }
 
 private:
     struct CameraBlock {
@@ -76,16 +100,35 @@ private:
         glm::mat4 proj;
     };
 
+    // One drawable, shadow-casting thing that is not the mine.
+    struct Prop {
+        const OccluderMesh* occluderMesh = nullptr;
+        const Mesh* mesh = nullptr;
+        Occluder occluder;
+        glm::mat4 model{1.0f};
+        int segment = -1;
+        int textureLayer = 0;
+    };
+
     glm::mat4 buildView(const RenderState& rs) const;
     glm::vec3 eyePos(const RenderState& rs) const;
     glm::mat4 shipModelMatrix(const RenderState& rs) const;
+
+    void loadProps(const Level& level);
+    void gatherLights(const Level& level, const Light* headlight);
+    void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
-    void lightPasses(const RenderState& rs, const Level& level, const PortalWalk& walk);
-    void unlitPass(const Level& level, const PortalWalk& walk);
+    void lightPasses(const RenderState& rs, const PortalWalk& walk);
+    void unlitPass(const RenderState& rs, const PortalWalk& walk);
+
+    void stencilPass(ShadowVolumes::Range range);
+    void visualiseStencil();
 
     std::unique_ptr<Shader> depthShader_;
     std::unique_ptr<Shader> wallShader_;
     std::unique_ptr<Shader> unlitShader_;
+    std::unique_ptr<Shader> shadowShader_;
+    std::unique_ptr<Shader> fullscreenShader_;
 
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<LevelMesh> levelMesh_;
@@ -93,9 +136,32 @@ private:
     std::unique_ptr<Mesh> gizmo_;
 
     ModelData shipModel_;
+    OccluderMesh shipOccluderMesh_;
+    OccluderMesh mineMesh_;
+    Occluder mineOccluder_;
+    Occluder shipOccluder_;
 
-    // Reused across frames so the per-light loop allocates nothing.
+    // Meshes shared by every instance of a given object type.
+    std::unordered_map<std::string, ModelData> propModels_;
+    std::unordered_map<std::string, Mesh> propMeshes_;
+    std::unordered_map<std::string, OccluderMesh> propOccluders_;
+    std::vector<Prop> props_;
+
+    // Every light being drawn this frame: the level's, then the headlight if
+    // it is on. One list so the shadow build and the light passes cannot
+    // disagree about what exists.
+    std::vector<const Light*> active_;
+    // Parallel to active_: the ship is never an occluder for its own
+    // headlight, and the headlight's own index is how that is known.
+    int headlightIndex_ = -1;
+
+    ShadowVolumes volumes_;
+    std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order
+    std::vector<LightStats> lightStats_;
+    std::vector<uint8_t> segmentMask_;
     std::vector<int> lit_;
+
+    GLuint emptyVao_ = 0;   // for the full-screen stencil visualiser
 
     MsaaTarget target_;
     GLuint cameraUbo_ = 0;

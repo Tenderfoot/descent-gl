@@ -38,6 +38,7 @@ add_executable(descent
     src/render/renderer.cpp
     src/render/screenshot.cpp
     src/render/shader.cpp
+    src/render/shadow.cpp
     src/render/stb_impl.cpp
     src/render/target.cpp
     src/render/texture_array.cpp

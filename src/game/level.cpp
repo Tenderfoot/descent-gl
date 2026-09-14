@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <fstream>
-#include <queue>
 
 namespace dvk {
 
@@ -109,7 +108,10 @@ void splitSides(Level& level) {
             for (int t = 0; t < 2; ++t) {
                 WallTriangle w;
                 for (int k = 0; k < 3; ++k) {
-                    w.p[static_cast<size_t>(k)] = c[static_cast<size_t>(split[t][k])];
+                    const int corner = split[t][k];
+                    w.p[static_cast<size_t>(k)] = c[static_cast<size_t>(corner)];
+                    w.vi[static_cast<size_t>(k)] = seg.verts[static_cast<size_t>(
+                        kSideVertices[static_cast<size_t>(side)][static_cast<size_t>(corner)])];
                 }
                 w.normal = faceNormal(w.p[0], w.p[1], w.p[2]);
                 w.d = -glm::dot(w.normal, w.p[0]);
@@ -197,35 +199,36 @@ void validate(const Level& level, const std::string& path) {
 
 } // namespace
 
-void rebuildLightSegments(Level& level, Light& light) {
+void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch) {
     light.segments.clear();
     if (level.segments.empty()) return;
 
     if (light.segment < 0 || light.segment >= level.segmentCount()) {
-        light.segment = findSegment(level, light.position);
-        if (light.segment < 0) {
-            // A light outside the mine lights nothing. Better to say so than to
-            // silently drop it and leave a room dark for no visible reason.
-            log::warn("light at {:.1f} {:.1f} {:.1f} is not inside any segment", light.position.x,
-                      light.position.y, light.position.z);
-            return;
-        }
+        // A light outside the mine lights nothing. Better to say so than to
+        // silently drop it and leave a room dark for no visible reason.
+        log::warn("light at {:.1f} {:.1f} {:.1f} is not inside any segment", light.position.x,
+                  light.position.y, light.position.z);
+        return;
     }
 
-    std::vector<bool> seen(level.segments.size(), false);
-    std::queue<int> queue;
-    queue.push(light.segment);
-    seen[static_cast<size_t>(light.segment)] = true;
+    // Stamped marks rather than a cleared array: the headlight rebuilds its set
+    // every frame and this runs in the draw path.
+    scratch.mark.resize(level.segments.size(), 0);
+    ++scratch.stamp;
+    scratch.queue.clear();
 
-    while (!queue.empty()) {
-        const int si = queue.front();
-        queue.pop();
+    scratch.queue.push_back(light.segment);
+    scratch.mark[static_cast<size_t>(light.segment)] = scratch.stamp;
+
+    for (size_t head = 0; head < scratch.queue.size(); ++head) {
+        const int si = scratch.queue[head];
         light.segments.push_back(si);
 
         const Segment& seg = level.segments[static_cast<size_t>(si)];
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
-            if (!sd.isPortal() || seen[static_cast<size_t>(sd.neighbour)]) continue;
+            if (!sd.isPortal()) continue;
+            if (scratch.mark[static_cast<size_t>(sd.neighbour)] == scratch.stamp) continue;
 
             // Stop at a portal the light cannot reach. Measured to the nearest
             // point of the portal itself rather than to the neighbour's centre:
@@ -237,12 +240,21 @@ void rebuildLightSegments(Level& level, Light& light) {
                          sim::distanceToTriangle(light.position, c[0], c[2], c[3]));
             if (nearest > light.radius) continue;
 
-            seen[static_cast<size_t>(sd.neighbour)] = true;
-            queue.push(sd.neighbour);
+            scratch.mark[static_cast<size_t>(sd.neighbour)] = scratch.stamp;
+            scratch.queue.push_back(sd.neighbour);
         }
     }
 
+    // Sorted so the renderer can binary-search membership.
     std::sort(light.segments.begin(), light.segments.end());
+}
+
+void rebuildLightSegments(Level& level, Light& light) {
+    if (light.segment < 0 || light.segment >= level.segmentCount()) {
+        light.segment = findSegment(level, light.position);
+    }
+    LightFlood scratch;
+    rebuildLightSegments(static_cast<const Level&>(level), light, scratch);
 }
 
 namespace {
@@ -368,6 +380,21 @@ Level loadLevel(const std::string& path) {
             }
         }
 
+        if (auto it = j.find("objects"); it != j.end()) {
+            for (const auto& oj : *it) {
+                LevelObject obj;
+                obj.type = oj.at("type").get<std::string>();
+                obj.position = readVec3(oj.at("position"));
+                obj.scale = oj.value("scale", 1.0f);
+                obj.segment = oj.value("segment", -1);
+                if (auto q = oj.find("orientation"); q != oj.end() && q->size() == 4) {
+                    obj.orientation = glm::quat((*q)[0].get<float>(), (*q)[1].get<float>(),
+                                                (*q)[2].get<float>(), (*q)[3].get<float>());
+                }
+                level.objects.push_back(obj);
+            }
+        }
+
         const auto& start = j.at("start");
         level.start.segment = start.value("segment", 0);
         level.start.position = readVec3(start.at("position"));
@@ -386,6 +413,16 @@ Level loadLevel(const std::string& path) {
 
     for (Light& light : level.lights) rebuildLightSegments(level, light);
 
+    for (LevelObject& obj : level.objects) {
+        if (obj.segment < 0 || obj.segment >= level.segmentCount()) {
+            obj.segment = findSegment(level, obj.position, obj.segment);
+        }
+        if (obj.segment < 0) {
+            log::fatal("{}: object '{}' at {:.1f} {:.1f} {:.1f} is not inside any segment", path,
+                       obj.type, obj.position.x, obj.position.y, obj.position.z);
+        }
+    }
+
     int portals = 0;
     int altDiagonals = 0;
     for (const Segment& seg : level.segments) {
@@ -394,8 +431,9 @@ Level loadLevel(const std::string& path) {
             if (sd.altDiagonal) ++altDiagonals;
         }
     }
-    log::info("level '{}': {} segments, {} portals, {} wall triangles, {} lights", path,
-              level.segments.size(), portals / 2, level.walls.size(), level.lights.size());
+    log::info("level '{}': {} segments, {} portals, {} wall triangles, {} lights, {} objects",
+              path, level.segments.size(), portals / 2, level.walls.size(), level.lights.size(),
+              level.objects.size());
     log::info("  {} of {} sides took the alternate diagonal at the minimum-crease split",
               altDiagonals, level.segments.size() * SideCount);
     return level;
@@ -434,6 +472,17 @@ bool saveLevel(const std::string& path, const Level& level) {
             lj["cone"] = light.coneDegrees;
         }
         j["lights"].push_back(lj);
+    }
+
+    for (const LevelObject& obj : level.objects) {
+        nlohmann::json oj;
+        oj["type"] = obj.type;
+        oj["position"] = {obj.position.x, obj.position.y, obj.position.z};
+        oj["orientation"] = {obj.orientation.w, obj.orientation.x, obj.orientation.y,
+                             obj.orientation.z};
+        if (obj.scale != 1.0f) oj["scale"] = obj.scale;
+        oj["segment"] = obj.segment;
+        j["objects"].push_back(oj);
     }
 
     j["start"]["segment"] = level.start.segment;

@@ -22,9 +22,8 @@ for convenience.
    in the stencil buffer with depth-fail. Pixel-exact hard edges, no acne, no
    shadow-map resolution.
 
-Status: bets 1 and 2 landed in M2 — see "The level format" and "The lighting
-frame" below. Bet 3 is M3's; M0 put its preconditions in place, see "Reversed-Z"
-and "Render target".
+Status: all three are in. Bets 1 and 2 landed in M2 — see "The level format"
+and "The lighting frame". Bet 3 landed in M3 — see "Stencil shadow volumes".
 
 ---
 
@@ -62,9 +61,11 @@ bind MSAA target
   clear colour (black) + depth + stencil
   depth prepass                        (all visible geometry, depth only)
   for each light reaching the visible set:
-      [M3: clear stencil, shadow volume pass]
-      additive lighting pass           (blend ONE,ONE; depth EQUAL; this
-                                        light's segments only)
+      clear stencil
+      shadow volume pass               (no colour write, depth-fail counting,
+                                        GL_GREATER)
+      additive lighting pass           (blend ONE,ONE; depth EQUAL;
+                                        stencil == 0; this light's segments)
   unlit pass                           (emissive and debug; M5 bolts and
                                         flares, M7 HUD, M8 automap)
 resolve (blit) to the default framebuffer
@@ -76,9 +77,9 @@ ImGui is drawn *after* the resolve, not into the MSAA target. Its geometry is
 axis-aligned text and rectangles that gain nothing from multisampling, and
 keeping it out means the resolve carries only scene colour.
 
-The per-light loop in `Renderer::lightPasses` carries a marked insertion point
-where M3 adds the stencil clear and the shadow volume pass. It is shaped that
-way so that milestone inserts rather than restructures.
+Silhouettes for every light are extracted on the CPU *before* any drawing, and
+all of a frame's volumes go into one buffer that is uploaded once. The per-light
+loop then draws a range out of it.
 
 ### The depth prepass and shader invariance
 
@@ -374,6 +375,113 @@ spin-up to 95% of top speed, coast-down to a visual stop, and the rotation one
 full mouse swipe produces. It exits non-zero if any is out of range. This is
 what caught the clamp bug above — it was invisible by eye and unmistakable as a
 number.
+
+---
+
+## Stencil shadow volumes
+
+`src/render/shadow.h`. Silhouette edges extruded to infinity and counted in the
+stencil buffer with depth-fail — the Doom 3 and F.E.A.R. technique. Pixel-exact
+hard edges, no acne, no shadow-map resolution to run out of.
+
+All of it is CPU work. The meshes are tens of triangles, so a geometry shader
+would cost more in setup than it saves, and the CPU path is the one whose
+correctness can be printed.
+
+### Closure is not negotiable
+
+`buildOccluder` welds by position, builds edge adjacency, and **fails fatally if
+any edge does not have exactly two triangles**, naming the offending edge's two
+positions. An open edge means the extruded volume has a hole, the depth-fail
+counts come out wrong beyond that hole, and the shadow flickers or inverts
+depending on where the camera is. There is no tolerable degraded behaviour, so
+there is no warning path.
+
+The mine itself is an occluder, and the most important one — without it a light
+spills through walls into rooms it should never reach. **The union of every
+segment's wall triangles is a closed surface**, because segments share vertex
+indices across portals, so the walls of two joined segments weld along the
+portal rim instead of leaving a crack. `--world-test` checks the Euler
+characteristic comes out at 2 (one closed surface, genus 0). For `test01`:
+V 58 − E 168 + F 112 = 2.
+
+### Building a volume
+
+For each silhouette edge — one whose two triangles disagree about facing the
+light — a quad extruded away from the light, plus a front cap of the
+light-facing triangles and a back cap of the same triangles reversed at
+infinity. The volume must be closed for depth-fail to count correctly.
+
+The extruded vertices carry `w = 0` and hold a *direction* away from the light
+rather than a position. Under the infinite far plane (see "Reversed-Z") they
+land exactly on the far plane instead of being clipped. **This is the reason
+that projection exists.**
+
+Side quads take the edge as the *light-facing* triangle winds it, which is what
+makes the quad's outward normal point out of the volume — and therefore what
+makes "front face" and "back face" mean what the stencil ops assume.
+
+### `GL_GREATER`, and why it is not `GL_GEQUAL`
+
+The volume pass uses `glDepthFunc(GL_GREATER)` where the rest of the frame uses
+`GL_GEQUAL`. **This one comparison is the difference between working shadows and
+a black screen.**
+
+Depth-fail counts volume faces lying *behind* the visible surface. A volume's
+front cap is the occluder's own light-facing triangles, exactly coincident with
+the surface being lit, and it has to be counted so that it cancels the back cap
+at infinity. Otherwise every lit surface finds one uncancelled face behind it
+and shadows itself. In a conventional `GL_LESS` depth buffer a coincident
+fragment *fails* the test and that cancellation is automatic. Reversed-Z with
+`GL_GEQUAL` makes equal **pass** instead, the cap silently stops counting, and
+the entire mine renders black. `GL_GREATER` restores the strict comparison
+depth-fail assumes.
+
+Getting there also required `invariant gl_Position` in `shadow.vert`, spelled
+identically to `depth.vert` including a `uModel` that is always identity. With
+a different association the coincident cap lands a bit off, scattered pixels
+count as behind, and the walls crawl with stripes of false shadow.
+
+### Why depth-fail and not depth-pass
+
+Depth-pass is cheaper and breaks the moment the camera is inside a shadow
+volume — which, in a mine lit by a headlight, is most of the time. Counting what
+is behind the visible surface instead of what is in front of it makes the near
+plane irrelevant.
+
+### The segment-set boundary rule
+
+For the mine, only wall triangles in the light's segment set are considered, and
+an edge with just one triangle inside that subset is treated as **not** a
+silhouette. That leaves the volume open at the subset's border.
+
+It is safe because the border portals are all farther from the light than its
+radius: the opening is out beyond the distance at which this light contributes
+exactly zero, and the lighting pass only ever draws segments in the same set.
+Closing it would mean extruding walls the light cannot reach, every frame, to
+affect pixels that are never shaded.
+
+### Anti-aliasing
+
+`GL_SAMPLE_SHADING` with `glMinSampleShading(1.0)`. Where the stencil differs
+between samples inside one pixel — which is exactly a shadow edge — the light
+pass shades per sample. Without it the multisampled stencil buys nothing and
+the hard edges come out stair-stepped, which is the one artifact this technique
+is supposed to be free of.
+
+### The headlight
+
+A shadow-casting spotlight on the ship, toggled with **H**. Its segment set is
+rebuilt every frame through `LightFlood`, whose scratch buffers are reused so
+the draw path does not allocate.
+
+**The ship is never an occluder for its own headlight.** A lamp bolted to the
+hull would spend every frame shadowing the hull it is bolted to, and the view
+would be a black cone. The ship is also not an occluder in first person at all:
+the camera sits inside the hull, so its volume would begin at the eye and black
+out most of the view — the player shadowing themselves with a mesh they cannot
+see. It is not drawn in first person either, so what casts a shadow and what is
+visible stay in agreement.
 
 ---
 

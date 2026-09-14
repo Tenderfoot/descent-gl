@@ -26,6 +26,13 @@ Options Options::parse(int argc, char** argv) {
             o.worldTest = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
+        } else if (a == "--wireframe-volumes") {
+            o.wireframeVolumes = true;
+        } else if (a == "--stencil-view") {
+            o.stencilView = true;
+        } else if (a == "--size" && i + 2 < argc) {
+            o.width = std::atoi(argv[++i]);
+            o.height = std::atoi(argv[++i]);
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }

@@ -18,6 +18,7 @@
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
@@ -41,6 +42,15 @@ constexpr double kMaxFrameTime = 0.25;
 
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kLevelPath = "assets/levels/test01.json";
+
+// The headlight. In a game with no ambient term this is the player's primary
+// way of seeing anything at all, so it is deliberately generous: a wide enough
+// cone to fly by and a range of three segments.
+constexpr float kHeadlightRadius = 62.0f;
+constexpr float kHeadlightCone = 34.0f;   // degrees, full angle
+// Set a little ahead of the hull so the cone does not start inside the ship's
+// own geometry.
+constexpr float kHeadlightForward = 2.2f;
 
 // Scripted window events for --resize-test. Covers the two cases that break
 // silently: a framebuffer size change while drawing, and iconify/restore,
@@ -80,6 +90,8 @@ int main(int argc, char** argv) {
     }
 
     dvk::Window::Desc desc;
+    desc.width = opts.width;
+    desc.height = opts.height;
 #ifdef DVK_DEBUG
     desc.debugContext = true;
 #endif
@@ -103,6 +115,8 @@ int main(int argc, char** argv) {
 
     dvk::Level level = dvk::loadLevel(kLevelPath);
     dvk::gl::Renderer renderer(level);
+    renderer.drawVolumeWireframe = opts.wireframeVolumes;
+    renderer.showStencil = opts.stencilView;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -130,6 +144,16 @@ int main(int argc, char** argv) {
         opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
 
     dvk::PortalWalk walk;
+    dvk::LightFlood flood;
+
+    dvk::Light headlight;
+    headlight.type = dvk::LightType::Spot;
+    headlight.radius = kHeadlightRadius;
+    headlight.coneDegrees = kHeadlightCone;
+    headlight.color = glm::vec3(1.0f, 0.97f, 0.9f);
+    headlight.intensity = 3.2f;
+    bool headlightOn = true;
+
     // Freezing the visible set leaves the last portal walk in place while the
     // camera keeps moving, so the culling can be inspected from outside it.
     // Without this, the one thing you cannot see is what the cull decided.
@@ -202,6 +226,7 @@ int main(int argc, char** argv) {
         if (input.pressed(GLFW_KEY_ESCAPE)) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
+        if (input.pressed(GLFW_KEY_H)) headlightOn = !headlightOn;
         if (input.pressed(GLFW_KEY_F1)) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
@@ -226,12 +251,22 @@ int main(int argc, char** argv) {
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
         rs.camera = camera;
 
+        // The headlight moves with the ship, so its segment set is rebuilt
+        // every frame. The flood fill reuses its scratch buffers, so this does
+        // not allocate in the frame loop.
+        const glm::mat3 shipBasis = glm::mat3_cast(rs.shipOrientation);
+        const glm::vec3 shipForward = shipBasis * glm::vec3(0.0f, 0.0f, -1.0f);
+        headlight.position = rs.shipPos + shipForward * kHeadlightForward;
+        headlight.direction = shipForward;
+        headlight.segment = rs.shipSegment;
+        if (headlightOn) dvk::rebuildLightSegments(level, headlight, flood);
+
         const glm::ivec2 fb = window.framebufferSize();
         renderer.beginFrame(fb.x, fb.y);
         if (!freezeVisible) {
             walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos);
         }
-        renderer.drawScene(rs, level, walk);
+        renderer.drawScene(rs, level, walk, headlightOn ? &headlight : nullptr);
         renderer.resolve();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -308,6 +343,39 @@ int main(int argc, char** argv) {
             if (ImGui::Button("Reset to defaults")) flight = flightDefaults;
             ImGui::SameLine();
             if (ImGui::Button("Reload")) flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
+        }
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(420, 12), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("shadows")) {
+            const dvk::gl::Renderer::Stats& st = renderer.stats();
+            ImGui::Checkbox("shadows", &renderer.shadowsEnabled);
+            ImGui::SameLine();
+            ImGui::Checkbox("volumes as wireframe", &renderer.drawVolumeWireframe);
+            ImGui::Checkbox("stencil visualiser", &renderer.showStencil);
+            ImGui::SameLine();
+            ImGui::Checkbox("headlight (H)", &headlightOn);
+
+            ImGui::Text("%d casters, %d silhouette edges, %d volume triangles",
+                        st.shadowCasters, st.silhouetteEdges, st.volumeTriangles);
+
+            ImGui::Separator();
+            ImGui::TextDisabled("per light: edges / volume triangles / segments");
+            ImGui::BeginChild("per light", ImVec2(0, 150), true);
+            const auto& ls = renderer.lightStats();
+            for (size_t i = 0; i < ls.size(); ++i) {
+                const bool isHeadlight = i >= level.lights.size();
+                dvk::Light& l = isHeadlight ? headlight : level.lights[i];
+                ImGui::PushID(static_cast<int>(i));
+                ImGui::Checkbox("##casts", &l.castsShadows);
+                ImGui::SameLine();
+                ImGui::Text("%-9s %4d edges  %5d tris  %2d segs",
+                            isHeadlight ? "headlight" : "light", ls[i].silhouetteEdges,
+                            ls[i].volumeTriangles, ls[i].segments);
+                ImGui::PopID();
+            }
+            ImGui::EndChild();
         }
         ImGui::End();
 

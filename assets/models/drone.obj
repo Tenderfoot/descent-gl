@@ -1,0 +1,46 @@
+# descent-vk drone: hexagonal drum, a shadow caster in M3 and a robot in M6.
+# THIS MESH MUST STAY CLOSED. Every edge is shared by exactly two triangles.
+# M3 extrudes silhouette edges into stencil shadow volumes and depth-fail
+# counting is only correct for a closed mesh; the loader treats an open edge as
+# a fatal asset error and prints the offending edge's coordinates.
+#
+# Wound counter-clockwise seen from outside. Normals are not authored; the
+# loader computes flat per-face normals.
+
+v    1.550    1.150    0.000
+v    0.775    1.150    1.342
+v   -0.775    1.150    1.342
+v   -1.550    1.150    0.000
+v   -0.775    1.150   -1.342
+v    0.775    1.150   -1.342
+v    2.050   -1.150    0.000
+v    1.025   -1.150    1.775
+v   -1.025   -1.150    1.775
+v   -2.050   -1.150    0.000
+v   -1.025   -1.150   -1.775
+v    1.025   -1.150   -1.775
+
+vt 0.00 0.00
+vt 1.00 0.00
+vt 1.00 1.00
+
+f 1/1 8/2 7/3
+f 1/1 2/2 8/3
+f 2/1 9/2 8/3
+f 2/1 3/2 9/3
+f 3/1 10/2 9/3
+f 3/1 4/2 10/3
+f 4/1 11/2 10/3
+f 4/1 5/2 11/3
+f 5/1 12/2 11/3
+f 5/1 6/2 12/3
+f 6/1 7/2 12/3
+f 6/1 1/2 7/3
+f 1/1 3/2 2/3
+f 1/1 4/2 3/3
+f 1/1 5/2 4/3
+f 1/1 6/2 5/3
+f 7/1 8/2 9/3
+f 7/1 9/2 10/3
+f 7/1 10/2 11/3
+f 7/1 11/2 12/3

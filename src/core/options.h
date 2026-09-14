@@ -22,6 +22,16 @@ namespace dvk {
 //   --segment N         start in segment N's centre instead of at the
 //                       player start, so a screenshot can be taken anywhere
 //                       in the mine without flying there
+//   --wireframe-volumes start with shadow volumes drawn as wireframe (also an
+//                       ImGui toggle), so the extrusion can be screenshotted
+//                       rather than inferred from whether shadows look right
+//   --stencil-view      start in the stencil visualiser (also an ImGui
+//                       toggle): tints whatever the stencil marks as shadowed
+//   --size W H          window size. Mostly for software-rendering
+//                       verification, where the full-size frame is slower
+//                       than the loop's 0.25 s frame clamp and the reported
+//                       step rate is bounded by the clamp rather than by the
+//                       simulation.
 struct Options {
     int frames = -1;
     std::string screenshot;
@@ -30,6 +40,10 @@ struct Options {
     bool flightTest = false;
     bool worldTest = false;
     int startSegment = -1;
+    bool wireframeVolumes = false;
+    bool stencilView = false;
+    int width = 1600;
+    int height = 900;
 
     static Options parse(int argc, char** argv);
 };
