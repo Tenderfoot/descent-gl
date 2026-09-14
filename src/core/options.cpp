@@ -20,6 +20,8 @@ Options Options::parse(int argc, char** argv) {
             o.resizeTest = true;
         } else if (a == "--automap") {
             o.automap = true;
+        } else if (a == "--validate-assets") {
+            o.validateAssets = true;
         } else if (a == "--reveal") {
             o.reveal = true;
             o.automap = true;

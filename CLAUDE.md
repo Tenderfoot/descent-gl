@@ -69,6 +69,7 @@ milestone rather than describing what the code should do:
 | `--resize-test` | Drive a scripted 9-second sequence of window resizes, an iconify and a restore, then exit. Keeps vsync on so the window manager can deliver the events. |
 | `--chase` | Start in the chase camera, so a screenshot can show the ship without a keypress. |
 | `--automap` | Start with the automap open, so a screenshot can show it without flying the level first. |
+| `--validate-assets` | Run every shipped model and level through the M2 and M3 validators, print one line each, and exit non-zero on any failure. Needs no window and no GL. Also runs at every startup. |
 | `--reveal` | Draw the automap as if every segment had been visited and every key and the reactor had been found. A rendering check for the map, in the same family as `--wireframe-volumes`; it changes nothing in the simulation, which still records only the rooms actually flown through. Implies `--automap`. |
 | `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
 | `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |

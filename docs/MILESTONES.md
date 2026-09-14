@@ -872,6 +872,35 @@ segment set misses the visible set does no silhouette work at all.
 Tracy is the agreed follow-up for the deep profiling, added on the dev machine
 where it can be confirmed working.
 
+### Asset validation and the README ✅
+
+Every shipped model and level through the M2 and M3 validators at startup and
+behind `--validate-assets`, one line each.
+
+| Check | Result |
+| --- | --- |
+| All shipped assets validate | ✅ **0 failures** — 6 models and 2 levels |
+| Level surfaces are closed genus-0 | ✅ `V - E + F = 2` on both `mine01` and `test01` |
+| Negative control: a face deleted from `pillar.obj` | ✅ caught — "3 open edge(s)", first at (1.700 9.000 0.000) |
+| Debug refuses to continue past it | ✅ `[FATAL] aborting` |
+| Release reports and skips it | ✅ "skipping ... because this is a Release build", exit code **1** |
+| Restored asset | ✅ exit code **0** |
+| Runs at startup, before a window exists | ✅ `--resize-test` logs `asset validation: 0 failure(s)` |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+
+One deliberate departure from the plan: a failing **level** is fatal in Release
+too, not skipped. Skipping a model costs a pillar; skipping a level leaves
+nothing to play, so stopping and saying why is the better outcome. Models behave
+as the plan asks.
+
+`README.md` covers what the project is, the three permanent bets, both build
+paths, the controls, how to verify it, and credits — Descent for the mine and
+the flight model, Doom 3 for the shadow volume implementation and depth-fail,
+F.E.A.R. for the argument that hard shadows with no ambient term are worth
+committing to. The screenshots are a placeholder: software rendering at ~13 fps
+cannot show the technique at a frame rate that flatters it, so those want the
+dev machine.
+
 ### Housekeeping done on the way
 
 `src/game/bindings.h` now holds the discrete keys too — F1, F3, H, F, Tab,

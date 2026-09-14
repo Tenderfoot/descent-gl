@@ -3,6 +3,7 @@
 #include "core/options.h"
 #include "core/time.h"
 #include "core/window.h"
+#include "game/asset_check.h"
 #include "game/bindings.h"
 #include "game/level.h"
 #include "game/state.h"
@@ -98,6 +99,11 @@ int main(int argc, char** argv) {
     if (opts.flightTest) {
         return dvk::sim::runFlightTest(kFlightConfigPath);
     }
+    // Every shipped asset through the validators, then out. Needs no window and
+    // no GL, so it runs anywhere the tests do.
+    if (opts.validateAssets) {
+        return dvk::validateAssets() == 0 ? 0 : 1;
+    }
     if (opts.worldTest) {
         return dvk::runWorldTest(levelPath);
     }
@@ -113,6 +119,11 @@ int main(int argc, char** argv) {
     if (opts.loopTest) {
         return dvk::runLoopTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
     }
+
+    // Every shipped asset, every run, before a window exists. A broken asset
+    // then fails before anything is on screen rather than at the moment the
+    // level that places it is first loaded.
+    dvk::validateAssets();
 
     dvk::Window::Desc desc;
     desc.width = opts.width;
