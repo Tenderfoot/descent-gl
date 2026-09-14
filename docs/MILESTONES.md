@@ -729,6 +729,32 @@ was clean; and a shadow budget of 32 always looked better than the default 8.
 
 ---
 
+## Fixes after M7 — self-shadow fizz on meshes
+
+Reported from play: the ship showed strange shadow artifacts in the chase
+camera. The same artifact was on every robot, pillar and door slab.
+
+The M3 rule that the volume's front cap must be bit-identical to the depth
+prepass was only applied to the mine, whose model matrix is the identity.
+Mesh occluders were transformed to world space on the CPU and drawn with an
+identity matrix, which computes the same point by a different association;
+the cap landed an ulp in front of the surface, was not counted, and the
+surface shadowed itself. Volumes are now emitted in each occluder's own space
+and drawn per occluder with the model matrix the prepass used.
+
+### Verified (Linux container, software GL)
+
+| Check | Result |
+| --- | --- |
+| Pillar under the headlight, segment 12, before | ❌ almost entirely black with fizzing edges |
+| Same view after | ✅ fully lit |
+| Chase-camera ship, before / after | ❌ speckled hull → ✅ clean |
+| World test volume closure, 14 `mine01` and 8 `test01` lights | ✅ PASS (the check now runs on object-space output) |
+| World, loop, weapons, robots tests on `mine01` | ✅ PASS |
+| Headless renders | ✅ no GL error or fatal lines |
+
+---
+
 ## M8 — Polish and performance ⬜
 
 Not started.

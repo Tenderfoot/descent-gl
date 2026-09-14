@@ -428,6 +428,28 @@ Side quads take the edge as the *light-facing* triangle winds it, which is what
 makes the quad's outward normal point out of the volume — and therefore what
 makes "front face" and "back face" mean what the stencil ops assume.
 
+### Volumes are built in the occluder's own space
+
+`appendShadowVolume` decides which triangles face the light in world space,
+but emits the vertices in the **mesh's own space**, and each occluder's run of
+triangles is drawn with the same model matrix the mesh was drawn with in the
+depth prepass (`ShadowVolumes::Draw`). The direction to infinity is
+`p − light` with the light brought into object space, since
+`M·(p − l, 0) = M·(p, 1) − M·(l, 1)`.
+
+This is the same invariance argument as the `GL_GREATER` section below, applied
+to every mesh rather than only the mine. The front cap is the occluder's own
+light-facing triangles and has to land at *exactly* the depth the prepass
+wrote. Transforming to world space on the CPU and drawing with an identity
+matrix computes the same point by a different association, and the last bit
+differs: a cap an ulp in front of its own surface is not counted, and the
+surface shadows itself in a fizz of scattered pixels. The mine's matrix is the
+identity, so it never had the problem, which is why M3 looked right on the
+walls while the ship, robots, pillars and door slabs all fizzed. Under
+software GL a pillar under the headlight rendered almost entirely black before
+this and fully lit after, and the chase-camera ship's hull went from speckled
+to clean.
+
 ### `GL_GREATER`, and why it is not `GL_GEQUAL`
 
 The volume pass uses `glDepthFunc(GL_GREATER)` where the rest of the frame uses
@@ -445,9 +467,10 @@ the entire mine renders black. `GL_GREATER` restores the strict comparison
 depth-fail assumes.
 
 Getting there also required `invariant gl_Position` in `shadow.vert`, spelled
-identically to `depth.vert` including a `uModel` that is always identity. With
-a different association the coincident cap lands a bit off, scattered pixels
-count as behind, and the walls crawl with stripes of false shadow.
+identically to `depth.vert` and fed the same `uModel` the prepass used for
+that occluder. With a different association the coincident cap lands a bit
+off, scattered pixels count as behind, and the walls crawl with stripes of
+false shadow.
 
 ### Why depth-fail and not depth-pass
 

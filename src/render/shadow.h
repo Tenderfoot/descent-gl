@@ -55,18 +55,26 @@ OccluderMesh buildOccluder(const std::vector<glm::vec3>& positions,
 
 // One placed instance: a mesh plus where it is. World positions and planes are
 // cached, so a static object pays for its transform once and the ship pays once
-// per frame.
+// per frame. The world data decides which triangles face the light; the
+// volume itself is emitted in the mesh's OWN space and drawn with the same
+// model matrix the mesh is drawn with - see appendShadowVolume.
 class Occluder {
 public:
     void reset(const OccluderMesh* mesh, const glm::mat4& transform);
     void setTransform(const glm::mat4& transform);
 
     const OccluderMesh* mesh() const { return mesh_; }
+    const glm::mat4& transform() const { return transform_; }
     const std::vector<glm::vec3>& worldPositions() const { return worldPos_; }
     const std::vector<glm::vec4>& worldPlanes() const { return worldPlane_; }
 
+    // A world position in the mesh's own space.
+    glm::vec3 toObject(const glm::vec3& world) const;
+
 private:
     const OccluderMesh* mesh_ = nullptr;
+    glm::mat4 transform_{1.0f};
+    glm::mat4 inverse_{1.0f};
     std::vector<glm::vec3> worldPos_;
     std::vector<glm::vec4> worldPlane_;
 };
@@ -74,16 +82,37 @@ private:
 // Pure CPU builder shared by rendering and the closure regression test.
 // Always uses the entire closed occluder; light range limits receivers, not
 // the surfaces needed to balance depth-fail counts behind those receivers.
+//
+// The vertices come out in the occluder's OWN space, not world space, and
+// must be drawn with the occluder's transform() as uModel. The volume's front
+// cap is the occluder's own light-facing triangles, which the depth prepass
+// has already drawn as `uProj * uView * uModel * vec4(p, 1)` with that same
+// matrix. Emitting the cap as the same p through the same expression makes the
+// two depths bit-identical, which depth-fail needs: a cap that lands an ulp in
+// front of its own surface is not counted, and the surface shadows itself in
+// a fizz of scattered pixels. Transforming on the CPU and drawing with an
+// identity matrix computes the same point by a different association, and the
+// last bit differs - which is what the ship, the robots, the pillars and the
+// door slabs all showed. The mine's transform is the identity, so for it the
+// two approaches coincide and it never had the problem.
 int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
                        std::vector<glm::vec4>& vertices, std::vector<uint8_t>& facesLight);
 
 // Builds every light's volumes into one CPU buffer, uploads once per frame, and
-// hands back a range per light to draw.
+// hands back a range per light to draw. A range is a run of draws, one per
+// occluder, each with the model matrix its vertices are expressed in.
 class ShadowVolumes {
 public:
-    struct Range {
+    struct Draw {
         GLint first = 0;
         GLsizei count = 0;
+        glm::mat4 model{1.0f};
+    };
+    struct Range {
+        GLint first = 0;       // vertex range, for the counters
+        GLsizei count = 0;
+        int firstDraw = 0;     // draw range
+        int drawCount = 0;
     };
 
     ShadowVolumes();
@@ -106,7 +135,18 @@ public:
     void upload();
 
     void bind() const { glBindVertexArray(vao_); }
-    void draw(Range range) const;
+
+    // Draws one light's volumes. `setModel` is called with each draw's model
+    // matrix before it is issued, so the caller can upload it to the bound
+    // shader's uModel.
+    template <class SetModel>
+    void draw(Range range, SetModel&& setModel) const {
+        for (int i = range.firstDraw; i < range.firstDraw + range.drawCount; ++i) {
+            const Draw& d = draws_[static_cast<size_t>(i)];
+            setModel(d.model);
+            glDrawArrays(GL_TRIANGLES, d.first, d.count);
+        }
+    }
 
     // Counters for the debug overlay.
     int silhouetteEdges() const { return silhouetteEdges_; }
@@ -118,7 +158,9 @@ private:
     // position, which the M0 infinite far plane projection maps exactly onto
     // the far plane instead of clipping.
     std::vector<glm::vec4> vertices_;
+    std::vector<Draw> draws_;
     GLint lightFirst_ = 0;
+    int lightFirstDraw_ = 0;
     int silhouetteEdges_ = 0;
 
     GLuint vao_ = 0, vbo_ = 0;

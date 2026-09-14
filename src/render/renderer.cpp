@@ -828,10 +828,12 @@ void Renderer::stencilPass(ShadowVolumes::Range range) {
     glStencilOpSeparate(GL_BACK, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
     glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
 
+    // Each occluder's volume is in its own space and is drawn with the same
+    // model matrix the mesh was drawn with in the prepass, so the front cap's
+    // depth is bit-identical to the surface it sits on. See appendShadowVolume.
     shadowShader_->bind();
-    shadowShader_->setMat4("uModel", glm::mat4(1.0f));
     volumes_.bind();
-    volumes_.draw(range);
+    volumes_.draw(range, [&](const glm::mat4& model) { shadowShader_->setMat4("uModel", model); });
 
     glEnable(GL_CULL_FACE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -993,10 +995,12 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         glDisable(GL_CULL_FACE);
         glDepthMask(GL_FALSE);
         shadowShader_->bind();
-        shadowShader_->setMat4("uModel", glm::mat4(1.0f));
         shadowShader_->setVec3("uColor", glm::vec3(0.15f, 0.9f, 0.35f));
         volumes_.bind();
-        for (const ShadowVolumes::Range& range : ranges_) volumes_.draw(range);
+        for (const ShadowVolumes::Range& range : ranges_) {
+            volumes_.draw(range,
+                          [&](const glm::mat4& model) { shadowShader_->setMat4("uModel", model); });
+        }
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glEnable(GL_CULL_FACE);
         glDepthMask(GL_TRUE);
