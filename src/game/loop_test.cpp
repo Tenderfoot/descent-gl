@@ -19,6 +19,7 @@
 #include <cmath>
 #include <format>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dvk {
@@ -184,6 +185,110 @@ bool verifyLevelList(const char* levelPath) {
     return ok;
 }
 
+std::vector<LevelEntry> fakeLevels(int count) {
+    std::vector<LevelEntry> levels;
+    for (int i = 0; i < count; ++i) {
+        LevelEntry entry;
+        entry.path = std::format("assets/levels/mine{:02}.json", i);
+        entry.name = std::format("mine{:02}", i);
+        entry.comment = "A mine. It has rock in it, and the rock has robots in it.";
+        levels.push_back(std::move(entry));
+    }
+    return levels;
+}
+
+bool verifyLevelSelect() {
+    bool ok = true;
+    constexpr int kWidth = 1600;
+    constexpr int kHeight = 900;
+
+    PlayerMenu menu;
+    menu.setLevels(fakeLevels(3));
+    menu.setSelectedLevel(1);
+    menu.showLevelSelect();
+
+    MenuView view = menu.view(kWidth, kHeight);
+    ok &= expect(view.screen == MenuScreen::LevelSelect, "the level list is visible");
+    ok &= expect(view.buttonCount == 4, "three levels and a back row");
+    ok &= expect(view.buttons[1].selected && view.buttons[1].levelIndex == 1,
+                 "the list opens on the level that is loaded");
+    ok &= expect(std::string_view(view.subtitle).find("A mine.") == 0,
+                 "the selected level's blurb is the subtitle");
+    ok &= expect(std::string_view(view.subtitle).find("robots") == std::string_view::npos,
+                 "only the first sentence of the blurb is kept");
+
+    MenuInput confirm;
+    confirm.confirm = true;
+    ok &= expect(menu.update(confirm, kWidth, kHeight) == MenuAction::Start &&
+                     menu.selectedLevel() == 1,
+                 "confirming a row starts that level");
+
+    // Down from the last level lands on back, and once more wraps to the top.
+    MenuInput down;
+    down.next = true;
+    menu.update(down, kWidth, kHeight);   // -> level 2
+    menu.update(down, kWidth, kHeight);   // -> back
+    ok &= expect(menu.view(kWidth, kHeight).buttons[3].selected, "the cursor reaches back");
+    ok &= expect(menu.update(confirm, kWidth, kHeight) == MenuAction::Back,
+                 "back leaves the level list");
+    menu.update(down, kWidth, kHeight);
+    ok &= expect(menu.view(kWidth, kHeight).buttons[0].selected,
+                 "the cursor wraps from back to the first level");
+
+    // Clicking a row starts that level even when the cursor was elsewhere.
+    view = menu.view(kWidth, kHeight);
+    const MenuRect third = view.buttons[2].bounds;
+    MenuInput click;
+    click.pointer = {third.x + third.width * 0.5f, third.y + third.height * 0.5f};
+    click.pointerPressed = true;
+    ok &= expect(menu.update(click, kWidth, kHeight) == MenuAction::Start &&
+                     menu.selectedLevel() == 2,
+                 "clicking a row starts the level under the pointer");
+
+    // A list longer than the screen shows a window that follows the cursor and
+    // still fits inside the panel.
+    PlayerMenu many;
+    many.setLevels(fakeLevels(20));
+    many.setSelectedLevel(19);
+    many.showLevelSelect();
+    view = many.view(kWidth, kHeight);
+    ok &= expect(view.buttonCount == kMaxLevelRows + 1, "a long list shows a window of rows");
+    ok &= expect(view.levelsShown == kMaxLevelRows && view.levelCount == 20,
+                 "the window reports which slice of the list it is");
+    ok &= expect(view.firstLevelShown + view.levelsShown == 20,
+                 "the window holds the selected level");
+    bool onPanel = true;
+    for (int i = 0; i < view.buttonCount; ++i) {
+        const MenuRect& r = view.buttons[static_cast<size_t>(i)].bounds;
+        onPanel &= r.y >= 0.0f && r.y + r.height <= static_cast<float>(kHeight) * 0.90f;
+    }
+    ok &= expect(onPanel, "every row of a full list stays inside the panel");
+
+    // Small windows shrink the window rather than spilling rows off the panel.
+    view = many.view(640, 360);
+    bool onSmallPanel = true;
+    for (int i = 0; i < view.buttonCount; ++i) {
+        const MenuRect& r = view.buttons[static_cast<size_t>(i)].bounds;
+        onSmallPanel &= r.y + r.height <= 360.0f * 0.90f + 0.01f;
+    }
+    ok &= expect(view.buttonCount >= 2 && onSmallPanel,
+                 "a small window shows fewer rows rather than spilling them");
+
+    // An empty directory is a list with nothing to pick, not a crash.
+    PlayerMenu empty;
+    empty.setLevels({});
+    empty.showLevelSelect();
+    view = empty.view(kWidth, kHeight);
+    ok &= expect(view.buttonCount == 1 && view.buttons[0].action == MenuAction::Back,
+                 "an empty level list offers only back");
+    ok &= expect(empty.selectedLevel() == -1, "an empty level list selects nothing");
+    ok &= expect(empty.update(confirm, kWidth, kHeight) == MenuAction::Back,
+                 "confirming an empty level list backs out");
+
+    log::info("level select: {}", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 bool verifyPlayerMenu() {
     bool ok = true;
     PlayerMenu menu;
@@ -197,6 +302,12 @@ bool verifyPlayerMenu() {
     keyboard.confirm = true;
     ok &= expect(menu.update(keyboard, 1600, 900) == MenuAction::Quit,
                  "keyboard navigation selects a menu action");
+
+    menu.showMain();
+    MenuInput confirm;
+    confirm.confirm = true;
+    ok &= expect(menu.update(confirm, 1600, 900) == MenuAction::ChooseLevel,
+                 "play opens the level list");
 
     menu.showPause();
     view = menu.view(1600, 900);
@@ -229,6 +340,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     ok &= verifyLevelSession(rig.level, rig.robotCfg);
     ok &= verifyPlayerMenu();
     ok &= verifyLevelList(levelPath);
+    ok &= verifyLevelSelect();
 
     // Only a campaign level has a loop to test. test01 is a renderer and
     // physics fixture with no doors, no exit and no reactor, and running the

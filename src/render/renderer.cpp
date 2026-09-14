@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <string_view>
 
 namespace dvk::gl {
 
@@ -528,9 +529,37 @@ void Renderer::buildMenu(const MenuView& menu) {
     const float titleScale = scale * 2.4f;
     const float titleWidth = hud_.textWidth(menu.title, titleScale);
     hud_.text(menu.title, (width - titleWidth) * 0.5f, height * 0.20f, titleScale, white);
+    // A level's own blurb is the subtitle of the level list, and a blurb is
+    // written to be read, not to fit a panel. Cut it to what fits - at a word
+    // boundary, with an ellipsis - rather than letting it run off both edges.
+    // No std::string: this runs every frame the menu is up, and the draw path
+    // is one of the two places this project does not allocate in.
     const float subtitleScale = scale * 0.75f;
-    const float subtitleWidth = hud_.textWidth(menu.subtitle, subtitleScale);
-    hud_.text(menu.subtitle, (width - subtitleWidth) * 0.5f, height * 0.30f, subtitleScale, dim);
+    const float subtitleRoom = panelWidth * 0.92f;
+    const float glyphWidth = std::max(hud_.textWidth(" ", subtitleScale), 1.0f);
+    std::string_view subtitle(menu.subtitle);
+    const char* kEllipsis = "...";
+    bool elided = false;
+    if (hud_.textWidth(subtitle, subtitleScale) > subtitleRoom) {
+        const size_t room = static_cast<size_t>(subtitleRoom / glyphWidth);
+        subtitle = subtitle.substr(0, room > 4 ? room - 3 : 1);
+        const size_t space = subtitle.find_last_of(' ');
+        // Only back up to a space that is near the cut; a subtitle with one
+        // very long word would otherwise lose most of itself.
+        if (space != std::string_view::npos && space * 4 > subtitle.size() * 3) {
+            subtitle = subtitle.substr(0, space);
+        }
+        elided = true;
+    }
+    const float subtitleWidth =
+        hud_.textWidth(subtitle, subtitleScale) +
+        (elided ? hud_.textWidth(kEllipsis, subtitleScale) : 0.0f);
+    const float subtitleLeft = (width - subtitleWidth) * 0.5f;
+    hud_.text(subtitle, subtitleLeft, height * 0.30f, subtitleScale, dim);
+    if (elided) {
+        hud_.text(kEllipsis, subtitleLeft + hud_.textWidth(subtitle, subtitleScale),
+                  height * 0.30f, subtitleScale, dim);
+    }
 
     if (menu.screen == MenuScreen::Summary) {
         const float reasonWidth = hud_.textWidth(menu.reason, scale);
@@ -540,6 +569,18 @@ void Renderer::buildMenu(const MenuView& menu) {
                       menu.robotsDestroyed, menu.robotsTotal);
         const float statsWidth = hud_.textWidth(stats, scale);
         hud_.text(stats, (width - statsWidth) * 0.5f, height * 0.45f, scale, white);
+    }
+
+    // Only when the list is longer than the rows on screen: which slice of it
+    // this is. A list that fits says nothing, because there is nothing to say.
+    if (menu.screen == MenuScreen::LevelSelect && menu.levelsShown > 0 &&
+        menu.levelCount > menu.levelsShown) {
+        char range[64];
+        std::snprintf(range, sizeof(range), "%d-%d of %d", menu.firstLevelShown + 1,
+                      menu.firstLevelShown + menu.levelsShown, menu.levelCount);
+        const float rangeScale = scale * 0.7f;
+        hud_.text(range, (width - hud_.textWidth(range, rangeScale)) * 0.5f, height * 0.335f,
+                  rangeScale, dim);
     }
 
     for (int i = 0; i < menu.buttonCount; ++i) {

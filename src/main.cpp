@@ -8,6 +8,7 @@
 #include "game/asset_check.h"
 #include "game/bindings.h"
 #include "game/level.h"
+#include "game/level_list.h"
 #include "game/state.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
@@ -59,6 +60,7 @@ constexpr double kMaxFrameTime = 0.25;
 
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kDefaultLevelPath = "assets/levels/mine01.json";
+constexpr const char* kLevelDir = "assets/levels";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
@@ -221,11 +223,19 @@ int main(int argc, char** argv) {
         cur.combat.player.headlightOn = true;
     }
     dvk::PlayerMenu menu;
+    menu.setLevels(dvk::discoverLevels(kLevelDir, levelPath));
+    // The list opens on the level that is loaded, so confirming twice from the
+    // main menu starts what a plain run has always started.
+    for (int i = 0; i < static_cast<int>(menu.levels().size()); ++i) {
+        if (menu.levels()[static_cast<size_t>(i)].path == levelPath) menu.setSelectedLevel(i);
+    }
 
-    const bool commandLineRun = argc > 1 && !opts.startMenu;
+    const bool commandLineRun = argc > 1 && !opts.startMenu && !opts.levelSelect;
     if (commandLineRun) {
         session.start();
         menu.hide();
+    } else if (opts.levelSelect) {
+        menu.showLevelSelect();
     } else {
         menu.showMain();
     }
@@ -396,6 +406,8 @@ int main(int argc, char** argv) {
             dvk::readMenuInput(input, input.cursorPosition() * pointerScale), menuFramebuffer.x,
             menuFramebuffer.y);
         switch (menuAction) {
+            case dvk::MenuAction::ChooseLevel: menu.showLevelSelect(); break;
+            case dvk::MenuAction::Back: menu.showMain(); break;
             case dvk::MenuAction::Start:
                 session.start();
                 menu.hide();
