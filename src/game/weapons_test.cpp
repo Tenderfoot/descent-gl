@@ -443,6 +443,118 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
                   rig.state.player.shields, rig.state.player.deaths);
     }
 
+    // --- every weapon throws a muzzle flash ----------------------------------
+    //
+    // The flash is what makes firing-to-see a tactic in a mine with no ambient
+    // light, so it has to carry a light and not just a billboard.
+    for (int w = 0; w < sim::WeaponCount; ++w) {
+        rig.reset();
+        rig.state.player.headlightOn = false;
+
+        sim::FireControls controls;
+        controls.selectWeapon = w;
+        controls.primary = w <= sim::WeaponVulcan;
+        controls.secondary = w >= sim::WeaponConcussion;
+        rig.run(1, controls);
+
+        int lit = 0;
+        float brightest = 0.0f;
+        for (const sim::Effect& e : rig.state.effects.items) {
+            if (!e.alive || e.lightIntensity <= 0.0f) continue;
+            ++lit;
+            brightest = std::max(brightest, e.lightIntensity);
+        }
+        ok &= expect(lit >= 1, "firing spawned a flash carrying a light");
+
+        const sim::WeaponDef& def = rig.cfg.weapons[static_cast<size_t>(w)];
+        ok &= expect(brightest > def.lightIntensity,
+                     "the flash is brighter than the bolt it launched");
+
+        // And it is gone again quickly: a muzzle flash that lingers reads as a
+        // lamp on the nose of the ship. Counted within a few units of the ship,
+        // because by now the bolt has hit something and that impact flash is a
+        // lit effect too - just not this one.
+        rig.run(static_cast<int>(0.2f / kStep), sim::FireControls{});
+
+        int stillLit = 0;
+        for (const sim::Effect& e : rig.state.effects.items) {
+            if (!e.alive || e.lightIntensity <= 0.0f) continue;
+            if (glm::length(e.position - rig.ship.position) < 4.0f) ++stillLit;
+        }
+        ok &= expect(stillLit == 0, "the muzzle flash is out again within 0.2 s");
+
+        log::info("{:11} muzzle flash: {} light(s), brightest {:.1f} vs bolt {:.1f}",
+                  sim::kWeaponNames[static_cast<size_t>(w)], lit, brightest, def.lightIntensity);
+    }
+
+    // --- being hit flinches the screen, and only the screen -------------------
+    {
+        rig.reset();
+        ok &= expect(rig.state.player.hurtTimer == 0.0f, "no flinch before anything lands");
+
+        // Take a hit the way the game delivers one: a concussion missile into
+        // the wall the ship is facing, close enough that its own splash comes
+        // back. No special-cased damage call, so this also proves the flinch is
+        // wired into the real damage path.
+        rig.state.player.headlightOn = false;
+        const glm::vec3 centre = rig.level.segments[static_cast<size_t>(rig.ship.segment)].center;
+        rig.ship.position = centre;
+        // Down and a little sideways: glm::quatLookAt is degenerate when the
+        // look direction is the up vector, and straight down is exactly that.
+        rig.aimAt(centre + glm::vec3(0.35f, -1.0f, 0.0f));
+
+        const float before = rig.state.player.shields;
+        rig.held = sim::FireControls{};
+        rig.held.selectWeapon = sim::WeaponConcussion;
+        rig.held.secondary = true;
+        rig.run(1);
+        rig.held = sim::FireControls{};
+
+        const glm::vec3 shipAt = rig.ship.position;
+        const glm::vec3 shipVel = rig.ship.velocity;
+
+        // Run until it lands rather than guessing how long a slow missile takes
+        // to cross a room, so the flinch is checked while it is still on.
+        int waited = 0;
+        while (waited < 600 && rig.state.player.shields >= before) {
+            rig.run(1);
+            ++waited;
+        }
+
+        ok &= expect(rig.state.player.shields < before, "the ship's own splash took shields");
+        ok &= expect(rig.state.player.hurtTimer > 0.0f, "the hit set the flinch");
+        ok &= expect(rig.ship.position == shipAt && rig.ship.velocity == shipVel,
+                     "the flinch did not move the ship");
+
+        rig.run(static_cast<int>((sim::kHurtFlashTime + 0.05f) / kStep));
+        ok &= expect(rig.state.player.hurtTimer == 0.0f, "the flinch faded out");
+        log::info("damage flinch: {:.0f} shields lost, faded in {:.2f}s", before -
+                  rig.state.player.shields, sim::kHurtFlashTime);
+    }
+
+    // --- a missile kicks the camera, a gun does not ---------------------------
+    {
+        rig.reset();
+        sim::FireControls laser;
+        laser.selectWeapon = sim::WeaponLaser;
+        laser.primary = true;
+        rig.run(1, laser);
+        ok &= expect(rig.state.player.recoilTimer == 0.0f, "the laser does not kick");
+
+        rig.reset();
+        sim::FireControls missile;
+        missile.selectWeapon = sim::WeaponConcussion;
+        missile.secondary = true;
+        const glm::vec3 velBefore = rig.ship.velocity;
+        rig.run(1, missile);
+        ok &= expect(rig.state.player.recoilTimer > 0.0f, "the missile kicked");
+        ok &= expect(rig.ship.velocity == velBefore, "the kick did not push the ship");
+
+        rig.run(static_cast<int>((sim::kRecoilTime + 0.05f) / kStep), sim::FireControls{});
+        ok &= expect(rig.state.player.recoilTimer == 0.0f, "the kick faded out");
+        log::info("missile kick: {:.2f}s, ship velocity unchanged", sim::kRecoilTime);
+    }
+
     log::info("weapons test: {}", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

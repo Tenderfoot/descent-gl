@@ -384,6 +384,17 @@ int main(int argc, char** argv) {
         // The mine coming apart. Driven from wall-clock rather than the sim, so
         // the shake is smooth at any frame rate and never accumulates into the
         // ship's actual position.
+        // A missile leaving the tube shoves the view back, and only the view:
+        // the ship's own motion is the simulation's business and a camera
+        // effect must not reach into it. Squared so it snaps and then eases,
+        // which reads as a shove rather than a wobble.
+        if (cur.combat.player.recoilTimer > 0.0f) {
+            const float k = cur.combat.player.recoilTimer / dvk::sim::kRecoilTime;
+            const glm::vec3 back =
+                glm::mat3_cast(rs.shipOrientation) * glm::vec3(0.0f, 0.0f, 1.0f);
+            rs.shakeOffset += back * (0.55f * k * k);
+        }
+
         if (cur.game.shake > 0.0f) {
             const auto t = static_cast<float>(clock.seconds());
             const float amp = cur.game.shake * 0.9f;
@@ -533,6 +544,7 @@ int main(int argc, char** argv) {
         hud.message = cur.game.endReason;
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
+        hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         hud.robotsTotal = cur.game.robotsAtStart;
 
         if (automap.open) {

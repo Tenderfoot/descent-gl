@@ -602,6 +602,13 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                         p.lightRadius = 14.0f;
                         p.lightIntensity = 1.8f;
                         p.owner = ri;
+
+                        // The same flash the player's guns make. In a black
+                        // corridor this is often the first thing that tells the
+                        // player where a robot is - before the bolt, before the
+                        // eyes.
+                        spawnEffect(combat, p.position, p.segment, def.color, 0.9f, 0.05f, 21.0f,
+                                    4.5f);
                     }
 
                     --robot.burstLeft;

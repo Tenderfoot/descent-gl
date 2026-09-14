@@ -117,7 +117,17 @@ struct PlayerState {
     bool nextWingRight = false;
     bool headlightOn = true;
     int deaths = 0;
+
+    // Feel, not state anything reads back. Both decay in stepCombat and both
+    // only ever leave the simulation through RenderState and HudData: the
+    // screen flinches, the ship does not.
+    float hurtTimer = 0.0f;     // seconds since the hull was last hit
+    float recoilTimer = 0.0f;   // seconds since a missile shoved the ship
 };
+
+// How long the hit tint and the missile kick take to fade out.
+inline constexpr float kHurtFlashTime = 0.45f;
+inline constexpr float kRecoilTime = 0.18f;
 
 // Health of each level object, indexed the same as Level::objects. Zero or
 // below is destroyed.
@@ -161,6 +171,13 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
                 const SolidDoors* doors = nullptr);
+
+// A short-lived additive billboard with a light: a muzzle flash, an impact, an
+// explosion. Public because robots fire too, and a robot's muzzle flash is the
+// same thing as the player's.
+void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
+                 const glm::vec3& color, float size, float lifetime, float lightRadius,
+                 float lightIntensity);
 
 // Resets the player after a death. Returns true if a death happened this step.
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,

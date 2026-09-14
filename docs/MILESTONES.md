@@ -802,6 +802,35 @@ software-rendering numbers and the full-size ones are bounded by the loop's
 check. And the reveal screenshot proves the map *renders* the graph; the loop
 test, not the screenshot, is what proves it only reveals what was found.
 
+### Feel: muzzle flash, hit flinch, missile kick ✅
+
+Three effects that exist to be felt. Each lands on `RenderState` or `HudData`
+and never on the body, and each test asserts that.
+
+| Check | Result |
+| --- | --- |
+| Every weapon throws a flash carrying a light | ✅ 4 of 4 |
+| The flash is brighter than the bolt it launched | ✅ laser 6.5 vs 2.6, vulcan 3.8 vs 1.5, concussion and homing 7.5 vs 3.0 |
+| The flash is out again within 0.2 s | ✅ (counted near the ship — by then the bolt's impact flash is lit too, at the wall) |
+| Robot fire flashes as well | ✅ caught on the step a gunner fires |
+| Being hit sets the flinch | ✅ through the real damage path, a missile's own splash off the floor |
+| The flinch does not move the ship | ✅ position and velocity unchanged |
+| The flinch fades | ✅ zero after 0.45 s |
+| A missile kicks, a gun does not | ✅ laser leaves `recoilTimer` at zero |
+| The kick does not push the ship | ✅ velocity unchanged |
+| The tint draws with the HUD hidden | ✅ screenshot under `--no-ui` after robots landed a hit |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test`, Debug, GL errors fatal | ✅ completes, no GL error or fatal lines |
+| Step rate, 640x360, 500 frames | **120.0 / 120** |
+
+What these numbers do **not** cover: whether the flash actually reads as
+firing-to-see in a dark corridor. That is an aesthetic judgement at a real frame
+rate, and software rendering at ~13 fps cannot make it. The same goes for the
+final tint smoothing — the screenshot that caught a hit was of the earlier
+four-band version; going to eight bands changed only the band count and the
+per-band alpha, and I did not land another hit frame to re-capture it. Both want
+the dev machine.
+
 ### Housekeeping done on the way
 
 `src/game/bindings.h` now holds the discrete keys too — F1, F3, H, F, Tab,

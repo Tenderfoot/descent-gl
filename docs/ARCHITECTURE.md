@@ -910,6 +910,52 @@ and `--stencil-view` — and it touches only what the renderer is handed, never
 
 ---
 
+## Feel: flashes, flinches and kicks (M8)
+
+Three effects that exist to be felt rather than read. All three share one rule:
+**they land on `RenderState` and `HudData`, never on the body.** A camera effect
+that moves the ship is a physics bug wearing a costume, and the tests assert the
+ship's position and velocity are untouched by each of them.
+
+### Muzzle flash
+
+Firing spawns a short `Effect` at the fire point, carrying a light. It is scaled
+from the weapon's **own** bolt light rather than from a constant — radius x1.5,
+intensity x2.5 — so a vulcan pop is small, a missile launch throws real light
+down the corridor, and a weapon retuned in `weapons.json` brings its flash with
+it.
+
+It lasts 0.05 s rather than literally one frame. At 120 Hz a single step is 8 ms,
+which at any real frame rate is as likely to be missed entirely as seen; 0.05 s
+is long enough to land on a frame and still be gone before it reads as a lamp
+bolted to the nose of the ship.
+
+Robots flash too, from the same `spawnEffect` — which is why that function is
+public in `combat.h` rather than file-local. In a black corridor a robot's muzzle
+flash is usually what tells the player where it is, before the bolt arrives and
+before the eyes are close enough to see.
+
+### The hit flinch
+
+`PlayerState::hurtTimer` is set wherever shields come off — both the direct hit
+and the splash path — and decays in `stepCombat`. The renderer turns it into
+bands of red at the screen edges, drawn **even when the HUD is hidden**: it is
+damage feedback rather than a readout, and a screenshot taken with `--no-ui`
+should still show the player being shot at.
+
+Eight bands of falling alpha rather than a gradient shader, because `Hud::rect`
+is a flat colour and this is on screen for under half a second. At four bands it
+reads as four rectangles, which looks like a bug rather than a flinch.
+
+### The missile kick
+
+`recoilTimer` is set only by concussion and homing, and pushes the **eye**
+backwards along the ship's forward axis, squared so it snaps and then eases. A
+gun does not kick; the test asserts the laser leaves `recoilTimer` at zero, which
+is what stops the effect creeping onto every trigger pull.
+
+---
+
 ## Robots
 
 `src/sim/robots.h`. Three types from `assets/config/robots.json`, placed in the

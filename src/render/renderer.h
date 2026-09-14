@@ -71,6 +71,12 @@ struct HudData {
     float elapsed = 0.0f;
     int robotsDestroyed = 0;
     int robotsTotal = 0;
+
+    // 1 the instant the hull is hit, 0 once the flinch has faded. Drawn even
+    // when `show` is false: it is damage feedback rather than a readout, and a
+    // screenshot taken with the HUD hidden should still show the player being
+    // shot at.
+    float damageFlash = 0.0f;
 };
 
 // The automap, gathered by the game layer for the same reason `HudData` is: the

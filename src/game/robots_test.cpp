@@ -203,12 +203,26 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
 
             const float before = rig.combat.player.shields;
             int firedSteps = 0;
+            // A robot's gun flashes like the player's, which in a black
+            // corridor is often what tells the player where it is - before the
+            // bolt arrives and before the eyes are visible. Caught on the step
+            // it fires, because the flash is out again in 0.05 s.
+            bool sawMuzzleFlash = false;
             while (rig.combat.player.shields >= before && firedSteps < 1800) {
                 rig.run(1);
                 ++firedSteps;
+                if (sawMuzzleFlash) continue;
+                for (const sim::Effect& e : rig.combat.effects.items) {
+                    if (!e.alive || e.lightIntensity <= 0.0f) continue;
+                    if (glm::length(e.position - robot->body.position) < 4.0f) {
+                        sawMuzzleFlash = true;
+                        break;
+                    }
+                }
             }
             const bool hurt = rig.combat.player.shields < before;
             ok &= expect(hurt, "a gunner's fire damaged the player's shields");
+            ok &= expect(sawMuzzleFlash, "the gunner's fire threw a muzzle flash");
             log::info("attack: shields {:.0f} -> {:.1f} after {:.2f}s at 14 units in the open",
                       before, rig.combat.player.shields, static_cast<float>(firedSteps) * kStep);
         }

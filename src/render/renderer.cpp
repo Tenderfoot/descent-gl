@@ -372,8 +372,32 @@ void Renderer::buildDoors(const RenderState& rs, const Level& level) {
 }
 
 void Renderer::buildHud(const HudData& hud) {
+    // Four bands per edge with falling alpha, because Hud::rect is a flat
+    // colour and this is cheaper and more predictable than a gradient shader
+    // for something on screen for a third of a second.
+    const auto damageTint = [&]() {
+        if (hud.damageFlash <= 0.0f) return;
+        const float w = static_cast<float>(target_.width());
+        const float h = static_cast<float>(target_.height());
+        const float depth = h * 0.16f;
+        // Eight rather than four: at four the "gradient" reads as four
+        // rectangles, which looks like a bug rather than a flinch.
+        constexpr int kBands = 8;
+        for (int b = 0; b < kBands; ++b) {
+            const float t = static_cast<float>(b) / kBands;
+            const float band = depth * (1.0f - t);
+            const glm::vec4 red(0.9f, 0.12f, 0.1f,
+                                hud.damageFlash * 0.055f * (1.0f - t * 0.5f));
+            hud_.rect(0.0f, 0.0f, w, band, red);
+            hud_.rect(0.0f, h - band, w, band, red);
+            hud_.rect(0.0f, 0.0f, band, h, red);
+            hud_.rect(w - band, 0.0f, band, h, red);
+        }
+    };
+
     if (!hud.show) {
         hud_.begin(target_.width(), target_.height());
+        damageTint();
         hud_.upload();
         return;
     }
@@ -384,6 +408,7 @@ void Renderer::buildHud(const HudData& hud) {
     // window size instead of shrinking to nothing at 4K.
     const float s = std::max(1.5f, h / 260.0f);
     hud_.begin(target_.width(), target_.height());
+    damageTint();
 
     const glm::vec4 white(1.0f, 1.0f, 1.0f, 0.92f);
     const glm::vec4 dim(0.75f, 0.8f, 0.9f, 0.8f);
