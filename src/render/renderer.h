@@ -3,6 +3,7 @@
 #include "render/gl.h"
 #include "render/billboards.h"
 #include "render/debug_lines.h"
+#include "render/gpu_timer.h"
 #include "render/hud.h"
 #include "render/level_mesh.h"
 #include "render/mesh.h"
@@ -157,8 +158,18 @@ public:
         int shadowLights = 0;      // how many of it were used
         int budgetDenied = 0;      // lights that lit but did not cast
         int billboards = 0;
+        // The heaviest single light's volume, and which light it was. M8's plan
+        // suggested capping this per light; that is deliberately not done. A
+        // truncated volume is an OPEN volume, and depth-fail counting against an
+        // open volume is exactly the bug the shadow-closure work fixed - the
+        // segment-subset optimization that left holes behind receivers. So the
+        // cap is a number to look at, not a limit to enforce: if extraction ever
+        // shows up in a profile, this says how big the problem is and where.
+        int worstVolumeTriangles = 0;
+        int worstVolumeLight = -1;
     };
     const Stats& stats() const { return stats_; }
+    const GpuTimers& timers() const { return timers_; }
 
     // What each light contributed, for the per-light debug readout.
     struct LightStats {
@@ -283,6 +294,7 @@ private:
     Billboards billboards_;
     std::unique_ptr<Shader> billboardShader_;
     Hud hud_;
+    GpuTimers timers_;
     DebugLines mapLines_;   // separate from debugLines_, which the scene owns
     std::unique_ptr<Shader> hudShader_;
 

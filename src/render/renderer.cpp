@@ -617,6 +617,7 @@ void Renderer::beginFrame(int fbWidth, int fbHeight) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     stats_ = Stats{};
+    timers_.beginFrame();
 }
 
 glm::mat4 Renderer::buildView(const RenderState& rs) const {
@@ -750,6 +751,10 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
         const ShadowVolumes::Range range = volumes_.endLight();
         ls.silhouetteEdges = volumes_.silhouetteEdges() - before;
         ls.volumeTriangles = range.count / 3;
+        if (ls.volumeTriangles > stats_.worstVolumeTriangles) {
+            stats_.worstVolumeTriangles = ls.volumeTriangles;
+            stats_.worstVolumeLight = static_cast<int>(li);
+        }
         ranges_.push_back(range);
         lightStats_.push_back(ls);
     }
@@ -883,7 +888,10 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
 
         const ShadowVolumes::Range range =
             li < ranges_.size() ? ranges_[li] : ShadowVolumes::Range{};
+        const int timed = static_cast<int>(li);
+        timers_.stencilBegin(timed);
         stencilPass(range);
+        timers_.stencilEnd(timed);
 
         if (showStencil) {
             visualiseStencil();
@@ -892,6 +900,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
 
         // Shade only the fragments the prepass decided are visible, and only
         // where the stencil balance came out zero.
+        timers_.lightBegin(timed);
         glDepthMask(GL_FALSE);
         glDepthFunc(GL_EQUAL);
         glEnable(GL_BLEND);
@@ -981,6 +990,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             wallShader_->setMat4("uModel", shipModelMatrix(rs));
             ship_->draw();
         }
+        timers_.lightEnd(timed);
     }
 
     glDisable(GL_BLEND);
@@ -1091,9 +1101,13 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     buildBillboards(rs);
     buildHud(hud);
     buildShadowVolumes(rs, walk);
+    timers_.passBegin(GpuTimers::Prepass);
     depthPrepass(rs, walk);
+    timers_.passEnd(GpuTimers::Prepass);
     lightPasses(rs, walk);
+    timers_.passBegin(GpuTimers::Unlit);
     unlitPass(rs, level, walk);
+    timers_.passEnd(GpuTimers::Unlit);
 }
 
 void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
@@ -1213,16 +1227,23 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_GEQUAL);
 
+    // Timed as the unlit pass, which is what it is: lines, no lighting, no
+    // stencil. Without this the timing panel reads as "no results" in map view.
+    timers_.passBegin(GpuTimers::Unlit);
     if (!mapLines_.empty()) {
         debugLineShader_->bind();
         mapLines_.draw();
     }
+    timers_.passEnd(GpuTimers::Unlit);
 
 }
 
 void Renderer::resolve() {
     target_.resolveToDefault();
     hudPass();
+    // After the last GL work of the frame, so the ring advances once per frame
+    // whichever view was drawn.
+    timers_.endFrame();
 }
 
 } // namespace dvk::gl

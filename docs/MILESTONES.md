@@ -831,6 +831,47 @@ four-band version; going to eight bands changed only the band count and the
 per-band alpha, and I did not land another hit frame to re-capture it. Both want
 the dev machine.
 
+### Performance instrumentation ✅ (measurement), ⬜ (the target itself)
+
+GPU timestamp queries per pass, and an allocation counter, both reported in an
+ImGui panel and on a line at exit so a headless run can see them.
+
+| Check | Result |
+| --- | --- |
+| Timestamp queries resolve | ✅ read back two frames late, no pipeline stall |
+| Per-pass breakdown, `mine01`, 640x360 | prepass **3.67 ms**, stencil **22.11**, lighting **3.03**, unlit **0.05**, total **28.87 ms** over 16 lights |
+| Most expensive light identified | ✅ light 4 at **4.53 ms** |
+| Automap view timed | ✅ **1.64 ms** unlit, everything else zero — the map is ~18x cheaper than the scene |
+| Sim step allocations, steady state | ✅ **0** on 269 of 270 frames |
+| Draw path allocations, steady state | ✅ **0** on 269 of 270 frames |
+| Negative control: one `std::vector<int>(4)` per sim step | ✅ caught — "SOME on 89 of 90 frames (worst 17)", draw path still clean |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test` | ✅ completes, no GL error or fatal lines |
+| Step rate, 640x360, 300 frames | **119.9 / 120** |
+
+The three allocations that are not zero were each traced, and none is per-frame:
+the death message being formatted by `log::info` inside `stepGame`; the render
+target's log line on the frame a resize rebuilds it; and a per-frame container
+reaching a new high-water mark, which happens once and not again — the signature
+of capacity growth rather than churn. I did not chase which container.
+
+**The 200 fps at 1440p target is not measured and cannot be here.** These numbers
+come from zink over lavapipe at 640x360 — software rasterization, where a
+fill-heavy stencil pass is pathologically slow. Stencil taking 77% of the frame
+is a property of the software rasterizer, not a prediction about the 4070 Ti, and
+anyone reading it as one will optimize the wrong thing. The instrument is what is
+verified here; the numbers are not a benchmark.
+
+Also deliberately not done: the per-light volume triangle **cap** M8's plan
+suggested. A truncated volume is an open volume, and depth-fail against an open
+volume is exactly the bug the shadow-closure work fixed. `worstVolumeTriangles`
+reports the number instead, so a cap can be sized from evidence if evidence ever
+appears. The cheap half of that suggestion was already in place: a light whose
+segment set misses the visible set does no silhouette work at all.
+
+Tracy is the agreed follow-up for the deep profiling, added on the dev machine
+where it can be confirmed working.
+
 ### Housekeeping done on the way
 
 `src/game/bindings.h` now holds the discrete keys too — F1, F3, H, F, Tab,

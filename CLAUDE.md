@@ -86,6 +86,10 @@ milestone rather than describing what the code should do:
 | `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
 | `--stencil-view` | Start in the stencil visualiser, which tints whatever the stencil marks as shadowed. Also an ImGui toggle. |
 
+Every run also ends with the last frame's GPU cost per pass and a report of how
+many heap allocations the sim step and the draw path made after a 30-frame
+warm-up. Both should read `none`; a number there is a finding, not noise.
+
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
 timestep is real: it must sit on 120 regardless of how fast frames were drawn.

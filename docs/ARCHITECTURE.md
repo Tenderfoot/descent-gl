@@ -1013,6 +1013,69 @@ deviation from the plan's "emissive eye geometry", and worth knowing about.
 
 ---
 
+## Measurement (M8)
+
+Two instruments, because M8 says to measure rather than reason, and because the
+two questions have different shapes: "where does the frame go" is an
+investigation, and "did anything allocate" is an invariant.
+
+### GPU timing
+
+`src/render/gpu_timer.h`. Every timed region is a pair of `glQueryCounter`
+calls, read back **two frames later**. Reading them in the frame they were
+issued stalls the pipeline waiting for the GPU, which makes the thing being
+measured slower than it is — the classic way to profile a renderer into a shape
+that does not exist. Three sets of queries rotate; a frame whose results are not
+ready yet is skipped rather than waited on, and the last good numbers stay on
+screen.
+
+Timed: the depth prepass, the unlit pass, and — separately — the stencil pass
+and the lighting pass of each light, up to sixteen. The automap counts as the
+unlit pass, which is what it is.
+
+The numbers appear in the `gpu timings` ImGui panel and on a line at exit, so a
+headless run reports them the way everything else in this project is reported
+rather than only existing behind a panel nobody can open without a display.
+
+### Allocation counting
+
+`src/core/alloc_count.h`. Global `operator new` is replaced with one that
+increments a counter. That is a big hammer for a small question and it is the
+only one that answers it honestly: it sees allocations from anywhere, including
+inside the standard library and inside a container that grew when nobody
+expected it to. A counter threaded through the project's own allocations would
+only ever find the ones already known about.
+
+`main` brackets the sim-step loop and the `beginFrame`-to-`resolve` span and
+reports both at exit. The first thirty frames are exempt, because pools and
+vectors reserve on their way to steady state and counting that warm-up would
+report a leak that is really a start-up cost.
+
+What it found, which is the point of having it: the steady state really is zero
+on both paths, and the exceptions are all **events** rather than churn — the
+death message being formatted inside `stepGame`, the render target's log line
+when a resize rebuilds it, a per-frame container reaching a new high-water mark.
+None of those happen every frame, which is what the invariant actually claims.
+
+### What is deliberately not capped
+
+M8's plan suggested capping per-light volume triangle counts. That is not done,
+and `Stats::worstVolumeTriangles` reports the number instead.
+
+A truncated shadow volume is an **open** volume, and depth-fail counting against
+an open volume is exactly the bug the shadow-closure work fixed: the earlier
+segment-subset optimization left holes in emitted volumes and produced black
+polygons behind receivers. Capping would reintroduce that class of failure to
+buy performance nobody has yet shown is needed. The stat says how big the
+problem would be and which light has it, so a cap can be sized from evidence if
+evidence ever appears.
+
+The cheap part of that suggestion was already in place: `buildShadowVolumes`
+skips a light entirely when no segment in its set is visible, before any
+silhouette work, and `gatherLights` orders the shadow budget by the same test.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort

@@ -14,6 +14,7 @@
 #include "game/world_test.h"
 #include "render/debug.h"
 #include "render/gl.h"
+#include "core/alloc_count.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "sim/collision.h"
@@ -227,6 +228,16 @@ int main(int argc, char** argv) {
     long long totalSteps = 0;
     int frame = 0;
     double frameMs = 0.0;
+    // Allocation instrumentation. The first frames are exempt: pools and
+    // vectors reserve on their way to steady state, and counting that warm-up
+    // would report a leak that is really a start-up cost.
+    constexpr int kAllocWarmupFrames = 30;
+    uint64_t worstSimAllocs = 0;
+    uint64_t worstDrawAllocs = 0;
+    int simAllocFrames = 0;
+    int drawAllocFrames = 0;
+    int firstSimAllocFrame = -1;
+    int firstDrawAllocFrame = -1;
     double loopEnd = 0.0;   // set on the final frame, before any screenshot write
     bool scriptFired[std::size(kResizeScript)] = {};
     int minimizedFrames = 0;
@@ -310,6 +321,7 @@ int main(int argc, char** argv) {
             automap.open = !automap.open;
         }
 
+        dvk::alloc::Scope simAllocs;
         glm::vec2 mouseDelta = input.consumeMouseDelta();
         // With the map open the mouse orbits it instead of steering. The
         // simulation is untouched either way: the ship keeps flying, robots keep
@@ -375,6 +387,16 @@ int main(int argc, char** argv) {
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
+        }
+        // CLAUDE.md says the sim step does not allocate. M8 says to instrument
+        // that rather than believe it. The first few frames are exempt: pools
+        // and vectors reserve on their way to steady state, and counting those
+        // would report a leak that is really a warm-up.
+        const uint64_t simAllocCount = simAllocs.count();
+        if (frame > kAllocWarmupFrames) {
+            worstSimAllocs = std::max(worstSimAllocs, simAllocCount);
+            simAllocFrames += simAllocCount > 0 ? 1 : 0;
+            if (simAllocCount > 0 && firstSimAllocFrame < 0) firstSimAllocFrame = frame;
         }
 
         const auto alpha = static_cast<float>(accumulator / kSimStep);
@@ -515,6 +537,7 @@ int main(int argc, char** argv) {
             dvk::sim::raycast(level, rs.shipPos, shipForward, 300.0f, rs.shipSegment);
 
         const glm::ivec2 fb = window.framebufferSize();
+        dvk::alloc::Scope drawAllocs;
         renderer.beginFrame(fb.x, fb.y);
         renderer.buildDebugLines(level, rs, contacts, noseRay);
         if (!freezeVisible) {
@@ -614,6 +637,14 @@ int main(int argc, char** argv) {
             renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
         }
         renderer.resolve();
+        // The same question for the draw path: everything from beginFrame to
+        // resolve, which is where per-frame geometry is built and submitted.
+        const uint64_t drawAllocCount = drawAllocs.count();
+        if (frame > kAllocWarmupFrames) {
+            worstDrawAllocs = std::max(worstDrawAllocs, drawAllocCount);
+            drawAllocFrames += drawAllocCount > 0 ? 1 : 0;
+            if (drawAllocCount > 0 && firstDrawAllocFrame < 0) firstDrawAllocFrame = frame;
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -683,6 +714,52 @@ int main(int argc, char** argv) {
 
         ImGui::SetNextWindowPos(ImVec2(12, 210), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(390, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("gpu timings")) {
+            const dvk::gl::GpuTimers& gt = renderer.timers();
+            const dvk::gl::Renderer::Stats& st = renderer.stats();
+            if (!gt.valid()) {
+                ImGui::TextUnformatted("waiting for the first results...");
+                ImGui::TextUnformatted("(read back two frames late, so nothing stalls)");
+            } else {
+                const float perLight = gt.stencilTotal() + gt.lightingTotal();
+                const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + perLight +
+                                    gt.pass(dvk::gl::GpuTimers::Unlit);
+                ImGui::Text("depth prepass %6.3f ms", gt.pass(dvk::gl::GpuTimers::Prepass));
+                ImGui::Text("stencil       %6.3f ms   (all lights)", gt.stencilTotal());
+                ImGui::Text("lighting      %6.3f ms   (all lights)", gt.lightingTotal());
+                ImGui::Text("unlit         %6.3f ms", gt.pass(dvk::gl::GpuTimers::Unlit));
+                ImGui::Separator();
+                ImGui::Text("gpu total     %6.3f ms", total);
+                if (gt.worstLight() >= 0) {
+                    ImGui::Text("most expensive light: %d at %.3f ms", gt.worstLight(),
+                                gt.worstLightMs());
+                }
+                ImGui::Separator();
+                ImGui::BeginChild("per light gpu", ImVec2(0, 150), true);
+                for (int li = 0; li < gt.lightCount(); ++li) {
+                    ImGui::Text("%2d  stencil %6.3f   light %6.3f", li, gt.stencil(li),
+                                gt.lighting(li));
+                }
+                ImGui::EndChild();
+            }
+            ImGui::Separator();
+            ImGui::Text("shadow casters %d   volume tris %d", st.shadowCasters,
+                        st.volumeTriangles);
+            // Reported, not enforced: truncating a volume would reopen the
+            // open-volume bug the shadow-closure work fixed.
+            ImGui::Text("heaviest volume: light %d, %d triangles", st.worstVolumeLight,
+                        st.worstVolumeTriangles);
+            ImGui::Separator();
+            const int measured = std::max(0, frame - kAllocWarmupFrames);
+            ImGui::Text("heap allocations after a %d-frame warm-up:", kAllocWarmupFrames);
+            ImGui::Text("  sim step:  %llu on %d of %d frames",
+                        static_cast<unsigned long long>(worstSimAllocs), simAllocFrames, measured);
+            ImGui::Text("  draw path: %llu on %d of %d frames",
+                        static_cast<unsigned long long>(worstDrawAllocs), drawAllocFrames,
+                        measured);
+        }
+        ImGui::End();
+
         if (ImGui::Begin("flight tuning")) {
             ImGui::TextDisabled("linear");
             ImGui::SliderFloat("forward thrust", &flight.forwardThrust, 0.0f, 200.0f, "%.1f");
@@ -949,6 +1026,38 @@ int main(int argc, char** argv) {
     if (opts.resizeTest) {
         dvk::log::info("resize-test: {} frames ({:.2f}s) skipped while minimized, excluded above",
                        minimizedFrames, minimizedSeconds);
+    }
+
+    // The last frame's GPU cost, so a headless run reports it the way every
+    // other number in this project is reported rather than only existing behind
+    // a panel nobody can open without a display.
+    {
+        const dvk::gl::GpuTimers& gt = renderer.timers();
+        if (gt.valid()) {
+            const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + gt.stencilTotal() +
+                                gt.lightingTotal() + gt.pass(dvk::gl::GpuTimers::Unlit);
+            dvk::log::info(
+                "gpu (last frame): prepass {:.3f} ms, stencil {:.3f}, lighting {:.3f}, unlit "
+                "{:.3f}, total {:.3f} ms over {} light(s); worst light {} at {:.3f} ms",
+                gt.pass(dvk::gl::GpuTimers::Prepass), gt.stencilTotal(), gt.lightingTotal(),
+                gt.pass(dvk::gl::GpuTimers::Unlit), total, gt.lightCount(), gt.worstLight(),
+                gt.worstLightMs());
+        } else {
+            dvk::log::info("gpu: no timestamp results resolved (too few frames, or unsupported)");
+        }
+    }
+
+    // Measured, not asserted. A non-zero number here is a real finding: it means
+    // something in the sim step or the draw path reached the heap on a frame
+    // after warm-up, which CLAUDE.md says does not happen.
+    const int measured = std::max(0, frame - kAllocWarmupFrames);
+    if (measured > 0) {
+        dvk::log::info(
+            "allocations after a {}-frame warm-up: sim step {} on {} of {} frames (worst {}, "
+            "first at frame {}), draw path {} on {} of {} (worst {}, first at frame {})",
+            kAllocWarmupFrames, simAllocFrames == 0 ? "none" : "SOME", simAllocFrames, measured,
+            worstSimAllocs, firstSimAllocFrame, drawAllocFrames == 0 ? "none" : "SOME",
+            drawAllocFrames, measured, worstDrawAllocs, firstDrawAllocFrame);
     }
     return 0;
 }
