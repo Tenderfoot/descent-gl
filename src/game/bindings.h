@@ -64,6 +64,7 @@ enum class Toggle {
     Flare,
     Automap,
     Capture,
+    Mute,
     Count,
 };
 
@@ -80,6 +81,7 @@ inline constexpr std::array<ToggleBinding, static_cast<size_t>(Toggle::Count)> k
     {Toggle::Flare, GLFW_KEY_F, "F"},
     {Toggle::Automap, GLFW_KEY_TAB, "Tab"},
     {Toggle::Capture, GLFW_KEY_ESCAPE, "Escape"},
+    {Toggle::Mute, GLFW_KEY_M, "M"},
 }};
 
 inline int keyFor(Toggle t) {

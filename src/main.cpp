@@ -1,3 +1,5 @@
+#include "audio/audio.h"
+#include "audio/sound_test.h"
 #include "core/input.h"
 #include "core/log.h"
 #include "core/options.h"
@@ -38,6 +40,7 @@
 #include <chrono>
 #include <cstdio>
 #include <iterator>
+#include <string>
 #include <thread>
 
 namespace {
@@ -55,6 +58,15 @@ constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kDefaultLevelPath = "assets/levels/mine01.json";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
+constexpr const char* kSoundDir = "assets/sounds";
+
+// How the ship's drive is heard. The engine loop is always running once a
+// device is open; what changes is how loud it is and how fast it is played, so
+// the throttle is audible without the loop ever restarting.
+constexpr float kEngineIdleGain = 0.16f;
+constexpr float kEngineFullGain = 0.55f;
+constexpr float kEngineIdlePitch = 0.72f;
+constexpr float kEngineFullPitch = 1.28f;
 
 // The headlight. In a game with no ambient term this is the player's primary
 // way of seeing anything at all, so it is deliberately generous: a wide enough
@@ -119,6 +131,12 @@ int main(int argc, char** argv) {
     if (opts.loopTest) {
         return dvk::runLoopTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
     }
+    // The whole audio path with no device and no sound card. Sound is the one
+    // subsystem a screenshot cannot show, so this is how a claim about it is
+    // made checkable.
+    if (opts.soundTest) {
+        return dvk::audio::runSoundTest(kSoundDir);
+    }
 
     // Every shipped asset, every run, before a window exists. A broken asset
     // then fails before anything is on screen rather than at the moment the
@@ -180,6 +198,19 @@ int main(int argc, char** argv) {
     prev = cur;
 
     dvk::sim::ContactLog contacts;
+
+    // Sound. A container with no sound card is the ordinary case for this and
+    // is a warning, not an error: the mixer still runs, nothing pulls from it,
+    // and every other number the run reports is unaffected.
+    dvk::audio::Audio audio;
+    if (!opts.noSound) {
+        audio.init(kSoundDir);
+        audio.setMasterGain(opts.volume);
+    }
+    // Filled by the simulation steps of one frame and drained once, after them.
+    // Never cleared inside the step loop: a frame that runs three steps must
+    // still hear all three.
+    dvk::sim::EventQueue soundEvents;
 
     dvk::CameraMode camera =
         opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
@@ -331,6 +362,11 @@ int main(int argc, char** argv) {
         if (input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
             automap.open = !automap.open;
         }
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Mute))) {
+            // Mute keeps the device open and the ambient channels running, so
+            // unmuting is instant and does not restart the engine mid-note.
+            audio.setMuted(!audio.muted());
+        }
 
         dvk::alloc::Scope simAllocs;
         glm::vec2 mouseDelta = input.consumeMouseDelta();
@@ -345,6 +381,7 @@ int main(int argc, char** argv) {
             mouseDelta = glm::vec2(0.0f);
         }
         bool consumedMouse = false;
+        soundEvents.clear();
         while (accumulator >= kSimStep) {
             prev = cur;
             // The whole frame's motion belongs to the first step; later steps
@@ -388,11 +425,13 @@ int main(int argc, char** argv) {
                 }
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
-                                 fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors);
+                                 fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
+                                 &soundEvents);
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
-                                 cur.ship.body, static_cast<float>(kSimStep), &solidDoors);
+                                 cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
+                                 &soundEvents);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
-                               cur.ship.body, static_cast<float>(kSimStep));
+                               cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -438,6 +477,39 @@ int main(int argc, char** argv) {
             const float flicker = 0.72f + 0.28f * std::sin(t * 26.0f) * std::sin(t * 7.3f);
             rs.staticLightScale = 1.0f - cur.game.shake * (1.0f - flicker);
         }
+
+        // --- sound -------------------------------------------------------
+        //
+        // The listener is the ship, not the camera. In chase view the camera
+        // sits several units behind the hull, and hearing the mine from back
+        // there would put the player's own guns slightly in front of them. The
+        // chase camera is a view of the ship; it is not where the pilot is.
+        //
+        // It is set before the events are submitted so that this frame's sounds
+        // are positioned against this frame's listener rather than the last
+        // one's - at 200 units/s that is the difference between a bolt sounding
+        // ahead of the ship and behind it.
+        audio.setListener(rs.shipPos, rs.shipOrientation);
+        audio.submit(soundEvents);
+
+        // The drive. Gained and pitched by speed rather than by the throttle
+        // key, so a ship coasting with the throttle released still sounds like
+        // it is moving, which is what a player watching the walls go past
+        // expects to hear.
+        {
+            const float top = std::max(1.0f, flight.maxSpeed);
+            const float k = std::clamp(rs.speed / top, 0.0f, 1.0f);
+            audio.setAmbient(dvk::audio::Ambient::Engine,
+                             kEngineIdleGain + (kEngineFullGain - kEngineIdleGain) * k,
+                             kEngineIdlePitch + (kEngineFullPitch - kEngineIdlePitch) * k);
+        }
+        // The klaxon runs for exactly as long as the countdown does. Gained by
+        // how far the mine has come apart, so it arrives under the first
+        // explosion rather than on top of it.
+        audio.setAmbient(dvk::audio::Ambient::Alarm,
+                         cur.game.phase == dvk::sim::GamePhase::Countdown
+                             ? 0.25f + 0.35f * cur.game.shake
+                             : 0.0f);
 
         rs.pickupCount = static_cast<int>(
             std::min(level.pickups.size(), static_cast<size_t>(dvk::sim::kMaxPickups)));
@@ -891,6 +963,55 @@ int main(int argc, char** argv) {
         }
         ImGui::End();
 
+        ImGui::SetNextWindowPos(ImVec2(860, 300), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("sound")) {
+            const dvk::audio::Mixer& mixer = audio.mixer();
+            ImGui::Text("device %s   %d clip(s)   %d/%d voices",
+                        opts.noSound ? "disabled"
+                                     : (audio.deviceOpen() ? "open" : "none (silent)"),
+                        static_cast<int>(audio.bank().clips.size()), mixer.activeVoices(),
+                        dvk::audio::kMaxVoices);
+            ImGui::Text("%u started, %u stolen, %u event(s), %u dropped",
+                        static_cast<unsigned>(mixer.started()),
+                        static_cast<unsigned>(mixer.stolen()), audio.totalPlayed(),
+                        audio.droppedEvents());
+
+            float volume = audio.masterGain();
+            if (ImGui::SliderFloat("volume", &volume, 0.0f, 1.0f, "%.2f")) {
+                audio.setMasterGain(volume);
+            }
+            bool isMuted = audio.muted();
+            if (ImGui::Checkbox("mute (M)", &isMuted)) audio.setMuted(isMuted);
+
+            // Editable, because the only way to tell whether a mine sounds
+            // right is to fly it while changing these. They are not saved:
+            // settling on a number means editing the default in mixer.h.
+            ImGui::SeparatorText("attenuation");
+            ImGui::SliderFloat("reference", &audio.mixer().attenuation.reference, 1.0f, 60.0f,
+                               "%.0f units");
+            ImGui::SliderFloat("maximum", &audio.mixer().attenuation.maximum, 40.0f, 500.0f,
+                               "%.0f units");
+            ImGui::SliderFloat("rolloff", &audio.mixer().attenuation.rolloff, 0.1f, 4.0f, "%.2f");
+
+            // Every cue, including the ones that have never fired: a cue
+            // sitting at zero for a whole level is the interesting case, and a
+            // list of only what has played would be the one list that cannot
+            // show it.
+            ImGui::SeparatorText("cues played");
+            ImGui::BeginChild("cue list", ImVec2(0, 180), true);
+            const auto& played = audio.played();
+            for (size_t i = 0; i < played.size(); ++i) {
+                if (played[i] == 0) {
+                    ImGui::TextDisabled("%-18s      -", dvk::sim::kCueNames[i]);
+                } else {
+                    ImGui::Text("%-18s %6u", dvk::sim::kCueNames[i], played[i]);
+                }
+            }
+            ImGui::EndChild();
+        }
+        ImGui::End();
+
         ImGui::SetNextWindowPos(ImVec2(420, 300), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("weapons")) {
@@ -1037,6 +1158,32 @@ int main(int argc, char** argv) {
     if (opts.resizeTest) {
         dvk::log::info("resize-test: {} frames ({:.2f}s) skipped while minimized, excluded above",
                        minimizedFrames, minimizedSeconds);
+    }
+
+    // What was actually heard. Sound is the one subsystem a screenshot cannot
+    // show, so a run reports it rather than leaving "the guns make a noise" as a
+    // claim about the code. A device of "none" is the normal answer in a
+    // container and is not a failure; the cue counts are produced either way,
+    // because they come from the simulation and not from the device.
+    {
+        const auto& played = audio.played();
+        // Every cue that fired, with its count, rather than a total and the
+        // loudest one. A cue that never fires is the interesting case - it means
+        // either the level never reached that situation or nothing emits it -
+        // and a summary line cannot tell those apart. This can.
+        std::string cues;
+        int distinct = 0;
+        for (size_t i = 0; i < played.size(); ++i) {
+            if (played[i] == 0) continue;
+            ++distinct;
+            if (!cues.empty()) cues += ", ";
+            cues += std::format("{} x{}", dvk::sim::kCueNames[i], played[i]);
+        }
+        dvk::log::info("sound: device \"{}\"{}, {} events over {} cue(s), {} dropped",
+                       opts.noSound ? "disabled" : (audio.deviceOpen() ? "open" : "none"),
+                       audio.muted() ? ", muted" : "", audio.totalPlayed(), distinct,
+                       audio.droppedEvents());
+        if (distinct > 0) dvk::log::info("  {}", cues);
     }
 
     // The last frame's GPU cost, so a headless run reports it the way every

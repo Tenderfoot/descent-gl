@@ -1288,3 +1288,123 @@ thing that catches a mine you cannot finish.
 E0 viewer, E1 validation parity, E2 round trip, E3 geometry, E4 entities,
 E5 authoring. 112 assertions across four suites, all of them checked against
 the real binary where the binary has an opinion.
+
+---
+
+## M9 — Sound ✅
+
+Positional sound effects, no music. `src/audio`, `src/sim/events.h`,
+`assets/sounds`, `tools/make-sounds.py`, and miniaudio vendored under
+`third_party/`.
+
+24 clips, 24 cues, 3D-positioned against the ship's own basis, driven by events
+the simulation reports rather than by anything the simulation plays.
+
+### The shape
+
+The simulation still may not touch GL, and from here it may not touch audio
+either. `stepCombat`, `stepRobots` and `stepGame` take a trailing
+`sim::EventQueue*` that is always allowed to be null; they push
+`{cue, position, segment, gain}` into it and know nothing else. `main.cpp`
+drains it once a frame. Every pre-existing headless test passes null and is
+unchanged.
+
+The mixer is ours — voice pool, inverse-distance attenuation, equal-power
+panning, soft-clipped bus — and miniaudio is used only to open a device and ask
+for samples. That is what makes `--sound-test` possible: `Mixer` has no
+dependency on miniaudio, on GLFW, or on a sound card existing.
+
+### Verified
+
+Linux container, software rendering, no sound card. `--sound-test` needs none.
+
+| Check | Result |
+| --- | --- |
+| Debug and Release both build clean | ✅ no warnings at `-Wall -Wextra -Wpedantic` |
+| All eight headless tests, both configurations | ✅ `--validate-assets --flight-test --world-test --collision-test --weapons-test --robots-test --loop-test --sound-test`, exit 0 each |
+| Clips load | ✅ 24 clips, 13.58 s total, longest 2.20 s, 2339 KiB resident |
+| Every cue and both ambient channels have a clip | ✅ 0 silent |
+| Distance attenuation is monotonic | ✅ 0.200 at 0 and at the 9-unit reference, 0.039 at 40, 0.013 at 90, 0.003 at 160 |
+| …and reaches actual zero | ✅ 0.000 past the 220-unit maximum, not a residual hiss |
+| Stereo image | ✅ source to starboard L 0.0000 / R 0.0090; to port L 0.0090 / R 0.0000; dead ahead L 0.0064 / R 0.0064 |
+| Panning is against the ship's basis, not world X | ✅ listener rolled 180° inverts the same source to L 0.0090 / R 0.0000 |
+| Voice pool under pressure | ✅ 96 requests → 32 active (cap 32), 64 stolen, no overflow |
+| Ambient channels | ✅ 1 voice after start, still 1 after re-setting (not layered), still 1 after 1.21 s — past the clip's 1.00 s, so it looped — level 0.1012, 0 after stop |
+| The bus never passes full scale | ✅ peak 1.000 with 32 explosions at once, soft-clipped not clamped |
+| Command queue overflow survives | ✅ 255 of 512 pushes accepted, 32 voices after, peak 1.000 |
+| The mix path does not allocate | ✅ none over 200 blocks with voices starting |
+| Events actually reach audio from the sim | ✅ 484 events over 8 cues in a 150-frame autofire run: `vulcan_fire x147, weapon_select x1, wall_impact x203, robot_hit x23, robot_fire x93, robot_alert x5, robot_death x1, player_hurt x11` |
+| …including the cues only the game loop reaches | ✅ `--loop-test` raises 14 of 24 and asserts six by name: `door_open x9, door_locked x18, pickup x13, key_pickup x4, reactor_destroyed x4, exit x1` |
+| No event was ever dropped for want of queue space | ✅ 0 dropped in every run |
+| Sim step and draw path still do not allocate | ✅ none on 0 of 120 frames, both |
+| Fixed timestep unaffected | ✅ 3018 steps in 25.241 s = 119.6 steps/s against 120 |
+| `--resize-test` completes | ✅ 25 frames, 591 steps, 62.9 steps/s — see below |
+| The WAVs regenerate byte-identically | ✅ `tools/make-sounds.py --check` → 0 files differ |
+| No device is not a failure | ✅ warns, reports `device "none"`, everything else unaffected |
+
+### `--resize-test` does not report 120 here, and did not before
+
+62.9 steps/s, not 120. The same run on `main` reports 61.0–62.3. The script
+forces 1920x1080 and a shadowed frame there costs ~430–500 ms under zink on
+lavapipe, which is past the loop's 0.25 s frame clamp; the reported rate is then
+bounded by the clamp rather than by the simulation, exactly as the `--size` note
+in CLAUDE.md describes. This is a property of software rendering, not of M9, and
+the check is only meaningful compared against the same run on `main`.
+
+CLAUDE.md now says so, because the instruction as written ("it completes and
+reports a step rate on 120") cannot be satisfied in the container and invites
+the next session to go looking for a regression that is not there.
+
+### A finding: the player's own death made no sound
+
+`checkPlayerDeath` looked like the place to emit `PlayerDeath`, and the cue was
+put there. It never fires: since M7, running out of shields ends the level in
+`stepGame` instead of respawning, and `checkPlayerDeath` is now reached only by
+`--weapons-test`. The cue was emitted from a function the game does not call.
+
+Nothing catches that by reading the code — the function is named for exactly
+what it appears to do. What catches it is asking a running game which cues it
+actually raised, which is why `--loop-test` now asserts six flow cues by name
+and why the exit line lists every cue that fired with its count instead of a
+total and the loudest one. A cue nothing emits and a cue whose situation never
+arose are indistinguishable from a summary.
+
+### A finding: the alloc check measured itself
+
+`--sound-test` first reported `heap: no allocation(s)` and then failed on one
+allocation in the same block. The check read `alloc::Scope::count()` *after* the
+`log::info` call that reported it, and `std::format` allocates. The counter is
+now read into a local before anything is logged.
+
+Worth recording because the same shape is available anywhere in this project
+that instruments allocations next to a log line, and the symptom — a report and
+a contradicting verdict, one line apart — reads like a threading bug.
+
+### A finding: miniaudio's null backend lies
+
+Compiled with `MA_NO_NULL`. The null backend is tried last and always succeeds,
+so without it a container with no sound card opens a device successfully and the
+game reports working sound it is not producing. With it, such a machine fails to
+open, warns once, and reports `device "none"`.
+
+### Where the sounds came from
+
+`tools/make-sounds.py`: committed, deterministic, stdlib-only, synthesised from
+oscillators and filtered noise, in the same spirit as `render/procedural.cpp`
+generating the textures. The intended source was downloaded CC0 effects; the
+container's egress policy blocks the asset hosts (opengameart.org and kenney.nl
+both refused at CONNECT), so authoring them was the option that did not involve
+committing binaries of unverifiable provenance.
+
+Nothing downstream depends on that choice. `wav.cpp` reads PCM 8/16/24/32 and
+float at any rate and any channel count, and the game loads whatever is in
+`assets/sounds/`. Any file can be swapped for a recording without touching code;
+the names are the contract, not the contents.
+
+### Not done
+
+- **No music**, by request.
+- **No occlusion.** A robot firing behind a shut door is attenuated by distance
+  alone. The segment is already carried on every event for the day that changes.
+- **No reverb and no doppler.** The clips are dry deliberately — the sense of
+  space comes from attenuation and panning, and baked-in reverb fights it.

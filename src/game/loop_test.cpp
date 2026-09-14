@@ -12,7 +12,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <format>
+#include <string>
 
 namespace dvk {
 
@@ -30,6 +33,15 @@ struct Rig {
     sim::GameState game;
     sim::Body player;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+
+    // Sound events raised over the whole test, by cue. This test is the only
+    // thing that drives doors, keys, pickups, the reactor and the exit, so it
+    // is the only place those cues can be shown to fire at all - a headless
+    // run with nobody at the controls never reaches a door.
+    sim::EventQueue events;
+    std::array<int, static_cast<size_t>(sim::Cue::Count)> cues{};
+
+    bool heard(sim::Cue cue) const { return cues[static_cast<size_t>(cue)] > 0; }
 
     void reset() {
         combat = sim::CombatState{};
@@ -56,12 +68,17 @@ struct Rig {
         sim::SolidDoors doors;
         for (int i = 0; i < steps; ++i) {
             sim::buildSolidDoors(level, game, doors);
+            events.clear();
             sim::stepCombat(level, combat, player, orientation, weapons, held, kStep, &robots,
-                            &doors);
+                            &doors, &events);
             if (withRobots) {
-                sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, &doors);
+                sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, &doors,
+                                &events);
             }
-            sim::stepGame(level, gameCfg, game, combat, robots, robotCfg, player, kStep);
+            sim::stepGame(level, gameCfg, game, combat, robots, robotCfg, player, kStep, &events);
+            for (int e = 0; e < events.count; ++e) {
+                ++cues[static_cast<size_t>(events.items[static_cast<size_t>(e)].cue)];
+            }
         }
     }
 
@@ -560,6 +577,45 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
                       rig.game.reactorPosition.z);
         } else {
             log::info("automap: no reactor on this level, sighting not checked");
+        }
+    }
+
+    // --- sound ------------------------------------------------------------
+    //
+    // Not a check of how anything sounds - that is --sound-test's job - but of
+    // whether the simulation raises the cue at all. A cue nothing emits and a
+    // cue whose situation never arose look identical from outside, and this is
+    // the only test that reaches a door, a key, the reactor and the exit.
+    {
+        std::string fired;
+        int distinct = 0;
+        for (size_t i = 0; i < rig.cues.size(); ++i) {
+            if (rig.cues[i] == 0) continue;
+            ++distinct;
+            if (!fired.empty()) fired += ", ";
+            fired += std::format("{} x{}", sim::kCueNames[i], rig.cues[i]);
+        }
+        log::info("sound cues raised: {} of {}", distinct,
+                  static_cast<int>(rig.cues.size()));
+        log::info("  {}", fired.empty() ? "none" : fired);
+
+        // The cues this test is the only thing that can reach. Each one is a
+        // situation the test above has already asserted actually happened, so a
+        // silent one here means nothing emits it, not that the level is odd.
+        static constexpr std::array<sim::Cue, 6> kFlowCues{
+            {sim::Cue::DoorOpen, sim::Cue::DoorLocked, sim::Cue::Pickup, sim::Cue::KeyPickup,
+             sim::Cue::ReactorDestroyed, sim::Cue::Exit}};
+        for (sim::Cue cue : kFlowCues) {
+            if (!rig.heard(cue)) {
+                log::error("FAILED: nothing raised the {} cue",
+                           sim::kCueNames[static_cast<size_t>(cue)]);
+                ok = false;
+            }
+        }
+        if (rig.events.dropped > 0) {
+            log::error("FAILED: {} sound event(s) dropped - the queue is too small",
+                       rig.events.dropped);
+            ok = false;
         }
     }
 

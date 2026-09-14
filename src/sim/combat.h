@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/body.h"
+#include "sim/events.h"
 #include "sim/weapons.h"
 
 #include <array>
@@ -123,7 +124,15 @@ struct PlayerState {
     // screen flinches, the ship does not.
     float hurtTimer = 0.0f;     // seconds since the hull was last hit
     float recoilTimer = 0.0f;   // seconds since a missile shoved the ship
+
+    // Rate limit for the out-of-ammo click. The trigger is read every step, so
+    // without this an empty gun clicks 120 times a second, which sounds like a
+    // fault in the program rather than like an empty gun.
+    float emptyClickTimer = 0.0f;
 };
+
+// How long after an out-of-ammo click before another one is allowed.
+inline constexpr float kEmptyClickInterval = 0.4f;
 
 // How long the hit tint and the missile kick take to fade out.
 inline constexpr float kHurtFlashTime = 0.45f;
@@ -167,10 +176,13 @@ void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& ou
 // for fire points, as a target for robot fire, and for taking splash damage.
 // `robots` may be null before M6's robots exist. `doors` is the shut-door set
 // for this step; a bolt stops at a shut door as it does at a wall.
+// `events` collects what happened for the audio layer and may be null: the
+// headless tests drive the simulation without any interest in sound, and the
+// simulation itself does not know a sound system exists. See sim/events.h.
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
-                const SolidDoors* doors = nullptr);
+                const SolidDoors* doors = nullptr, EventQueue* events = nullptr);
 
 // A short-lived additive billboard with a light: a muzzle flash, an impact, an
 // explosion. Public because robots fire too, and a robot's muzzle flash is the
@@ -181,6 +193,6 @@ void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
 
 // Resets the player after a death. Returns true if a death happened this step.
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
-                      glm::quat& shipOrientation);
+                      glm::quat& shipOrientation, EventQueue* events = nullptr);
 
 } // namespace dvk::sim
