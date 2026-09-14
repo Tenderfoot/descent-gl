@@ -24,12 +24,16 @@ Options Options::parse(int argc, char** argv) {
             o.flightTest = true;
         } else if (a == "--world-test") {
             o.worldTest = true;
+        } else if (a == "--collision-test") {
+            o.collisionTest = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {
             o.wireframeVolumes = true;
         } else if (a == "--stencil-view") {
             o.stencilView = true;
+        } else if (a == "--debug-lines") {
+            o.debugLines = true;
         } else if (a == "--size" && i + 2 < argc) {
             o.width = std::atoi(argv[++i]);
             o.height = std::atoi(argv[++i]);

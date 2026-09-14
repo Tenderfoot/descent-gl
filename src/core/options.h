@@ -22,11 +22,17 @@ namespace dvk {
 //   --segment N         start in segment N's centre instead of at the
 //                       player start, so a screenshot can be taken anywhere
 //                       in the mine without flying there
+//   --collision-test    fly the ship into every wall from every direction at
+//                       max speed and check it never escapes, cross-check the
+//                       ray and sweep queries, and walk every portal both
+//                       ways, then exit. Needs no window and no GL.
 //   --wireframe-volumes start with shadow volumes drawn as wireframe (also an
 //                       ImGui toggle), so the extrusion can be screenshotted
 //                       rather than inferred from whether shadows look right
 //   --stencil-view      start in the stencil visualiser (also an ImGui
 //                       toggle): tints whatever the stencil marks as shadowed
+//   --debug-lines       start with wall normals, contact points and the nose
+//                       raycast drawn (all also ImGui toggles)
 //   --size W H          window size. Mostly for software-rendering
 //                       verification, where the full-size frame is slower
 //                       than the loop's 0.25 s frame clamp and the reported
@@ -39,9 +45,11 @@ struct Options {
     bool chase = false;
     bool flightTest = false;
     bool worldTest = false;
+    bool collisionTest = false;
     int startSegment = -1;
     bool wireframeVolumes = false;
     bool stencilView = false;
+    bool debugLines = false;
     int width = 1600;
     int height = 900;
 

@@ -73,12 +73,12 @@ void stepShip(ShipState& s, const ShipControls& c, const FlightConfig& cfg, floa
         c.lift * cfg.liftThrust,
         -c.thrust * cfg.forwardThrust,   // forward is -Z
     };
-    s.velocity += (s.orientation * localAccel) * dt;
+    s.body.velocity += (s.orientation * localAccel) * dt;
 
-    s.velocity *= decay(cfg.linearDamping, dt);
-    s.velocity = clampLength(s.velocity, cfg.maxSpeed);
+    s.body.velocity *= decay(cfg.linearDamping, dt);
+    s.body.velocity = clampLength(s.body.velocity, cfg.maxSpeed);
 
-    s.position += s.velocity * dt;
+    s.body.position += s.body.velocity * dt;
 }
 
 } // namespace dvk::sim

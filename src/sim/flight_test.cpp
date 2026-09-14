@@ -45,10 +45,10 @@ int runFlightTest(const char* configPath) {
     while (t < kMaxSeconds) {
         stepShip(s, full, cfg, kStep);
         t += kStep;
-        if (spinUp < 0.0f && glm::length(s.velocity) >= target) spinUp = t;
+        if (spinUp < 0.0f && glm::length(s.body.velocity) >= target) spinUp = t;
         if (spinUp >= 0.0f) break;
     }
-    const float topSpeed = glm::length(s.velocity);
+    const float topSpeed = glm::length(s.body.velocity);
 
     // --- coast down ------------------------------------------------------
     const ShipControls idle;
@@ -58,7 +58,7 @@ int runFlightTest(const char* configPath) {
     while (t < kMaxSeconds) {
         stepShip(s, idle, cfg, kStep);
         t += kStep;
-        if (glm::length(s.velocity) <= stopped) {
+        if (glm::length(s.body.velocity) <= stopped) {
             coast = t;
             break;
         }

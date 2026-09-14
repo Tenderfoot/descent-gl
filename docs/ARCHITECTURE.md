@@ -485,6 +485,86 @@ visible stay in agreement.
 
 ---
 
+## Collision and the query API
+
+`src/sim/collision.h`. A `Body` is a position, a velocity, a radius and a
+segment. The ship is one; robots, projectiles and debris become Bodies later.
+**Collision is sphere-based and only sphere-based** — a 6DOF shooter's ships and
+robots are compact and the mine is large flat faces, so an oriented box costs
+more in cases to get wrong than it buys in fit.
+
+### The resolve loop
+
+Each step, after integration: push the sphere out of any wall it is inside,
+remove the inward component of its velocity so it slides, repeat up to four
+times. Corners need more than one pass, because resolving against one wall can
+push the body into another.
+
+Two details carry the whole thing:
+
+- **The push is away from the closest point on the triangle, not along the
+  triangle's normal.** On a face they agree; on an edge or a corner they do not,
+  and using the normal there slides the body along the wall instead of off it.
+  That is exactly the case where a sphere resting on a triangle's edge falls
+  through. `closestPointOnTriangle` in `src/sim/geometry.h` handles the face,
+  the three edges and the three vertices separately for the same reason.
+- **The candidate set is the body's segment plus every segment through one of
+  its portals.** A body that crossed a portal mid-step is up against the
+  neighbour's walls, not its own, and a body wider than a portal has to be
+  stopped by the rim rather than squeezed through it.
+
+Only the inward part of the velocity is removed, so the tangential part
+survives and the ship slides. While in contact, `wallScrape` damping bleeds
+speed, so grinding along a wall costs something.
+
+### Queries
+
+`raycast` walks the segment graph: test the current segment's walls, and on
+leaving through a portal continue into the neighbour. `sweepSphere` does the
+same for a sphere and is what M5's projectiles move along, so a bolt crossing
+several segments in one step cannot pass through a wall.
+
+The sweep uses **conservative advancement** — step forward by the distance to
+the nearest wall, which can never step past it — rather than the analytic
+swept-sphere test. The analytic form is faster in the worst case but has
+separate face, edge and vertex branches, and those branches are where a
+projectile system finds its bugs. This form is a handful of lines, cannot tunnel
+by construction, and is deterministic. Its weakness is grazing contact, where it
+converges slowly and gives up, reporting no hit — which for a projectile means
+it keeps flying, the safe answer.
+
+Neither query allocates.
+
+### `--collision-test`, and two wrong oracles
+
+The test flies the ship into every wall of the level from all 26 face, edge and
+corner directions at max speed, re-applying full throttle every step so the body
+is pressed into the wall continuously rather than bouncing off once. It also
+slides along every wall at 45°, walks every portal from both sides, and
+cross-checks both queries.
+
+The interesting part was the oracle — "is this point inside the mine?" — which
+was wrong twice before it was right:
+
+1. **`findSegment`.** It walks the segment graph testing one averaged plane per
+   side. That is the cheap traditional test and it is approximate for a side
+   that is not planar, which every side in this format may be. It reported 125
+   of 364 raycasts as disagreeing.
+2. **Nearest wall triangle, which side of it.** Wrong at a *convex* edge, where
+   the mine's surface folds towards the interior — as it does at the inside of
+   every bend. Beyond such an edge the nearest point is *on* the edge, and the
+   direction back to the query point has a negative dot with both adjacent
+   faces' normals, so an interior point reads as outside. Nine false escapes.
+3. **Ray parity.** The wall union is one closed surface (M3 validates that), so
+   a ray from an interior point crosses it an odd number of times. Three
+   deliberately off-axis directions and a majority vote, because a single ray
+   that grazes an edge double-counts it. Zero false anything.
+
+The collision code was correct throughout. **If a test disagrees with the code,
+the test is a suspect too** — and here it was the culprit twice running.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort

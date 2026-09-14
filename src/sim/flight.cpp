@@ -50,6 +50,8 @@ FlightConfig loadFlightConfig(const std::string& path) {
     get(j, "angularDamping", cfg.angularDamping);
     get(j, "maxAngularSpeed", cfg.maxAngularSpeed);
     get(j, "invertPitch", cfg.invertPitch);
+    get(j, "shipRadius", cfg.shipRadius);
+    get(j, "wallScrape", cfg.wallScrape);
 
     log::info("flight config '{}' loaded", path);
     return cfg;
@@ -69,6 +71,8 @@ bool saveFlightConfig(const std::string& path, const FlightConfig& cfg) {
         {"angularDamping", cfg.angularDamping},
         {"maxAngularSpeed", cfg.maxAngularSpeed},
         {"invertPitch", cfg.invertPitch},
+        {"shipRadius", cfg.shipRadius},
+        {"wallScrape", cfg.wallScrape},
     };
 
     std::ofstream out(path);

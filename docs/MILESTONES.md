@@ -367,6 +367,65 @@ the clamp, the rate sits on 120. On the dev machine's GPU none of this arises.
 
 ---
 
-## M4 — Collision ⬜
+## M4 — Collision ✅
+
+Sphere-versus-segment collision with sliding, and the ray and sweep queries
+every later milestone consumes. No gameplay change beyond the ship no longer
+passing through walls.
+
+### Verified
+
+`--collision-test` runs the real resolve loop at the real fixed rate with no
+window and no GL. Identical results in Debug and Release:
+
+| Check | Result |
+| --- | --- |
+| **Containment** | **364 trials — 14 segments × 26 directions × 3 s of sustained full throttle at 20 u/s — 0 escapes** |
+| Sliding | 56 walls entered at 45°, **0 caught**; every one covered more than a quarter of free-flight distance in a second |
+| Portals | 28 crossings, every portal from both sides, **0 failed** |
+| Raycast | 364 rays, 0 missed, **0 disagreed** with marching; worst error 0.050 units, which is the marching step size |
+| Swept sphere | 364 sweeps, all 364 stopped short of the ray as they must, **0 passed through a wall the ray hit** |
+| Debug views | wall normals, contact points and the nose raycast all draw (`--debug-lines`) |
+| Debug / Release build clean | ✅ no warnings |
+| `--world-test`, `--flight-test` | ✅ PASS in both configs |
+| `--resize-test` | ✅ completes, both configs |
+| Step rate, 640×360, Release, 300 frames | **120.0 / 120** |
+
+The 26 directions are the face, edge and corner directions of a cube, so
+"straight at a wall", "straight at an edge" and "straight at a corner" are all
+covered rather than sampled.
+
+### The bug hunt that wasn't
+
+The first run reported 5 escapes and 125 of 364 raycasts disagreeing with an
+independent method. Both were the **test's** fault, not the collision's:
+
+1. The oracle started as `findSegment`, which walks the segment graph using one
+   averaged plane per side. That is approximate for a non-planar side, and every
+   side in this format may be non-planar. Replacing it dropped the raycast
+   disagreements from 125 to 2.
+2. The replacement was "nearest wall triangle, which side of it" — wrong at a
+   convex edge, where the surface folds towards the interior as it does at the
+   inside of every bend. A point in the wedge beyond such an edge has a negative
+   dot with *both* adjacent faces' normals and reads as outside. Nine false
+   escapes, and a probe showed the culprit exactly: a point genuinely inside
+   segment 3 whose nearest wall was segment 1's front face, 8.7 units away and
+   facing the wrong way.
+3. The third oracle is ray parity against the closed wall surface. Zero false
+   anything, and the raycast's worst disagreement is now 0.050 units — exactly
+   the marching increment, i.e. exact agreement.
+
+The collision code never changed. Worth recording because the instinct on a
+failing test is to go looking in the code under test.
+
+### Not verified here
+
+- **Feel.** "Slides without stutter" is measured as distance covered, which is
+  not the same as it feeling smooth at 144 Hz on a real machine.
+- Iconify/restore, and performance, as in every milestone so far.
+
+---
+
+## M5 — Weapons, flares, energy ⬜
 
 Not started.

@@ -42,6 +42,12 @@ struct FlightConfig {
     float maxAngularSpeed = 4.0f;      // rad/s
 
     bool invertPitch = false;
+
+    // Collision, tunable alongside the flight feel because that is how it is
+    // judged: a radius that is too large makes corridors feel tight, and scrape
+    // damping decides whether grinding a wall costs you the race.
+    float shipRadius = 1.6f;
+    float wallScrape = 2.5f;   // 1/s, applied only while in contact
 };
 
 // Reads the config, falling back to the defaults above for any field the file

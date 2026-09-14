@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gl.h"
+#include "render/debug_lines.h"
 #include "render/level_mesh.h"
 #include "render/mesh.h"
 #include "render/model.h"
@@ -17,6 +18,10 @@
 
 namespace dvk {
 struct Level;
+namespace sim {
+struct ContactLog;
+struct RayHit;
+}
 struct Light;
 struct RenderState;
 class PortalWalk;
@@ -57,6 +62,12 @@ public:
     // it moves with the ship and its segment set is rebuilt every step.
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
                    const Light* headlight);
+
+    // Rebuilds the debug line list for this frame. Call before drawScene.
+    // Everything here is a toggle because the mine is dark and these lines are
+    // the only way to see what collision believed.
+    void buildDebugLines(const Level& level, const RenderState& rs,
+                         const sim::ContactLog& contacts, const sim::RayHit& noseRay);
     void resolve();
 
     // The same view-projection the frame will be drawn with. The portal walk
@@ -89,6 +100,9 @@ public:
     bool shadowsEnabled = true;
     bool drawVolumeWireframe = false;
     bool showStencil = false;
+    bool drawWallNormals = false;
+    bool drawContacts = true;
+    bool drawNoseRay = false;
 
     size_t shipTriangleCount() const { return shipModel_.triangleCount(); }
     int levelTriangleCount() const { return levelMesh_->triangleCount(); }
@@ -129,6 +143,7 @@ private:
     std::unique_ptr<Shader> unlitShader_;
     std::unique_ptr<Shader> shadowShader_;
     std::unique_ptr<Shader> fullscreenShader_;
+    std::unique_ptr<Shader> debugLineShader_;
 
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<LevelMesh> levelMesh_;
@@ -154,6 +169,8 @@ private:
     // Parallel to active_: the ship is never an occluder for its own
     // headlight, and the headlight's own index is how that is known.
     int headlightIndex_ = -1;
+
+    DebugLines debugLines_;
 
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order

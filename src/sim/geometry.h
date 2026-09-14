@@ -4,6 +4,7 @@
 #include <glm/vec3.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace dvk::sim {
 
@@ -62,6 +63,30 @@ inline glm::vec3 closestPointOnTriangle(const glm::vec3& p, const glm::vec3& a,
     const float v = vb / denom;
     const float w = vc / denom;
     return a + ab * v + ac * w;    // face region
+}
+
+// Moller-Trumbore. Returns the distance along a unit `dir`, or a negative
+// number if the ray misses. Two-sided on purpose: a ray leaving the mine hits
+// the back of a wall, and that still counts.
+inline float rayTriangleDistance(const glm::vec3& origin, const glm::vec3& dir, const glm::vec3& a,
+                                 const glm::vec3& b, const glm::vec3& c) {
+    constexpr float kEpsilon = 1e-5f;
+    const glm::vec3 ab = b - a;
+    const glm::vec3 ac = c - a;
+    const glm::vec3 pv = glm::cross(dir, ac);
+    const float det = glm::dot(ab, pv);
+    if (std::abs(det) < kEpsilon) return -1.0f;
+
+    const float inv = 1.0f / det;
+    const glm::vec3 tv = origin - a;
+    const float u = glm::dot(tv, pv) * inv;
+    if (u < 0.0f || u > 1.0f) return -1.0f;
+
+    const glm::vec3 qv = glm::cross(tv, ab);
+    const float v = glm::dot(dir, qv) * inv;
+    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+
+    return glm::dot(ac, qv) * inv;
 }
 
 inline float distanceToTriangle(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b,

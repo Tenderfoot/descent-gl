@@ -4,6 +4,7 @@
 #include "game/level.h"
 #include "game/state.h"
 #include "game/visibility.h"
+#include "sim/collision.h"
 #include "render/camera.h"
 #include "render/procedural.h"
 
@@ -56,6 +57,8 @@ Renderer::Renderer(const Level& level) {
     shadowShader_ = std::make_unique<Shader>("shaders/shadow.vert", "shaders/shadow.frag");
     fullscreenShader_ =
         std::make_unique<Shader>("shaders/fullscreen.vert", "shaders/fullscreen.frag");
+    debugLineShader_ =
+        std::make_unique<Shader>("shaders/debugline.vert", "shaders/debugline.frag");
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
     levelMesh_ = std::make_unique<LevelMesh>(level);
@@ -139,6 +142,43 @@ void Renderer::gatherLights(const Level& level, const Light* headlight) {
         headlightIndex_ = static_cast<int>(active_.size());
         active_.push_back(headlight);
     }
+}
+
+void Renderer::buildDebugLines(const Level& level, const RenderState& rs,
+                               const sim::ContactLog& contacts, const sim::RayHit& noseRay) {
+    debugLines_.clear();
+
+    if (drawWallNormals && rs.shipSegment >= 0 && rs.shipSegment < level.segmentCount()) {
+        const int first = level.wallFirst[static_cast<size_t>(rs.shipSegment)];
+        const int count = level.wallCount[static_cast<size_t>(rs.shipSegment)];
+        for (int wi = first; wi < first + count; ++wi) {
+            const WallTriangle& w = level.walls[static_cast<size_t>(wi)];
+            const glm::vec3 centre = (w.p[0] + w.p[1] + w.p[2]) / 3.0f;
+            debugLines_.line(centre, centre + w.normal * 2.5f, glm::vec3(0.2f, 0.8f, 1.0f));
+        }
+    }
+
+    if (drawContacts) {
+        for (int i = 0; i < contacts.count; ++i) {
+            const sim::Contact& c = contacts.contacts[static_cast<size_t>(i)];
+            debugLines_.cross(c.point, 0.5f, glm::vec3(1.0f, 0.25f, 0.15f));
+            debugLines_.line(c.point, c.point + c.normal * 2.0f, glm::vec3(1.0f, 0.6f, 0.1f));
+        }
+    }
+
+    if (drawNoseRay) {
+        const glm::vec3 forward = glm::mat3_cast(rs.shipOrientation) * glm::vec3(0.0f, 0.0f, -1.0f);
+        const glm::vec3 origin = rs.shipPos;
+        const glm::vec3 end = noseRay.hit ? noseRay.point : origin + forward * 120.0f;
+        debugLines_.line(origin + forward * 2.0f, end, glm::vec3(0.3f, 1.0f, 0.4f));
+        if (noseRay.hit) {
+            debugLines_.cross(noseRay.point, 0.8f, glm::vec3(1.0f, 1.0f, 0.2f));
+            debugLines_.line(noseRay.point, noseRay.point + noseRay.normal * 3.0f,
+                             glm::vec3(1.0f, 1.0f, 0.2f));
+        }
+    }
+
+    debugLines_.upload();
 }
 
 void Renderer::beginFrame(int fbWidth, int fbHeight) {
@@ -478,6 +518,15 @@ void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
         for (const ShadowVolumes::Range& range : ranges_) volumes_.draw(range);
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+    }
+
+    if (!debugLines_.empty()) {
+        // Depth-tested so a line behind a wall is hidden, which is what makes
+        // them readable as being in the world rather than drawn over it.
+        debugLineShader_->bind();
+        glDepthMask(GL_FALSE);
+        debugLines_.draw();
         glDepthMask(GL_TRUE);
     }
 

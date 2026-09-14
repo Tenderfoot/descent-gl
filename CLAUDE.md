@@ -72,6 +72,8 @@ milestone rather than describing what the code should do:
 | `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
 | `--segment N` | Start in segment N's centre rather than at the player start, so a screenshot can be taken anywhere in the mine without flying there. |
 | `--size W H` | Window size. Mostly for software-rendering verification: at full size a shadowed frame can be slower than the loop's 0.25 s frame clamp, and the reported step rate is then bounded by the clamp rather than by the simulation. |
+| `--collision-test` | Fly the ship into every wall from all 26 face, edge and corner directions at max speed and check it never escapes; cross-check the ray and sweep queries against an independent method; walk every portal both ways. Exits non-zero on any failure. Needs no window and no GL. |
+| `--debug-lines` | Start with wall normals, contact points and the nose raycast drawn. Also ImGui toggles. |
 | `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
 | `--stencil-view` | Start in the stencil visualiser, which tints whatever the stencil marks as shadowed. Also an ImGui toggle. |
 

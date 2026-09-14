@@ -7,11 +7,13 @@
 #include "game/level.h"
 #include "game/state.h"
 #include "game/visibility.h"
+#include "game/collision_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
 #include "render/gl.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
+#include "sim/collision.h"
 #include "sim/flight.h"
 #include "sim/flight_test.h"
 #include "sim/ship.h"
@@ -88,6 +90,9 @@ int main(int argc, char** argv) {
     if (opts.worldTest) {
         return dvk::runWorldTest(kLevelPath);
     }
+    if (opts.collisionTest) {
+        return dvk::runCollisionTest(kLevelPath, kFlightConfigPath);
+    }
 
     dvk::Window::Desc desc;
     desc.width = opts.width;
@@ -117,6 +122,8 @@ int main(int argc, char** argv) {
     dvk::gl::Renderer renderer(level);
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
     renderer.showStencil = opts.stencilView;
+    renderer.drawWallNormals = opts.debugLines;
+    renderer.drawNoseRay = opts.debugLines;
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -131,14 +138,16 @@ int main(int argc, char** argv) {
 
     dvk::SimState prev;
     dvk::SimState cur;
-    cur.ship.position = level.start.position;
+    cur.ship.body.position = level.start.position;
+    cur.ship.body.segment = level.start.segment;
     cur.ship.orientation = level.start.orientation;
-    cur.segment = level.start.segment;
     if (opts.startSegment >= 0 && opts.startSegment < level.segmentCount()) {
-        cur.segment = opts.startSegment;
-        cur.ship.position = level.segments[static_cast<size_t>(cur.segment)].center;
+        cur.ship.body.segment = opts.startSegment;
+        cur.ship.body.position = level.segments[static_cast<size_t>(opts.startSegment)].center;
     }
     prev = cur;
+
+    dvk::sim::ContactLog contacts;
 
     dvk::CameraMode camera =
         opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
@@ -241,7 +250,15 @@ int main(int argc, char** argv) {
             dvk::sim::ShipControls controls =
                 dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta);
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
-            cur.segment = dvk::trackSegment(level, cur.ship.position, cur.segment);
+
+            // Collision runs after integration, every step, and owns the
+            // segment tracking from here on: a body that has been pushed out of
+            // a wall may have crossed a portal doing it.
+            dvk::sim::CollisionConfig collision;
+            collision.scrapeDamping = flight.wallScrape;
+            cur.ship.body.radius = flight.shipRadius;
+            dvk::sim::resolveCollision(level, cur.ship.body, collision,
+                                       static_cast<float>(kSimStep), &contacts);
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
@@ -261,8 +278,15 @@ int main(int argc, char** argv) {
         headlight.segment = rs.shipSegment;
         if (headlightOn) dvk::rebuildLightSegments(level, headlight, flood);
 
+        // A ray straight out of the nose, for the debug overlay and as a live
+        // check that the query everything from M5 on depends on agrees with
+        // what is on screen.
+        const dvk::sim::RayHit noseRay =
+            dvk::sim::raycast(level, rs.shipPos, shipForward, 300.0f, rs.shipSegment);
+
         const glm::ivec2 fb = window.framebufferSize();
         renderer.beginFrame(fb.x, fb.y);
+        renderer.buildDebugLines(level, rs, contacts, noseRay);
         if (!freezeVisible) {
             walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos);
         }
@@ -301,6 +325,19 @@ int main(int argc, char** argv) {
                         camera == dvk::CameraMode::Chase ? "chase" : "first person");
             ImGui::Text("mouse captured: %s  (Escape toggles)",
                         input.mouseCaptured() ? "yes" : "no");
+            ImGui::Separator();
+            ImGui::Text("contacts %d in %d iterations", contacts.count, contacts.iterations);
+            if (noseRay.hit) {
+                ImGui::Text("nose ray: %.2f units, segment %d, triangle %d", noseRay.distance,
+                            noseRay.segment, noseRay.triangle);
+            } else {
+                ImGui::TextDisabled("nose ray: no hit");
+            }
+            ImGui::Checkbox("wall normals", &renderer.drawWallNormals);
+            ImGui::SameLine();
+            ImGui::Checkbox("contacts", &renderer.drawContacts);
+            ImGui::SameLine();
+            ImGui::Checkbox("nose ray", &renderer.drawNoseRay);
         }
         ImGui::End();
 
@@ -313,6 +350,8 @@ int main(int argc, char** argv) {
             ImGui::SliderFloat("lift thrust", &flight.liftThrust, 0.0f, 200.0f, "%.1f");
             ImGui::SliderFloat("linear damping", &flight.linearDamping, 0.1f, 12.0f, "%.2f /s");
             ImGui::SliderFloat("max speed", &flight.maxSpeed, 1.0f, 80.0f, "%.1f");
+            ImGui::SliderFloat("ship radius", &flight.shipRadius, 0.2f, 6.0f, "%.2f");
+            ImGui::SliderFloat("wall scrape", &flight.wallScrape, 0.0f, 12.0f, "%.2f /s");
             // The two numbers the defaults were actually tuned against: with
             // exponential damping a decay is visually finished at about three
             // time constants, and terminal speed is thrust / damping.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "sim/body.h"
 #include "sim/flight.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -45,9 +46,10 @@ struct ShipControls {
 // One clamped channel cannot express both: the cap would catch the leftover
 // aim velocity on the step after the swipe and eat most of the turn.
 struct ShipState {
-    glm::vec3 position{0.0f, 0.0f, 0.0f};
+    // Position, velocity, radius and segment live in the Body, because from M4
+    // the ship is one of several things the mine has to stop.
+    Body body;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
-    glm::vec3 velocity{0.0f};       // world, units/s
     glm::vec3 thrusterSpin{0.0f};   // local, rad/s, capped
     glm::vec3 aimSpin{0.0f};        // local, rad/s, uncapped
 
