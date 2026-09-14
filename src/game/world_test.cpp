@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "game/visibility.h"
+#include "sim/gameflow.h"
 #include "render/camera.h"
 #include "render/model.h"
 #include "render/shadow.h"
@@ -13,6 +14,7 @@
 #include <array>
 #include <cstdio>
 #include <format>
+#include <map>
 #include <string>
 
 namespace dvk {
@@ -69,12 +71,72 @@ Sample sampleSegment(const Level& level, PortalWalk& walk, int segment) {
     return s;
 }
 
+bool testPortalRevisit() {
+    // Two routes reach room 3 at equal depth. The first sees only its left
+    // half; the second reveals a right-hand exit to room 4. Opening a door on
+    // the second route must reveal that exit without moving the camera.
+    Level fixture;
+    fixture.segments.resize(5);
+    fixture.vertices.resize(40);
+    for (int s = 0; s < 5; ++s) {
+        for (int v = 0; v < 8; ++v) fixture.segments[s].verts[v] = s * 8 + v;
+    }
+    const auto portal = [&](int from, int side, int to, float left, float right) {
+        fixture.segments[from].sides[side].neighbour = to;
+        const glm::vec3 corners[4] = {{left, -0.5f, 0}, {right, -0.5f, 0},
+                                      {right, 0.5f, 0}, {left, 0.5f, 0}};
+        for (int c = 0; c < 4; ++c) {
+            fixture.vertices[from * 8 + kSideVertices[side][c]] = corners[c];
+        }
+    };
+    portal(0, SideBack, 1, -0.9f, -0.2f);
+    portal(0, SideFront, 2, -0.9f, 0.9f);
+    portal(1, SideFront, 3, -0.9f, -0.2f);
+    portal(2, SideFront, 3, -0.9f, 0.9f);
+    portal(3, SideFront, 4, 0.2f, 0.9f);
+    sim::DoorField doors;
+    doors.blocked[2 * SideCount + SideFront] = 1;
+    PortalWalk walk;
+    const glm::mat4 projection(1.0f);
+    walk.build(fixture, 0, projection, glm::vec3(0), &doors);
+    const bool shut = !walk.isVisible(4);
+    doors.blocked[2 * SideCount + SideFront] = 0;
+    walk.build(fixture, 0, projection, glm::vec3(0), &doors);
+    const bool opened = walk.isVisible(4);
+    doors.blocked[2 * SideCount + SideFront] = 1;
+    walk.build(fixture, 0, projection, glm::vec3(0), &doors);
+    const bool closedAgain = !walk.isVisible(4);
+    log::info("portal revisit: shut {}, opened {}, closed again {}", shut, opened, closedAgain);
+    return shut && opened && closedAgain;
+}
+
+bool volumeIsClosed(const std::vector<glm::vec4>& vertices) {
+    // Check the emitted homogeneous geometry, not merely the input mesh.
+    // Every oriented edge must be cancelled by an oppositely wound edge,
+    // including finite caps, extruded sides and caps at infinity.
+    using Point = std::array<float, 4>;
+    std::map<std::pair<Point, Point>, int> balance;
+    for (size_t t = 0; t < vertices.size(); t += 3) {
+        for (size_t e = 0; e < 3; ++e) {
+            const auto& a = vertices[t + e];
+            const auto& b = vertices[t + (e + 1) % 3];
+            Point pa{a.x, a.y, a.z, a.w}, pb{b.x, b.y, b.z, b.w};
+            if (pa == pb) continue;
+            if (pa < pb) ++balance[{pa, pb}];
+            else --balance[{pb, pa}];
+        }
+    }
+    return std::all_of(balance.begin(), balance.end(), [](const auto& edge) {
+        return edge.second == 0;
+    });
+}
+
 } // namespace
 
 int runWorldTest(const char* levelPath) {
     Level level = loadLevel(levelPath);   // fatal on any structural problem
     PortalWalk walk;
-    bool ok = true;
+    bool ok = testPortalRevisit();
 
     const int n = level.segmentCount();
 
@@ -204,17 +266,22 @@ int runWorldTest(const char* levelPath) {
         gl::Occluder mineOccluder;
         mineOccluder.reset(&mine, glm::mat4(1.0f));
 
-        std::vector<uint8_t> mask(level.segments.size(), 0);
+        std::vector<glm::vec4> volume;
+        std::vector<uint8_t> faces;
         int totalEdges = 0;
         for (size_t i = 0; i < level.lights.size(); ++i) {
             const Light& l = level.lights[i];
-            std::fill(mask.begin(), mask.end(), uint8_t{0});
-            for (int seg : l.segments) mask[static_cast<size_t>(seg)] = 1;
-            const int edges = gl::silhouetteEdgeCount(mineOccluder, l.position, &mask);
+            volume.clear();
+            const int edges = gl::appendShadowVolume(mineOccluder, l.position, volume, faces);
+            if (volume.empty() || !volumeIsClosed(volume)) {
+                log::error("light {} produced an open shadow volume", i);
+                ok = false;
+            }
             totalEdges += edges;
             log::info("  light {:2}: {:3} silhouette edges on the mine walls ({} segments)", i,
                       edges, l.segments.size());
         }
+        log::info("  checked generated volume closure for {} lights", level.lights.size());
 
         // A light with no silhouette edges anywhere casts nothing from the
         // walls, which in a mine with bends means the extraction is broken.

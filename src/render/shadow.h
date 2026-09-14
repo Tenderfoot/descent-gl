@@ -38,8 +38,8 @@ struct OccluderMesh {
     std::vector<Edge> edges;
 
     // Which segment each triangle belongs to, for the mine. -1 for a mesh that
-    // is not part of the level. Lets a light consider only the wall triangles
-    // in its own segment set.
+    // is not part of the level. Retained as source metadata; these tags must
+    // not be used to cut a closed occluder into an open subset.
     std::vector<int> triangleSegment;
 
     size_t triangleCount() const { return triangles.size(); }
@@ -71,11 +71,11 @@ private:
     std::vector<glm::vec4> worldPlane_;
 };
 
-// How many silhouette edges one light produces on one occluder. Pure CPU and
-// makes no GL call, so a headless test can report the numbers that decide
-// whether shadow volumes are doing anything at all.
-int silhouetteEdgeCount(const Occluder& occluder, const glm::vec3& lightPos,
-                        const std::vector<uint8_t>* segmentMask);
+// Pure CPU builder shared by rendering and the closure regression test.
+// Always uses the entire closed occluder; light range limits receivers, not
+// the surfaces needed to balance depth-fail counts behind those receivers.
+int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
+                       std::vector<glm::vec4>& vertices, std::vector<uint8_t>& facesLight);
 
 // Builds every light's volumes into one CPU buffer, uploads once per frame, and
 // hands back a range per light to draw.
@@ -99,11 +99,8 @@ public:
     void beginLight();
     Range endLight();
 
-    // Adds the volume cast by one occluder. `segmentMask`, when not null, is
-    // indexed by segment and limits which triangles are considered - used to
-    // restrict the mine's walls to a light's own segment set.
-    void add(const Occluder& occluder, const glm::vec3& lightPos,
-             const std::vector<uint8_t>* segmentMask);
+    // Adds the volume cast by one complete, closed occluder.
+    void add(const Occluder& occluder, const glm::vec3& lightPos);
 
     // Uploads everything built this frame. Call once, after the last light.
     void upload();

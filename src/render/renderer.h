@@ -247,7 +247,6 @@ private:
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order
     std::vector<LightStats> lightStats_;
-    std::vector<uint8_t> segmentMask_;
     std::vector<int> lit_;
 
     GLuint emptyVao_ = 0;   // for the full-screen stencil visualiser

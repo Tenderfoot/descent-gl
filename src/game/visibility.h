@@ -57,6 +57,7 @@ private:
     std::vector<int> visible_;
     std::vector<uint32_t> mark_;   // per segment, the frame it was last added
     std::vector<int> bestDepth_;   // shallowest depth it has been reached at
+    std::vector<Rect> covered_;    // conservative union of windows already traversed
     uint32_t frame_ = 0;
     int visited_ = 0;
     int crossed_ = 0;
