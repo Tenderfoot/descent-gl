@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/collision.h"
+#include "sim/lighting.h"
 #include "sim/combat.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
@@ -41,10 +42,26 @@ struct Rig {
 
     void run(int steps) {
         const sim::FireControls idle;
+        run(steps, idle);
+    }
+
+    void run(int steps, const sim::FireControls& fire) {
         for (int i = 0; i < steps; ++i) {
-            sim::stepCombat(level, combat, player, orientation, weapons, idle, kStep, &robots);
+            sim::stepCombat(level, combat, player, orientation, weapons, fire, kStep, &robots);
             sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep);
         }
+    }
+
+    // A robot can no longer pick the player out of an unlit stretch of mine, and
+    // several cases below deliberately stand the player in one - they are about
+    // what a robot DOES once it is on to the player, not about whether it
+    // notices. Turning the headlight on says plainly that the player is not
+    // hiding, and exercises the real visibility path rather than reaching past
+    // it into the robot's awareness.
+    void revealPlayer() { combat.player.headlightOn = true; }
+
+    sim::PlayerVisibility visibility() const {
+        return sim::playerVisibility(level, combat, weapons, player.position, player.segment);
     }
 
     sim::Robot* firstOfType(const char* name) {
@@ -200,6 +217,7 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             robot->body.position = centre + glm::vec3(0.0f, 0.0f, -7.0f);
             rig.player.segment = robot->body.segment;
             rig.player.position = centre + glm::vec3(0.0f, 0.0f, 7.0f);
+            rig.revealPlayer();
 
             const float before = rig.combat.player.shields;
             int firedSteps = 0;
@@ -250,6 +268,7 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             robot->body.position = centre + glm::vec3(0.0f, 0.0f, -6.0f);
             rig.player.segment = robot->body.segment;
             rig.player.position = centre + glm::vec3(0.0f, 0.0f, 6.0f);
+            rig.revealPlayer();
 
             // Whittle it down and watch for the retreat threshold.
             bool sawRetreat = false;
@@ -290,6 +309,222 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
         log::info("death: {}/12 retreated when hurt, {}/12 died, {} debris chunks, "
                   "{}/12 kills dropped something",
                   retreated, died, debrisSeen, dropped);
+    }
+
+    // --- darkness hides the player from robots that have not seen them -------
+    //
+    // Every case below stands the player somewhere genuinely unlit and asserts
+    // that first, so none of them can pass because the hiding spot turned out
+    // to be bright.
+    {
+        rig.reset();
+
+        // A robot whose own segment is dark, with the player a few units away
+        // in the same segment so line of sight is never the thing under test.
+        int slot = -1;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
+            if (!r.alive) continue;
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(r.body.segment)].center;
+            const sim::PlayerVisibility here =
+                sim::playerVisibility(rig.level, rig.combat, rig.weapons, centre, r.body.segment);
+            if (!here.visible) {
+                slot = i;
+                break;
+            }
+        }
+        ok &= expect(slot >= 0, "the level has a robot standing in the dark");
+
+        if (slot >= 0) {
+            const int segment = rig.robots.robots[static_cast<size_t>(slot)].body.segment;
+            const glm::vec3 centre = rig.level.segments[static_cast<size_t>(segment)].center;
+
+            const auto place = [&]() {
+                rig.robots.robots[static_cast<size_t>(slot)].body.position =
+                    centre + glm::vec3(0.0f, 0.0f, -5.0f);
+                rig.robots.robots[static_cast<size_t>(slot)].body.segment = segment;
+                rig.robots.robots[static_cast<size_t>(slot)].mode = sim::RobotMode::Idle;
+                rig.robots.robots[static_cast<size_t>(slot)].awareness = 0.0f;
+                rig.robots.robots[static_cast<size_t>(slot)].hasLastKnown = false;
+                rig.player.segment = segment;
+                rig.player.position = centre + glm::vec3(0.0f, 0.0f, 5.0f);
+            };
+
+            // 1. Unlit, in plain line of sight: the robot never notices.
+            place();
+            rig.combat.player.headlightOn = false;
+            const sim::PlayerVisibility hidden = rig.visibility();
+            ok &= expect(!hidden.visible, "the hiding spot really is dark");
+            log::info("hiding spot: illumination {:.3f}, visible {}", hidden.illumination,
+                      hidden.visible);
+            rig.run(240);
+            const sim::Robot& unlit = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(unlit.awareness <= 0.0f && unlit.mode == sim::RobotMode::Idle,
+                         "a robot in line of sight of an unlit player stays idle");
+
+            // 2. The same robot, same spot, headlight on: it notices at once.
+            place();
+            rig.revealPlayer();
+            ok &= expect(rig.visibility().visible, "the headlight makes the player visible");
+            rig.run(240);
+            const sim::Robot& lamp = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(lamp.awareness > 0.0f,
+                         "the same robot notices a player carrying a headlight");
+
+            // 3. Already on to the player, who then goes dark: it keeps coming.
+            place();
+            rig.combat.player.headlightOn = false;
+            rig.robots.robots[static_cast<size_t>(slot)].awareness = 1.0f;
+            rig.robots.robots[static_cast<size_t>(slot)].mode = sim::RobotMode::Chase;
+            ok &= expect(!rig.visibility().visible, "the player is dark again");
+            rig.run(240);
+            const sim::Robot& engaged = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(engaged.awareness > 0.0f && engaged.mode != sim::RobotMode::Idle,
+                         "an alerted robot keeps engaging a player who goes dark");
+
+            // 4. Firing gives the position away. No rule says so: the muzzle
+            //    flash is a light like any other, and it reaches the player
+            //    because the player is holding the gun.
+            place();
+            rig.combat.player.headlightOn = false;
+            rig.combat.player.weapon = sim::WeaponLaser;
+            sim::FireControls trigger;
+            trigger.primary = true;
+            bool litByOwnFire = false;
+            for (int i = 0; i < 240 && !litByOwnFire; ++i) {
+                rig.run(1, trigger);
+                if (rig.visibility().visible) litByOwnFire = true;
+            }
+            ok &= expect(litByOwnFire, "firing from the dark lights the player up");
+            const sim::Robot& shot = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(shot.awareness > 0.0f, "and the robot notices the player who fired");
+
+            // 5. A hit alerts the robot outright, which is a separate mechanism
+            //    from the flash: there is no sniping out of the dark. Worth its
+            //    own case because the two have to compose - the darkness rule
+            //    gates acquisition by sight, and must not quietly gate this.
+            place();
+            rig.combat.player.headlightOn = false;
+            for (sim::Projectile& p : rig.combat.projectiles.items) p.alive = false;
+            for (sim::Effect& e : rig.combat.effects.items) e.alive = false;
+            {
+                sim::Robot& target = rig.robots.robots[static_cast<size_t>(slot)];
+                const int p = rig.combat.projectiles.spawn();
+                sim::Projectile& bolt = rig.combat.projectiles.items[static_cast<size_t>(p)];
+                bolt.kind = sim::ProjectileKind::Laser;
+                bolt.position = target.body.position + glm::vec3(0.0f, 0.0f, 4.0f);
+                bolt.velocity = glm::vec3(0.0f, 0.0f, -120.0f);
+                bolt.segment = target.body.segment;
+                bolt.radius = 0.35f;
+                bolt.damage = 4.0f;
+                bolt.lifetime = 2.0f;
+                bolt.owner = -1;
+                // No light on it, so the only thing that can wake the robot is
+                // the hit itself.
+                bolt.lightRadius = 0.0f;
+                bolt.lightIntensity = 0.0f;
+            }
+            rig.run(60);
+            const sim::Robot& hit = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(hit.awareness > 0.0f,
+                         "a robot hit from the dark is alerted by the hit itself");
+        }
+    }
+
+    // --- awareness decays, and then the dark works again ----------------------
+    //
+    // The other half of the mechanic. Going dark does not call a robot off; you
+    // have to break line of sight and wait it out. Once you have, the dark hides
+    // you from it again exactly as it did before it ever saw you.
+    //
+    // The robot is pinned in place for this one. Left to itself an alerted robot
+    // hunts, regains line of sight and re-acquires - correct behaviour, but it
+    // makes the decay impossible to observe. Pinning it lets only awareness
+    // move, which is the thing under test.
+    {
+        rig.reset();
+
+        int slot = -1;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
+            if (!r.alive) continue;
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(r.body.segment)].center;
+            const sim::PlayerVisibility here =
+                sim::playerVisibility(rig.level, rig.combat, rig.weapons, centre, r.body.segment);
+            if (!here.visible) {
+                slot = i;
+                break;
+            }
+        }
+        ok &= expect(slot >= 0, "a robot standing in the dark to wait out");
+
+        if (slot >= 0) {
+            const int segment = rig.robots.robots[static_cast<size_t>(slot)].body.segment;
+            const glm::vec3 centre = rig.level.segments[static_cast<size_t>(segment)].center;
+            const glm::vec3 post = centre + glm::vec3(0.0f, 0.0f, -5.0f);
+
+            const auto runPinned = [&](int steps) {
+                for (int i = 0; i < steps; ++i) {
+                    rig.run(1);
+                    sim::Robot& r = rig.robots.robots[static_cast<size_t>(slot)];
+                    r.body.position = post;
+                    r.body.segment = segment;
+                    r.body.velocity = glm::vec3(0.0f);
+                }
+            };
+
+            rig.combat.player.headlightOn = false;
+            rig.robots.robots[static_cast<size_t>(slot)].body.position = post;
+            rig.robots.robots[static_cast<size_t>(slot)].body.segment = segment;
+            rig.robots.robots[static_cast<size_t>(slot)].awareness = 1.0f;
+            rig.robots.robots[static_cast<size_t>(slot)].mode = sim::RobotMode::Chase;
+
+            // Somewhere this robot genuinely cannot see. Picked by asking,
+            // rather than assumed: the level start looked out of the way and
+            // turned out to be straight down a corridor from the robot, which
+            // kept it locked on and made the decay impossible to observe.
+            int hideSegment = -1;
+            for (int si = 0; si < rig.level.segmentCount(); ++si) {
+                const glm::vec3 centre = rig.level.segments[static_cast<size_t>(si)].center;
+                const glm::vec3 delta = centre - post;
+                const float distance = glm::length(delta);
+                if (distance < 1e-3f) continue;
+                const sim::RayHit hit = sim::raycast(rig.level, post, delta / distance, distance,
+                                                     segment);
+                if (hit.hit && hit.distance < distance - 0.5f) {
+                    hideSegment = si;
+                    break;
+                }
+            }
+            ok &= expect(hideSegment >= 0, "somewhere in the mine this robot cannot see");
+            if (hideSegment < 0) hideSegment = rig.level.start.segment;
+            rig.player.segment = hideSegment;
+            rig.player.position = rig.level.segments[static_cast<size_t>(hideSegment)].center;
+            const float before = rig.robots.robots[static_cast<size_t>(slot)].awareness;
+            runPinned(600);   // five seconds against a three-second decay
+            const float after = rig.robots.robots[static_cast<size_t>(slot)].awareness;
+            log::info("awareness: {:.2f} -> {:.2f} after five seconds out of sight", before, after);
+            ok &= expect(after <= 0.0f, "awareness runs out once the player is out of sight");
+
+            // Back into the same room, still dark, still in plain sight. Having
+            // forgotten the player, it cannot pick them out again.
+            //
+            // Bolts and flashes from the fight elsewhere in the mine are lights
+            // like any other, and one still burning next to the player would
+            // light them up for reasons that have nothing to do with this test.
+            for (sim::Projectile& p : rig.combat.projectiles.items) p.alive = false;
+            for (sim::Flare& f : rig.combat.flares.items) f.alive = false;
+            for (sim::Effect& e : rig.combat.effects.items) e.alive = false;
+            rig.player.segment = segment;
+            rig.player.position = centre + glm::vec3(0.0f, 0.0f, 5.0f);
+            ok &= expect(!rig.visibility().visible, "the room is still dark");
+            runPinned(240);
+            const sim::Robot& again = rig.robots.robots[static_cast<size_t>(slot)];
+            ok &= expect(again.awareness <= 0.0f && again.mode == sim::RobotMode::Idle,
+                         "once it has forgotten you, the dark hides you from it again");
+        }
     }
 
     // --- robots stay inside the mine ------------------------------------------

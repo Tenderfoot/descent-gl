@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/collision.h"
+#include "sim/lighting.h"
 #include "sim/combat.h"
 
 #include <nlohmann/json.hpp>
@@ -431,6 +432,11 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
     CollisionConfig collision;
     collision.scrapeDamping = 1.0f;
 
+    // Asked once for the whole step, not once per robot: it is a property of
+    // where the player is standing, identical for every robot looking at them.
+    const PlayerVisibility visibility =
+        playerVisibility(level, combat, weapons, player.position, player.segment, doors);
+
     for (int ri = 0; ri < state.count; ++ri) {
         Robot& robot = state.robots[static_cast<size_t>(ri)];
         if (!robot.alive) continue;
@@ -458,7 +464,15 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             canSee = !hit.hit || hit.distance >= distance - 0.5f;
         }
 
-        if (canSee) {
+        // Line of sight is necessary but no longer sufficient. A robot that has
+        // never seen the player cannot pick them out of an unlit stretch of
+        // mine; one that is already on to them keeps hunting whether or not
+        // the player is standing in the light. That asymmetry is the whole
+        // mechanic: darkness hides you until something gives you away, and
+        // once it has, going dark again does not call the robots off - you have
+        // to break line of sight and wait out their awareness.
+        const bool alreadyOnToThem = robot.awareness > 0.0f;
+        if (canSee && (visibility.visible || alreadyOnToThem)) {
             robot.awareness = 1.0f;
             robot.lastKnown = player.position;
             robot.hasLastKnown = true;

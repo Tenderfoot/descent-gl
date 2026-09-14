@@ -1,6 +1,7 @@
 #include "sim/lighting.h"
 
 #include "sim/collision.h"
+#include "sim/combat.h"
 
 #include <glm/geometric.hpp>
 
@@ -67,6 +68,45 @@ int illuminationSamplePoints(const IlluminationQuery& query,
     return kIlluminationSamples;
 }
 
+namespace {
+
+// One light at every sample point: falloff, spot cone, then one shadow ray.
+// Shared by the level's lights and by the loose ones the simulation owns, so
+// the two can never drift into answering differently.
+void accumulateLight(Illumination& out, std::array<float, kIlluminationSamples>& perSample,
+                     const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
+                     const IlluminationQuery& query, const Level& level, const Light& light,
+                     const SolidDoors* doors) {
+    bool reaches = false;
+    bool visible = false;
+    for (int s = 0; s < sampleCount; ++s) {
+        const glm::vec3& p = samples[static_cast<size_t>(s)];
+        const float contribution = lightContribution(light, p);
+        if (contribution <= 0.0f) continue;
+        reaches = true;
+
+        if (query.shadows) {
+            const glm::vec3 toLight = light.position - p;
+            const float distance = glm::length(toLight);
+            if (distance > 1e-4f) {
+                ++out.raysCast;
+                const RayHit hit =
+                    raycast(level, p, toLight / distance, distance, query.segment, doors);
+                if (hit.hit && hit.distance < distance - kShadowSkin) continue;
+            }
+        }
+
+        visible = true;
+        perSample[static_cast<size_t>(s)] += contribution;
+        out.litMask |= static_cast<uint8_t>(1u << s);
+        out.brightest = std::max(out.brightest, contribution);
+    }
+    if (reaches) ++out.lightsReaching;
+    if (visible) ++out.lightsVisible;
+}
+
+} // namespace
+
 void addIllumination(Illumination& out, const IlluminationQuery& query, const Level& level,
                      const std::vector<Light>& lights, const SolidDoors* doors) {
     if (query.segment < 0 || query.segment >= level.segmentCount()) return;
@@ -74,10 +114,6 @@ void addIllumination(Illumination& out, const IlluminationQuery& query, const Le
     std::array<glm::vec3, kIlluminationSamples> samples{};
     const int sampleCount = illuminationSamplePoints(query, samples);
     out.samples = sampleCount;
-
-    // This list's own per-sample totals. `out` accumulates across lists, so the
-    // running value is added at the end and the lit samples are OR-ed into the
-    // mask, which is what makes two lists union rather than overwrite.
     std::array<float, kIlluminationSamples> perSample{};
 
     for (const Light& light : lights) {
@@ -89,38 +125,79 @@ void addIllumination(Illumination& out, const IlluminationQuery& query, const Le
             light.segments.end()) {
             continue;
         }
-
-        bool reaches = false;
-        bool visible = false;
-        for (int s = 0; s < sampleCount; ++s) {
-            const glm::vec3& p = samples[static_cast<size_t>(s)];
-            const float contribution = lightContribution(light, p);
-            if (contribution <= 0.0f) continue;
-            reaches = true;
-
-            if (query.shadows) {
-                const glm::vec3 toLight = light.position - p;
-                const float distance = glm::length(toLight);
-                if (distance > 1e-4f) {
-                    ++out.raysCast;
-                    const RayHit hit = raycast(level, p, toLight / distance, distance,
-                                               query.segment, doors);
-                    if (hit.hit && hit.distance < distance - kShadowSkin) continue;
-                }
-            }
-
-            visible = true;
-            perSample[static_cast<size_t>(s)] += contribution;
-            out.litMask |= static_cast<uint8_t>(1u << s);
-            out.brightest = std::max(out.brightest, contribution);
-        }
-        if (reaches) ++out.lightsReaching;
-        if (visible) ++out.lightsVisible;
+        accumulateLight(out, perSample, samples, sampleCount, query, level, light, doors);
     }
 
     float total = 0.0f;
     for (int s = 0; s < sampleCount; ++s) total += perSample[static_cast<size_t>(s)];
     out.value += total / static_cast<float>(sampleCount);
+}
+
+void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
+                   const glm::vec3& position, float radius, float intensity,
+                   const SolidDoors* doors) {
+    if (query.segment < 0 || query.segment >= level.segmentCount()) return;
+    if (radius <= 0.0f || intensity <= 0.0f) return;
+
+    std::array<glm::vec3, kIlluminationSamples> samples{};
+    const int sampleCount = illuminationSamplePoints(query, samples);
+    out.samples = sampleCount;
+    std::array<float, kIlluminationSamples> perSample{};
+
+    // A stack Light with no segment set. Constructing one allocates nothing as
+    // long as `segments` is left alone, which is why the cull is skipped rather
+    // than faked: there is nothing to cull with, and the falloff plus one
+    // shadow ray is the whole answer anyway.
+    Light light;
+    light.type = LightType::Point;
+    light.position = position;
+    light.radius = radius;
+    light.intensity = intensity;
+    accumulateLight(out, perSample, samples, sampleCount, query, level, light, doors);
+
+    float total = 0.0f;
+    for (int s = 0; s < sampleCount; ++s) total += perSample[static_cast<size_t>(s)];
+    out.value += total / static_cast<float>(sampleCount);
+}
+
+PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
+                                 const WeaponConfig& weapons, const glm::vec3& position,
+                                 int segment, const SolidDoors* doors) {
+    PlayerVisibility out;
+    out.headlight = combat.player.headlightOn;
+
+    IlluminationQuery query;
+    query.point = position;
+    query.segment = segment;
+
+    Illumination lit;
+    addIllumination(lit, query, level, level.lights, doors);
+
+    // Everything the player's own fight throws off. The muzzle flash is the one
+    // that matters most: firing from the dark lights you up for as long as the
+    // flash lasts, so a shot taken from cover gives the position away without
+    // any rule saying so.
+    for (const Projectile& p : combat.projectiles.items) {
+        if (!p.alive) continue;
+        addLooseLight(lit, query, level, p.position, p.lightRadius, p.lightIntensity, doors);
+    }
+    for (const Flare& f : combat.flares.items) {
+        if (!f.alive) continue;
+        const float remaining = f.lifetime - f.age;
+        const float fade = std::clamp(remaining / weapons.flareFade, 0.0f, 1.0f);
+        addLooseLight(lit, query, level, f.position, weapons.flareRadius,
+                      weapons.flareIntensity * fade, doors);
+    }
+    for (const Effect& e : combat.effects.items) {
+        if (!e.alive || e.lightIntensity <= 0.0f) continue;
+        const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
+        addLooseLight(lit, query, level, e.position, e.lightRadius,
+                      e.lightIntensity * std::max(0.0f, 1.0f - k), doors);
+    }
+
+    out.illumination = lit.value;
+    out.visible = out.headlight || lit.value >= kDarkThreshold;
+    return out;
 }
 
 Illumination illuminationAt(const IlluminationQuery& query, const Level& level,

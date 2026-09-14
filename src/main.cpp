@@ -1048,6 +1048,21 @@ int main(int argc, char** argv) {
                         playerLight.lightsReaching, playerLight.lightsVisible,
                         playerLight.raysCast);
 
+            // The rule the robots actually act on, which is not the same number:
+            // it is a point query rather than the hull, and a player carrying a
+            // headlight is visible whatever is falling on them. Shown next to
+            // the illumination above precisely because the two can disagree.
+            const dvk::sim::PlayerVisibility seen = dvk::sim::playerVisibility(
+                level, cur.combat, weapons, rs.shipPos, rs.shipSegment, &solidDoors);
+            int hunting = 0;
+            for (int i = 0; i < cur.robots.count; ++i) {
+                const dvk::sim::Robot& r = cur.robots.robots[static_cast<size_t>(i)];
+                if (r.alive && r.awareness > 0.0f) ++hunting;
+            }
+            ImGui::Text("robots can see the player: %s%s", seen.visible ? "YES" : "no",
+                        seen.headlight ? "  (headlight)" : "");
+            ImGui::Text("  %d robot(s) already on to them and still hunting", hunting);
+
             ImGui::Separator();
             ImGui::TextDisabled("per light: edges / volume triangles / segments");
             ImGui::BeginChild("per light", ImVec2(0, 150), true);
