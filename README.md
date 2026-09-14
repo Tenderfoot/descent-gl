@@ -9,7 +9,9 @@ A surface no light reaches is `(0,0,0)`. That is not a colour grade — it is th
 absence of a lighting pass. Darkness is the mechanic the rest of the game hangs
 off: the headlight, the flares, and firing to see what is in the room.
 
-No sound.
+Positional sound effects, no music. Every gun, robot, door and explosion is a
+point in the mine, panned and attenuated against the ship's own basis — roll
+inverted and a sound on your left moves to your right.
 
 > The repository is named `descent-gl` and the project inside it calls itself
 > `descent-vk`. It was planned for Vulkan and switched to OpenGL 4.6 before any

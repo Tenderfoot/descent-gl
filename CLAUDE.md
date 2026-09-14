@@ -2,7 +2,8 @@
 
 A recreation of Descent's core gameplay: 6DOF flight through a mine, robots,
 reactor, escape. C++20 and OpenGL 4.6 core, lit the way F.E.A.R. and Doom 3
-were — no ambient term, full blacks, hard stencil-volume shadows. No sound.
+were — no ambient term, full blacks, hard stencil-volume shadows. Positional
+sound effects, no music.
 
 The repository name says `vk` for historical reasons; the renderer is OpenGL.
 See `docs/ARCHITECTURE.md` for why.
@@ -86,10 +87,20 @@ milestone rather than describing what the code should do:
 | `--debug-lines` | Start with wall normals, contact points and the nose raycast drawn. Also ImGui toggles. |
 | `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
 | `--stencil-view` | Start in the stencil visualiser, which tints whatever the stencil marks as shadowed. Also an ImGui toggle. |
+| `--sound-test` | Load every shipped clip and run the mixer headlessly: attenuation over distance, the stereo image, the voice pool under pressure, whether a loop loops, whether the bus clips, and whether the mix path allocates. Needs no window, no GL and no sound card. |
+| `--no-sound` | Do not open a playback device. |
+| `--volume V` | Master volume, 0..1. Default 0.8. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame
 warm-up. Both should read `none`; a number there is a finding, not noise.
+
+A run also reports what it heard: every sound cue the simulation raised, with
+its count, and how many events it had to drop. A cue that never fires is the
+interesting case — it means either the level never reached that situation or
+nothing emits it — so the line lists cues rather than a total. A container with
+no sound card reports `device "none"` and is not a failure; the events are still
+counted, because they come from the simulation and not from the device.
 
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
@@ -114,6 +125,7 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 | Right mouse | Launch a missile |
 | F | Throw a flare |
 | H | Toggle the headlight |
+| M | Mute |
 | Escape | Toggle mouse capture |
 
 All of these come from one table in `src/game/bindings.h`; nothing else in the
@@ -126,12 +138,20 @@ project names a GLFW key code for gameplay.
 - **`src/core`** window, input, time, logging, options. Knows nothing about GL.
 - **`src/render`** everything OpenGL. The only place that includes `glad`, and
   it does so through `render/gl.h`.
-- **`src/sim`** physics, collision, projectiles, AI. Must not touch GL.
+- **`src/sim`** physics, collision, projectiles, AI. Must not touch GL, and
+  must not touch audio either: it reports what happened into a
+  `sim::EventQueue` (`src/sim/events.h`) and something else makes the noise.
+- **`src/audio`** WAV loading, mixing, 3D positioning, the device. The only
+  place that includes `miniaudio.h`, and it does so through `audio/device.cpp`.
+  Knows nothing about GL.
 - **Level data lives in `src/game/level.h`** and is read by both `sim` and
   `render`. It is data, not logic, so both may depend on it; the rule that
   matters is that `sim` never touches GL.
 - **`src/game`** game state and app-level glue.
-- **No per-frame heap allocation** in the sim step or the draw path.
+- **No per-frame heap allocation** in the sim step, the draw path, or the audio
+  callback. The callback has a hard deadline: an allocation there is an audible
+  click, not a slow frame. It talks to the game thread through a lock-free ring
+  and never blocks.
 - **Fixed 120 Hz simulation** with an accumulator; rendering interpolates
   between the two most recent states. `SimState` and `RenderState` are separate
   types on purpose.
@@ -144,14 +164,26 @@ project names a GLFW key code for gameplay.
 Allowlist, all from vcpkg: `glfw3`, `glad`, `glm`, `imgui` (glfw and opengl3
 bindings), `stb`, `nlohmann-json`, `tinyobjloader`.
 
+Plus one vendored, committed under `third_party/`: **miniaudio** (single header,
+public domain). It is not on vcpkg and has no usable Debian package, and it has
+to exist on both build paths, so it is in the repository rather than fetched.
+It needs no new apt package on Linux — it `dlopen`s ALSA and PulseAudio at
+runtime.
+
 **Ask before adding anything else.**
 
 ## Before you finish a milestone
 
 1. `cmake --build --preset local-debug` and `--preset local-release` both clean.
 2. Run both configurations; no `[ERROR]` or `[FATAL]` lines.
-3. Run `--resize-test`; it completes and reports a step rate on 120.
-4. Update `docs/ARCHITECTURE.md` with whatever the milestone introduced.
-5. Add the milestone to `docs/MILESTONES.md` with what was actually verified,
+3. Run `--resize-test`; it completes and reports a step rate on 120. Under
+   software rendering it will not: the script forces 1920x1080, a shadowed
+   frame there costs more than the loop's 0.25 s clamp, and the rate is then
+   bounded by the clamp. Compare against the same run on `main` rather than
+   against 120.
+4. Run every headless test: `--validate-assets --flight-test --world-test
+   --collision-test --weapons-test --robots-test --loop-test --sound-test`.
+5. Update `docs/ARCHITECTURE.md` with whatever the milestone introduced.
+6. Add the milestone to `docs/MILESTONES.md` with what was actually verified,
    including real numbers.
-6. Commit.
+7. Commit.

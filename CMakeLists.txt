@@ -23,6 +23,11 @@ endif()
 
 add_executable(descent
     src/main.cpp
+    src/audio/audio.cpp
+    src/audio/device.cpp
+    src/audio/mixer.cpp
+    src/audio/sound_test.cpp
+    src/audio/wav.cpp
     src/core/input.cpp
     src/core/alloc_count.cpp
     src/core/log.cpp
@@ -64,6 +69,10 @@ add_executable(descent
 
 target_include_directories(descent PRIVATE src)
 target_include_directories(descent SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
+# miniaudio is vendored rather than resolved through vcpkg, which has no port
+# for it, or through apt. See third_party/miniaudio/README.md. SYSTEM so its
+# four megabytes of single-header C do not answer to this project's /W4.
+target_include_directories(descent SYSTEM PRIVATE third_party/miniaudio)
 target_link_libraries(descent PRIVATE
     glfw
     glad::glad
@@ -72,6 +81,14 @@ target_link_libraries(descent PRIVATE
     nlohmann_json::nlohmann_json
     tinyobjloader::tinyobjloader
 )
+# What miniaudio's backends need. On Windows it reaches WASAPI through
+# libraries the CRT already links; on Linux it dlopen()s ALSA and PulseAudio at
+# runtime, so there is nothing to link but libdl, libm and pthreads - which is
+# also why the Linux build needs no new -dev package for sound.
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+    target_link_libraries(descent PRIVATE Threads::Threads ${CMAKE_DL_LIBS} m)
+endif()
 target_compile_definitions(descent PRIVATE
     GLFW_INCLUDE_NONE
     GLM_FORCE_DEPTH_ZERO_TO_ONE

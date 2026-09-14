@@ -1370,3 +1370,127 @@ Two things the harness learned the hard way, both worth preserving:
   are drawn while the window is iconified, so a frame-keyed schedule never
   reaches its own restore event and the run hangs minimized forever. It also
   ends on time rather than on frame count, for the same reason.
+
+---
+
+## Sound
+
+M9. `src/audio`. Positional sound effects, no music.
+
+### The rule
+
+`src/sim` may not touch OpenGL. From M9 it may not touch audio either, and for
+the same reason: the simulation is the thing every headless test drives, and a
+dependency on a subsystem that needs a device would make half of them
+unrunnable.
+
+So the simulation does not play sounds. It **reports** them, into a
+`sim::EventQueue` (`src/sim/events.h`) — a fixed-capacity array of
+`{cue, position, segment, gain}` handed to `stepCombat`, `stepRobots` and
+`stepGame` as a trailing out-parameter that is always allowed to be null. The
+app layer drains it once a frame and hands it to `audio::Audio`. Nothing under
+`src/sim` includes anything under `src/audio`, and `--weapons-test`,
+`--robots-test` and `--loop-test` pass null and are unchanged.
+
+The queue is **not** part of `SimState`. `SimState` is copied every step and
+interpolated between two copies; an event is neither copyable state nor
+interpolatable — it happened once, at one step, and is consumed once. Putting
+it there would have meant deciding what `interpolate()` does with half an
+explosion.
+
+### The thread, and why the mixer is ours
+
+miniaudio hands the program a callback on a thread it owns, under a hard
+deadline. Return late and the driver replays whatever was in the buffer, which
+is an audible click rather than a dropped frame. Three things follow, and they
+are the whole shape of this subsystem:
+
+- **The render path allocates nothing.** Voices are a fixed array, so is the
+  command queue. `--sound-test` checks it with the same `alloc::Scope` counter
+  `main.cpp` uses on the sim step.
+- **It takes no lock.** The game thread and the audio thread share one
+  single-producer/single-consumer ring of POD commands (`Ring` in `mixer.h`).
+  The game thread writes only the head, the audio thread only the tail. A mutex
+  here would mean the audio thread waiting on the game thread, which is exactly
+  the stall that cannot be afforded.
+- **Everything except opening the device is ours.** miniaudio has a perfectly
+  good high-level engine with 3D sound built in, and it is not used. The mixing,
+  the attenuation and the panning are about 200 lines in `mixer.cpp`, and
+  writing them bought a `Mixer` with no dependency on miniaudio, on GLFW or on a
+  sound card existing — which is what makes `--sound-test` possible. The same
+  trade as `render/gl.h`: one file knows about the platform library, and the
+  interesting code is testable because it does not.
+
+### Positioning
+
+Every sound is a point. Distance gives inverse-distance attenuation from a
+reference radius of 9 units, faded linearly to nothing at 220 — the fade
+matters, because an inverse curve alone never reaches zero, so a sound ten
+rooms away would still cost a voice and still contribute a hiss.
+
+Panning is equal-power, and is taken against **the ship's own right vector**,
+not world X. In a 6DOF game that is not a detail: fly upside down and a sound on
+your left has to move to your right, or the audio contradicts the view.
+`--sound-test` checks it by rolling the listener 180° and asserting the image
+inverts.
+
+Two exceptions, both deliberate:
+
+- **Sounds the player makes play at the listener**, not in the world —
+  `SoundEvent::atListener`. The laser fires from a wingtip half a metre off the
+  camera, and panning by that offset puts the player's own gun hard right, which
+  is wrong and obviously wrong. The same goes for their own hull being hit, and
+  for the reactor, which is the whole mine rather than a point in it.
+- **Very close sounds collapse to centre.** Without it a bolt spawned at a
+  wingtip pans hard to that side for one frame and clicks across as it leaves.
+
+The listener is the **ship**, not the camera. In chase view the camera sits
+several units behind the hull; hearing from back there would put the player's
+own guns slightly in front of them. The chase camera is a view of the ship, not
+where the pilot is.
+
+### Voices
+
+32, fixed. A full pool steals the quietest voice rather than dropping the newest
+request — a missing gunshot is more noticeable than a quieter one being cut. An
+ambient channel is never stolen: losing the engine loop to a burst of gunfire
+and never getting it back is worse than losing a shot.
+
+The bus is soft-clipped with `tanh` rather than clamped. With a dozen explosions
+in one room the sum genuinely passes 1.0, and a clamp turns that into buzzing
+square edges.
+
+### Ambient channels
+
+Two, named rather than handles: `Engine` and `Alarm`. The engine loop runs
+whenever a device is open; what changes is gain and playback rate, driven by the
+ship's **speed** rather than by the throttle key — a ship coasting with the
+throttle released still sounds like it is moving, which is what a player
+watching the walls go past expects. Re-setting a channel updates the running
+voice rather than restarting it, or the engine would stutter every time the
+throttle moved.
+
+Loops must be seamless. `engine.wav` and `alarm.wav` are built with every
+partial at an integer number of cycles over the loop length and the tail
+crossfaded over the head (`seamless()` in `tools/make-sounds.py`); without that,
+a one-second loop clicks once a second.
+
+### Where the WAVs come from
+
+`assets/sounds/*.wav`, 24 files, mono 16-bit 44.1 kHz, written by
+`tools/make-sounds.py` — committed, deterministic, stdlib-only, and
+regenerable. They are synthesised from oscillators and filtered noise, in the
+same spirit as `render/procedural.cpp` generating the textures.
+
+They are ordinary WAV files with no special status. `wav.cpp` reads PCM
+8/16/24/32 and float at any rate and any channel count, so any of them can be
+replaced with a recording or a downloaded effect without touching code. The
+**names** are the contract — `kCues` in `audio.cpp` — not the contents.
+
+### A finding: the null backend
+
+miniaudio is compiled with `MA_NO_NULL`. Its null backend is tried last and
+always succeeds, so leaving it in means a container with no sound card opening a
+"device" successfully and the game reporting sound it is not producing. Without
+it, such a machine fails to open, `Audio::init` warns, and the run says
+`device "none"` — which is true.

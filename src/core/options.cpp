@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <string_view>
 
@@ -39,6 +40,12 @@ Options Options::parse(int argc, char** argv) {
             o.robotsTest = true;
         } else if (a == "--loop-test") {
             o.loopTest = true;
+        } else if (a == "--sound-test") {
+            o.soundTest = true;
+        } else if (a == "--no-sound") {
+            o.noSound = true;
+        } else if (a == "--volume" && hasNext) {
+            o.volume = std::clamp(static_cast<float>(std::atof(argv[++i])), 0.0f, 1.0f);
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {

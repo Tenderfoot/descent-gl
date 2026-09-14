@@ -420,7 +420,7 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
-                const SolidDoors* doors) {
+                const SolidDoors* doors, EventQueue* events) {
     (void)weapons;
 
     const int shutDoors = doors ? doors->count : 0;
@@ -475,7 +475,13 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
 
         switch (robot.mode) {
             case RobotMode::Idle:
-                if (robot.awareness > 0.0f) setMode(robot, RobotMode::Alert);
+                if (robot.awareness > 0.0f) {
+                    setMode(robot, RobotMode::Alert);
+                    // The one transition worth hearing. In a mine with no
+                    // ambient light, a robot waking up somewhere behind you is
+                    // information you cannot get any other way.
+                    emit(events, Cue::RobotAlert, robot.body.position, robot.body.segment);
+                }
                 break;
             case RobotMode::Alert:
                 if (robot.awareness <= 0.0f) {
@@ -609,6 +615,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                         // eyes.
                         spawnEffect(combat, p.position, p.segment, def.color, 0.9f, 0.05f, 21.0f,
                                     4.5f);
+                        emit(events, Cue::RobotFire, p.position, p.segment);
                     }
 
                     --robot.burstLeft;
@@ -638,6 +645,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         // --- death -------------------------------------------------------
         if (robot.health <= 0.0f) {
             robot.alive = false;
+            emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
             spawnDebris(state, robot, def);
             spawnDrop(level, state, def, robot);
 

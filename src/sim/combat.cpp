@@ -125,8 +125,11 @@ int hitObject(const Level& level, const CombatState& state, const glm::vec3& fro
     return best;
 }
 
+// `events` is the sound queue and may be null. Only the explosion is emitted
+// here: a bolt landing on a wall, a robot or a crate is a different noise each
+// time, and the caller is the only place that knows which of those it was.
 void killProjectile(const Level& level, CombatState& state, RobotState* robots, Body* player,
-                    Projectile& p, const glm::vec3& at, int segment) {
+                    Projectile& p, const glm::vec3& at, int segment, EventQueue* events) {
     p.alive = false;
 
     if (p.kind == ProjectileKind::Flare) {
@@ -145,6 +148,7 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
         applySplash(level, state, robots, player, at, p.splashRadius, p.splashDamage);
         spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f, 0.45f,
                     p.splashRadius * 1.6f, 7.0f);
+        emit(events, Cue::Explosion, at, segment);
     } else {
         spawnEffect(state, at, segment, p.color, 1.2f, 0.16f, 9.0f, 2.2f);
     }
@@ -166,14 +170,18 @@ void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& ou
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
-                const SolidDoors* doors) {
+                const SolidDoors* doors, EventQueue* events) {
     PlayerState& player = state.player;
 
     if (controls.selectWeapon >= 0 && controls.selectWeapon < WeaponCount) {
+        // Only on a real change: holding a number key down would otherwise
+        // re-select the same gun every step and chatter.
+        if (controls.selectWeapon != player.weapon) emitLocal(events, Cue::WeaponSelect);
         player.weapon = controls.selectWeapon;
     }
 
     for (float& c : player.cooldown) c = std::max(0.0f, c - dt);
+    player.emptyClickTimer = std::max(0.0f, player.emptyClickTimer - dt);
     player.flareCooldown = std::max(0.0f, player.flareCooldown - dt);
     player.hurtTimer = std::max(0.0f, player.hurtTimer - dt);
     player.recoilTimer = std::max(0.0f, player.recoilTimer - dt);
@@ -208,14 +216,29 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             color = cfg.laserColor[static_cast<size_t>(level0)];
         }
 
+        // Pulling the trigger on an empty gun is information the player needs,
+        // and in a mine with no ambient light it is often the only way they
+        // find out. Rate limited: the trigger is read every one of the 120
+        // steps a second.
+        const auto click = [&]() {
+            if (player.emptyClickTimer > 0.0f) return;
+            player.emptyClickTimer = kEmptyClickInterval;
+            emitLocal(events, Cue::WeaponEmpty);
+        };
         if (def.energyCost > 0.0f) {
-            if (player.energy < def.energyCost) return;
+            if (player.energy < def.energyCost) {
+                click();
+                return;
+            }
         }
         int* ammo = nullptr;
         if (weaponId == WeaponVulcan) ammo = &player.vulcanAmmo;
         if (weaponId == WeaponConcussion) ammo = &player.concussionAmmo;
         if (weaponId == WeaponHoming) ammo = &player.homingAmmo;
-        if (def.ammoCost > 0 && ammo && *ammo < def.ammoCost) return;
+        if (def.ammoCost > 0 && ammo && *ammo < def.ammoCost) {
+            click();
+            return;
+        }
 
         const int slot = state.projectiles.spawn();
         if (slot < 0) return;
@@ -247,6 +270,12 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         // before it reads as a light source.
         spawnEffect(state, origin, ship.segment, color, def.radius * 2.5f, kMuzzleFlashTime,
                     def.lightRadius * 1.5f, def.lightIntensity * 2.5f);
+
+        // At the listener, not at the wingtip it actually came from. See the
+        // note on SoundEvent::atListener.
+        static constexpr std::array<Cue, WeaponCount> kFireCues{
+            {Cue::LaserFire, Cue::VulcanFire, Cue::ConcussionFire, Cue::HomingFire}};
+        emitLocal(events, kFireCues[static_cast<size_t>(weaponId)]);
 
         if (weaponId == WeaponConcussion || weaponId == WeaponHoming) {
             player.recoilTimer = kRecoilTime;
@@ -330,6 +359,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             p.lifetime = cfg.flareLifetime;
             p.lightRadius = cfg.flareRadius;
             p.lightIntensity = cfg.flareIntensity;
+            emitLocal(events, Cue::FlareThrow);
         }
     }
 
@@ -340,7 +370,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         p.age += dt;
         if (p.age >= p.lifetime) {
             // A flare that never landed still becomes a light where it ran out.
-            killProjectile(level, state, robots, &ship, p, p.position, p.segment);
+            killProjectile(level, state, robots, &ship, p, p.position, p.segment, events);
             continue;
         }
 
@@ -434,7 +464,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             state.player.shields -= p.damage;
             state.player.hurtTimer = kHurtFlashTime;
             spawnEffect(state, playerPoint, p.segment, p.color, 1.4f, 0.18f, 8.0f, 2.0f);
-            killProjectile(level, state, robots, &ship, p, playerPoint, p.segment);
+            emitLocal(events, Cue::PlayerHurt);
+            killProjectile(level, state, robots, &ship, p, playerPoint, p.segment, events);
             continue;
         }
 
@@ -446,7 +477,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             robots->robots[static_cast<size_t>(robotHit)].lastKnown = ship.position;
             robots->robots[static_cast<size_t>(robotHit)].hasLastKnown = true;
             spawnEffect(state, robotPoint, p.segment, p.color, 1.7f, 0.22f, 11.0f, 2.8f);
-            killProjectile(level, state, robots, &ship, p, robotPoint, p.segment);
+            emit(events, Cue::RobotHit, robotPoint, p.segment);
+            killProjectile(level, state, robots, &ship, p, robotPoint, p.segment, events);
             continue;
         }
 
@@ -456,7 +488,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         if (hitObjectFirst) {
             state.objects.health[static_cast<size_t>(object)] -= p.damage;
             spawnEffect(state, objectPoint, p.segment, p.color, 1.6f, 0.2f, 10.0f, 2.6f);
-            killProjectile(level, state, robots, &ship, p, objectPoint, p.segment);
+            emit(events, Cue::WallImpact, objectPoint, p.segment);
+            killProjectile(level, state, robots, &ship, p, objectPoint, p.segment, events);
             continue;
         }
         if (wall.hit) {
@@ -464,8 +497,11 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             // any resulting flare sit in front of the wall rather than inside
             // it, where the light would be occluded by the wall it is lighting.
             const glm::vec3 at = from + dir * std::max(0.0f, wall.distance - p.radius * 0.5f);
-            killProjectile(level, state, robots, &ship, p, at,
-                           wall.segment >= 0 ? wall.segment : p.segment);
+            const int atSegment = wall.segment >= 0 ? wall.segment : p.segment;
+            // A flare landing is not an impact: it has already made its noise
+            // being thrown, and the thing it does next is glow.
+            if (p.kind != ProjectileKind::Flare) emit(events, Cue::WallImpact, at, atSegment);
+            killProjectile(level, state, robots, &ship, p, at, atSegment, events);
             continue;
         }
 
@@ -497,16 +533,18 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         state.objects.alive[static_cast<size_t>(i)] = false;
         spawnEffect(state, obj.position, obj.segment, glm::vec3(1.0f, 0.75f, 0.4f), 8.0f, 0.6f,
                     30.0f, 8.0f);
+        emit(events, Cue::ObjectDestroyed, obj.position, obj.segment);
     }
 }
 
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
-                      glm::quat& shipOrientation) {
+                      glm::quat& shipOrientation, EventQueue* events) {
     if (state.player.shields > 0.0f) return false;
 
     ++state.player.deaths;
     spawnEffect(state, ship.position, ship.segment, glm::vec3(1.0f, 0.6f, 0.25f), 9.0f, 0.7f,
                 34.0f, 9.0f);
+    emitLocal(events, Cue::PlayerDeath);
 
     ship.position = level.start.position;
     ship.segment = level.start.segment;

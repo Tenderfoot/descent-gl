@@ -80,6 +80,9 @@ struct Options {
     bool weaponsTest = false;
     bool robotsTest = false;
     bool loopTest = false;
+    bool soundTest = false;
+    bool noSound = false;
+    float volume = 0.8f;
     int startSegment = -1;
     bool wireframeVolumes = false;
     bool stencilView = false;

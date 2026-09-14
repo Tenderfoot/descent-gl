@@ -80,7 +80,8 @@ void initGame(const Level& level, const RobotState& robots, GameState& out) {
 }
 
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
-              RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt) {
+              RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
+              EventQueue* events) {
     if (state.phase == GamePhase::Won || state.phase == GamePhase::Lost) return;
 
     state.elapsed += dt;
@@ -121,6 +122,17 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         // carry no keys, so a locked door stays locked to them too.
         const bool mayOpen = hasKey(state, door.key);
 
+        ds.lockedTimer = std::max(0.0f, ds.lockedTimer - dt);
+        // Refused. Only for the player: a robot bumping into a door it cannot
+        // open is not something the player needs told about, and every robot in
+        // the mine buzzing at every locked door would be unbearable.
+        if (!mayOpen && ds.lockedTimer <= 0.0f &&
+            glm::length(player.position - door.center) < door.openDistance) {
+            ds.lockedTimer = kLockedRefusalInterval;
+            emit(events, Cue::DoorLocked, door.center, door.segment);
+        }
+
+        const bool wasOpening = ds.wantOpen;
         if (someoneNear && mayOpen) {
             ds.wantOpen = true;
             ds.holdTimer = door.closeDelay;
@@ -128,6 +140,14 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             ds.holdTimer -= dt;
         } else {
             ds.wantOpen = false;
+        }
+
+        // The slab starting to move is the sound, not the slab arriving. A door
+        // already at one end of its travel is not starting anything.
+        if (ds.wantOpen && !wasOpening && ds.openness < 1.0f) {
+            emit(events, Cue::DoorOpen, door.center, door.segment);
+        } else if (!ds.wantOpen && wasOpening && ds.openness > 0.0f) {
+            emit(events, Cue::DoorClose, door.center, door.segment);
         }
 
         const float rate = door.openTime > 0.0f ? dt / door.openTime : 1.0f;
@@ -146,6 +166,12 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         if (glm::length(player.position - pickup.position) > player.radius + 2.4f) continue;
 
         state.collected[pi] = true;
+        // A key is the one pickup that changes where the player can go, so it
+        // gets its own, more emphatic noise.
+        const bool isKey = pickup.kind == PickupKind::KeyBlue ||
+                           pickup.kind == PickupKind::KeyYellow ||
+                           pickup.kind == PickupKind::KeyRed;
+        emit(events, isKey ? Cue::KeyPickup : Cue::Pickup, pickup.position, pickup.segment);
         PlayerState& p = combat.player;
         switch (pickup.kind) {
             case PickupKind::Shield:
@@ -233,12 +259,24 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             state.phase = GamePhase::Countdown;
             state.countdown = cfg.countdownSeconds;
             state.exitOpen = true;
+            // At the listener: the reactor going up is the whole mine, and
+            // attenuating it by how far the player had already run from the
+            // room would be exactly backwards.
+            emitLocal(events, Cue::ReactorDestroyed);
             log::info("reactor destroyed: {:.0f} seconds to get out", state.countdown);
         }
     }
 
     if (state.phase == GamePhase::Countdown) {
+        const float before = state.countdown;
         state.countdown -= dt;
+        // One warning per whole second crossed, from the clock itself rather
+        // than from a timer of its own, so the beeps cannot drift away from the
+        // number on the HUD.
+        if (state.countdown > 0.0f &&
+            std::floor(before) != std::floor(state.countdown)) {
+            emitLocal(events, Cue::CountdownWarn);
+        }
         // Shake ramps from nothing to full over the countdown, so the mine
         // coming apart is a clock the player can feel without reading it.
         const float fraction =
@@ -252,6 +290,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
                 level.exitTrigger.radius + player.radius) {
             state.phase = GamePhase::Won;
             state.endReason = "escaped";
+            emitLocal(events, Cue::Exit);
             log::info("escaped with {:.1f}s to spare, {} robots destroyed", state.countdown,
                       state.robotsDestroyed);
             return;
@@ -260,12 +299,18 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         if (state.countdown <= 0.0f) {
             state.phase = GamePhase::Lost;
             state.endReason = "the mine went up with you still in it";
+            emitLocal(events, Cue::PlayerDeath);
             log::info("countdown reached zero");
             return;
         }
     }
 
     if (combat.player.shields <= 0.0f) {
+        // Here rather than in checkPlayerDeath: from M7 running out of shields
+        // ends the level instead of respawning, and checkPlayerDeath is only
+        // reached by --weapons-test. A cue emitted there alone would never fire
+        // in a played game.
+        if (state.phase != GamePhase::Lost) emitLocal(events, Cue::PlayerDeath);
         state.phase = GamePhase::Lost;
         state.endReason = "shields gone";
         log::info("destroyed after {:.1f}s, {} robots destroyed", state.elapsed,

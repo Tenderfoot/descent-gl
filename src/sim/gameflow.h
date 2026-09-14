@@ -2,6 +2,7 @@
 
 #include "game/level.h"
 #include "sim/body.h"
+#include "sim/events.h"
 
 #include <glm/vec3.hpp>
 
@@ -50,7 +51,14 @@ struct DoorState {
     float holdTimer = 0.0f;
     bool wantOpen = false;
     bool everOpened = false;
+    // Rate limit for the "you do not have this key" refusal. The player's
+    // distance to the door is tested every step, so without this, sitting in
+    // front of a locked door buzzes 120 times a second.
+    float lockedTimer = 0.0f;
 };
+
+// How long after a locked-door refusal before another one is allowed.
+inline constexpr float kLockedRefusalInterval = 1.2f;
 
 enum class GamePhase : uint8_t {
     Playing,      // find the reactor
@@ -105,9 +113,11 @@ struct GameConfig {
 
 void initGame(const Level& level, const RobotState& robots, GameState& out);
 
-// One fixed step of doors, pickups and the win/lose flow.
+// One fixed step of doors, pickups and the win/lose flow. `events` is the sound
+// queue and may be null. See sim/events.h.
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
-              RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt);
+              RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
+              EventQueue* events = nullptr);
 
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.

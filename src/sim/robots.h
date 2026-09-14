@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/body.h"
+#include "sim/events.h"
 
 #include <array>
 #include <glm/gtc/quaternion.hpp>
@@ -182,8 +183,9 @@ bool objectIsRobot(const RobotConfig& cfg, const std::string& type);
 // a robot can neither see, path nor fly through a shut door. Unlocked doors
 // open for robots, so the path search only treats a LOCKED shut door as a
 // wall; a shut door with no key is walked up to and opened.
+// `events` is the sound queue and may be null. See sim/events.h.
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
-                const SolidDoors* doors = nullptr);
+                const SolidDoors* doors = nullptr, EventQueue* events = nullptr);
 
 } // namespace dvk::sim
