@@ -22,6 +22,10 @@ Options Options::parse(int argc, char** argv) {
             o.chase = true;
         } else if (a == "--flight-test") {
             o.flightTest = true;
+        } else if (a == "--world-test") {
+            o.worldTest = true;
+        } else if (a == "--segment" && hasNext) {
+            o.startSegment = std::atoi(argv[++i]);
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }

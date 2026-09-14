@@ -15,7 +15,8 @@ struct Vertex {
 };
 
 // Indexed triangle mesh in a single VAO. Attribute locations match
-// shaders/textured.vert: 0 = position, 1 = normal, 2 = uv.
+// the lit shaders: 0 = position, 1 = normal, 2 = uv. Level geometry carries a
+// fourth attribute and lives in LevelMesh instead.
 class Mesh {
 public:
     Mesh(const std::vector<Vertex>& vertices, const std::vector<GLuint>& indices);
@@ -37,11 +38,5 @@ private:
 // A unit cube centred on the origin, 24 vertices (per-face normals and UVs),
 // 12 triangles, closed.
 Mesh makeCube();
-
-// A cube of the given size seen from the inside: winding and normals both
-// reversed, and UVs scaled by uvScale per unit so a tiling texture keeps a
-// constant density however large the box is. M1's reference volume; M2 replaces
-// it with real segment geometry.
-Mesh makeInsideBox(float size, float uvScale);
 
 } // namespace dvk::gl

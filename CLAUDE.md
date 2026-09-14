@@ -69,6 +69,8 @@ milestone rather than describing what the code should do:
 | `--resize-test` | Drive a scripted 9-second sequence of window resizes, an iconify and a restore, then exit. Keeps vsync on so the window manager can deliver the events. |
 | `--chase` | Start in the chase camera, so a screenshot can show the ship without a keypress. |
 | `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
+| `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
+| `--segment N` | Start in segment N's centre rather than at the player start, so a screenshot can be taken anywhere in the mine without flying there. |
 
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
@@ -99,6 +101,9 @@ project names a GLFW key code for gameplay.
 - **`src/render`** everything OpenGL. The only place that includes `glad`, and
   it does so through `render/gl.h`.
 - **`src/sim`** physics, collision, projectiles, AI. Must not touch GL.
+- **Level data lives in `src/game/level.h`** and is read by both `sim` and
+  `render`. It is data, not logic, so both may depend on it; the rule that
+  matters is that `sim` never touches GL.
 - **`src/game`** game state and app-level glue.
 - **No per-frame heap allocation** in the sim step or the draw path.
 - **Fixed 120 Hz simulation** with an accumulator; rendering interpolates

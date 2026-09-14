@@ -22,8 +22,9 @@ for convenience.
    in the stencil buffer with depth-fail. Pixel-exact hard edges, no acne, no
    shadow-map resolution.
 
-Status: none are implemented yet. M0 only puts the preconditions in place —
-see "Reversed-Z" and "Render target" below, both of which exist to serve bet 3.
+Status: bets 1 and 2 landed in M2 — see "The level format" and "The lighting
+frame" below. Bet 3 is M3's; M0 put its preconditions in place, see "Reversed-Z"
+and "Render target".
 
 ---
 
@@ -54,12 +55,18 @@ The directory name was left alone rather than churn paths and git history.
 
 ---
 
-## Frame structure (M0)
+## Frame structure
 
 ```
 bind MSAA target
-  clear colour + depth + stencil
-  scene pass            (textured, one draw)
+  clear colour (black) + depth + stencil
+  depth prepass                        (all visible geometry, depth only)
+  for each light reaching the visible set:
+      [M3: clear stencil, shadow volume pass]
+      additive lighting pass           (blend ONE,ONE; depth EQUAL; this
+                                        light's segments only)
+  unlit pass                           (emissive and debug; M5 bolts and
+                                        flares, M7 HUD, M8 automap)
 resolve (blit) to the default framebuffer
 ImGui on the default framebuffer
 swap
@@ -69,18 +76,143 @@ ImGui is drawn *after* the resolve, not into the MSAA target. Its geometry is
 axis-aligned text and rectangles that gain nothing from multisampling, and
 keeping it out means the resolve carries only scene colour.
 
-M2 inserts the depth prepass and the per-light passes between the clear and the
-resolve. The shape it grows into:
+The per-light loop in `Renderer::lightPasses` carries a marked insertion point
+where M3 adds the stencil clear and the shadow volume pass. It is shaped that
+way so that milestone inserts rather than restructures.
 
+### The depth prepass and shader invariance
+
+The lighting passes test `GL_EQUAL` against the depth the prepass wrote. That
+only works if both shaders compute *bit-identical* positions, so
+`depth.vert`, `wall.vert` and `unlit.vert` all declare `invariant gl_Position`
+and spell the expression exactly the same way:
+
+```glsl
+gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
 ```
-depth prepass                          (all visible geometry, depth only)
-for each visible light:
-    clear stencil
-    shadow volume pass                 (no colour write, depth-fail counting)
-    additive lighting pass             (blend ONE,ONE; depth EQUAL; stencil==0)
-unlit pass                             (emissive, bolts, HUD, automap)
-resolve -> ImGui -> swap
+
+This is not a style rule. `wall.vert` originally computed the world position
+first and reused it — `uProj * uView * (uModel * p)` — which is the same value
+in exact arithmetic and a different one in the last bit of a float. `GL_EQUAL`
+then rejected scattered fragments and the walls rendered shredded with thin
+unlit lines. Nothing about that symptom points at the vertex shader. **If you
+add a pass that draws into this depth, copy the expression verbatim.**
+
+---
+
+## The level format
+
+`src/game/level.h`. A mine is a graph of deformed cubes. A segment is 8 vertex
+indices into one shared level vertex array plus 6 sides, each of which is
+either a textured wall or a portal into a neighbour.
+
+Sides are always in the order **left, top, right, bottom, back, front**, and
+`kSideVertices` maps each to its four corners, wound counter-clockwise *seen
+from inside the segment*. The mine is a space you are inside, so a wall's front
+face and its normal both point inward.
+
+Sharing the vertex array is what makes portals exact: two segments joined
+through a portal reference the *same four vertex indices*, so there is no seam
+to leak light through and no gap to fall through, by construction rather than
+by tolerance.
+
+### Sides are not planar, and are split at load
+
+A deformed cube's side is a general quad. At load each is split into two
+triangles by whichever diagonal leaves the smaller crease — the pair of
+triangle normals with the larger dot product. **Every later system uses these
+triangles and never the quad**: rendering, collision, and M3's shadow volumes.
+In `test01`, 42 of 84 sides take the alternate diagonal, so this is not a
+theoretical case.
+
+### Validation is fatal
+
+`loadLevel` refuses a file that breaks a structural rule, naming the segment
+and side. The rules: vertex indices exist, a portal names a segment that
+exists and is not itself, the neighbour names this segment back, and **the two
+sides of a portal reference the same four vertices**. That last one is the one
+worth having. Checking only that the neighbour points back would accept two
+segments joined through different faces, which walks and renders perfectly
+right up until a light leaks through the seam — a symptom that looks like a
+renderer bug and is not.
+
+### UVs
+
+A side with no authored UVs gets a planar mapping at a fixed world size per
+tile (`kWorldUnitsPerTile`), so texel density is the same on a corridor wall
+and on the room's raised ceiling. A flat 0..1 per side stretches one 256-pixel
+tile across a 20-unit wall.
+
+---
+
+## Portal visibility
+
+`src/game/visibility.h`. From the segment the camera is in, recurse through
+portals, projecting each to a screen-space rectangle and intersecting it with
+the rectangle it was seen through. Empty rectangle, nothing beyond it is
+visible.
+
+**Portals are clipped against the near plane before projection.** A portal
+beside the camera straddles it, and projecting a corner behind the eye divides
+by a negative `w`, putting it on the wrong side of the screen and producing a
+mirrored, enormous rectangle. The first version fell back to the parent window
+in that case — conservative, and useless: at a segment's centre nearly every
+portal straddles, so every portal inherited the whole screen and the walk
+reported **all 14 segments visible from anywhere in the mine**. With a proper
+Sutherland-Hodgman clip against `w > epsilon` (four corners and one plane give
+at most five, so no allocation), the worst case is 10 of 14 and the start
+segment sees 4.
+
+The rectangle is an axis-aligned bound, not the portal's exact shape, so the
+walk over-reports slightly around bends. That is the intended trade: it can
+only ever draw too much, never too little, and too little is what makes holes.
+
+The ImGui "freeze visible set" toggle stops the walk being rebuilt while the
+camera keeps moving, so the cull can be inspected from outside it. Without it
+the one thing you cannot see is what the cull decided.
+
+---
+
+## The lighting frame
+
+**There is no ambient term and there will not be one.** A surface no light
+reaches keeps the clear colour, which is black. The darkness is the absence of
+a pass, not a grade, and it is what turns the headlight and flares of later
+milestones into mechanics rather than decoration.
+
+A light carries position, radius, colour, intensity, type, and a precomputed
+**segment set**: flood-filled from the light's own segment, stopped at any
+portal whose nearest point is farther away than the radius. Distance is
+measured to the nearest point of the portal itself, not to the neighbour's
+centre — a long segment whose centre is out of range can still have a doorway
+well inside it. A light is only ever considered against segments in its set,
+intersected with what the portal walk says is on screen, so a light in a room
+you cannot see does no work at all.
+
+The set is rebuilt whenever a light moves or its radius changes. A stale set is
+how a light ends up lighting a room through a wall.
+
+### Falloff
+
+```glsl
+float t = dist / uLightRadius;
+float window = clamp(1.0 - t*t*t*t, 0.0, 1.0);
+float attenuation = window * window / (1.0 + 12.0 * t * t);
 ```
+
+The window makes the light reach exactly zero **at** the radius rather than at
+infinity, which is what lets the segment set be an exact bound instead of an
+approximation. That matters: a light still faintly lit at the edge of its set
+would visibly pop as the set cut it off.
+
+The inverse-square term is in `t = dist/radius`, not in world units.
+Absolute inverse square is only meaningful if intensity is in absolute units
+too, and at this project's scale — 20-unit segments — that means authoring
+lights in the hundreds and still getting a pinprick at the source with
+blackness two metres away. The first attempt did exactly that and the mine was
+unreadable. Radius-relative falloff gives one knob that means what it looks
+like it means: radius sets both reach and shape, intensity stays a small
+readable number (2–4 in `test01`).
 
 ---
 

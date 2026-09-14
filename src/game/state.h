@@ -16,6 +16,10 @@ enum class CameraMode { FirstPerson, Chase };
 // interpolate lives here and nowhere else.
 struct SimState {
     sim::ShipState ship;
+    // Which segment the ship is in. Tracked by following portal planes each
+    // step rather than searched for, so it is O(portals crossed) and not
+    // O(segments).
+    int segment = 0;
 };
 
 // What the renderer draws: SimState interpolated between the two most recent
@@ -28,6 +32,7 @@ struct RenderState {
     glm::vec3 shipPos{0.0f};
     glm::quat shipOrientation{1.0f, 0.0f, 0.0f, 0.0f};
     CameraMode camera = CameraMode::FirstPerson;
+    int shipSegment = 0;
 
     // Readouts, not used to draw the scene.
     float speed = 0.0f;         // units/s
@@ -41,6 +46,7 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
     // interpolation of a quaternion is only approximately a rotation, and the
     // error shows as a hitch at high turn rates.
     r.shipOrientation = glm::slerp(a.ship.orientation, b.ship.orientation, t);
+    r.shipSegment = b.segment;
     r.speed = glm::length(glm::mix(a.ship.velocity, b.ship.velocity, t));
     r.angularSpeed = glm::length(glm::mix(a.ship.angularVelocity(), b.ship.angularVelocity(), t));
     return r;

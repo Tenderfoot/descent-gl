@@ -4,7 +4,10 @@
 #include "core/time.h"
 #include "core/window.h"
 #include "game/bindings.h"
+#include "game/level.h"
 #include "game/state.h"
+#include "game/visibility.h"
+#include "game/world_test.h"
 #include "render/debug.h"
 #include "render/gl.h"
 #include "render/renderer.h"
@@ -21,6 +24,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <iterator>
 #include <thread>
 
@@ -36,6 +40,7 @@ constexpr double kSimStep = 1.0 / kSimHz;
 constexpr double kMaxFrameTime = 0.25;
 
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
+constexpr const char* kLevelPath = "assets/levels/test01.json";
 
 // Scripted window events for --resize-test. Covers the two cases that break
 // silently: a framebuffer size change while drawing, and iconify/restore,
@@ -70,6 +75,9 @@ int main(int argc, char** argv) {
     if (opts.flightTest) {
         return dvk::sim::runFlightTest(kFlightConfigPath);
     }
+    if (opts.worldTest) {
+        return dvk::runWorldTest(kLevelPath);
+    }
 
     dvk::Window::Desc desc;
 #ifdef DVK_DEBUG
@@ -93,7 +101,8 @@ int main(int argc, char** argv) {
     dvk::gl::installDebugCallback(/*fatalOnHigh=*/false);
 #endif
 
-    dvk::gl::Renderer renderer;
+    dvk::Level level = dvk::loadLevel(kLevelPath);
+    dvk::gl::Renderer renderer(level);
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -108,8 +117,24 @@ int main(int argc, char** argv) {
 
     dvk::SimState prev;
     dvk::SimState cur;
+    cur.ship.position = level.start.position;
+    cur.ship.orientation = level.start.orientation;
+    cur.segment = level.start.segment;
+    if (opts.startSegment >= 0 && opts.startSegment < level.segmentCount()) {
+        cur.segment = opts.startSegment;
+        cur.ship.position = level.segments[static_cast<size_t>(cur.segment)].center;
+    }
+    prev = cur;
+
     dvk::CameraMode camera =
         opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
+
+    dvk::PortalWalk walk;
+    // Freezing the visible set leaves the last portal walk in place while the
+    // camera keeps moving, so the culling can be inspected from outside it.
+    // Without this, the one thing you cannot see is what the cull decided.
+    bool freezeVisible = false;
+    int lightEditorSelection = -1;
     dvk::Clock clock;
     // Measured from here, not from construction: startup (window, GL, texture,
     // shader compile) runs no sim steps and would drag the average down.
@@ -191,6 +216,7 @@ int main(int argc, char** argv) {
             dvk::sim::ShipControls controls =
                 dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta);
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
+            cur.segment = dvk::trackSegment(level, cur.ship.position, cur.segment);
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
@@ -202,7 +228,10 @@ int main(int argc, char** argv) {
 
         const glm::ivec2 fb = window.framebufferSize();
         renderer.beginFrame(fb.x, fb.y);
-        renderer.drawScene(rs);
+        if (!freezeVisible) {
+            walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos);
+        }
+        renderer.drawScene(rs, level, walk);
         renderer.resolve();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -216,6 +245,19 @@ int main(int argc, char** argv) {
             ImGui::Text("interp alpha: %.3f", alpha);
             ImGui::Text("framebuffer: %d x %d @ %dx MSAA", fb.x, fb.y,
                         static_cast<int>(dvk::gl::Renderer::kSamples));
+            ImGui::Separator();
+            const dvk::gl::Renderer::Stats& st = renderer.stats();
+            ImGui::Text("segment %d of %d", rs.shipSegment, level.segmentCount());
+            ImGui::Text("visible %d  (visited %d, portals %d, depth %d)",
+                        static_cast<int>(walk.visible().size()), walk.segmentsVisited(),
+                        walk.portalsCrossed(), walk.deepest());
+            ImGui::Text("lights %d of %d reach view  (%d segment draws)", st.lightsDrawn,
+                        st.lightsConsidered, st.lightSegmentDraws);
+            if (ImGui::Checkbox("freeze visible set", &freezeVisible)) {
+                // Nothing to do: the walk simply stops being rebuilt.
+            }
+            ImGui::SameLine();
+            ImGui::Checkbox("light gizmos", &renderer.drawLightGizmos);
             ImGui::Separator();
             ImGui::Text("pos %.1f %.1f %.1f", rs.shipPos.x, rs.shipPos.y, rs.shipPos.z);
             ImGui::Text("speed %6.2f / %.0f units/s", rs.speed, flight.maxSpeed);
@@ -266,6 +308,70 @@ int main(int argc, char** argv) {
             if (ImGui::Button("Reset to defaults")) flight = flightDefaults;
             ImGui::SameLine();
             if (ImGui::Button("Reload")) flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
+        }
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(12, 620), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(390, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("lights")) {
+            if (ImGui::Button("Add here")) {
+                dvk::Light added;
+                added.position = rs.shipPos;
+                added.segment = rs.shipSegment;
+                added.radius = 30.0f;
+                dvk::rebuildLightSegments(level, added);
+                level.lights.push_back(added);
+                lightEditorSelection = static_cast<int>(level.lights.size()) - 1;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save level")) dvk::saveLevel(kLevelPath, level);
+            ImGui::SameLine();
+            ImGui::TextDisabled("%d lights", static_cast<int>(level.lights.size()));
+
+            ImGui::BeginChild("light list", ImVec2(0, 110), true);
+            for (int i = 0; i < static_cast<int>(level.lights.size()); ++i) {
+                const dvk::Light& l = level.lights[static_cast<size_t>(i)];
+                char label[96];
+                std::snprintf(label, sizeof(label), "%2d  seg %-3d  r %-5.1f  %s  (%d segs)", i,
+                              l.segment, l.radius,
+                              l.type == dvk::LightType::Spot ? "spot " : "point",
+                              static_cast<int>(l.segments.size()));
+                if (ImGui::Selectable(label, lightEditorSelection == i)) lightEditorSelection = i;
+            }
+            ImGui::EndChild();
+
+            if (lightEditorSelection >= 0 &&
+                lightEditorSelection < static_cast<int>(level.lights.size())) {
+                dvk::Light& l = level.lights[static_cast<size_t>(lightEditorSelection)];
+                // Position and radius both change which segments the light can
+                // reach, so the set is rebuilt whenever either moves. Leaving it
+                // stale is how a light ends up lighting a room through a wall.
+                bool reach = false;
+                reach |= ImGui::DragFloat3("position", &l.position.x, 0.25f);
+                reach |= ImGui::SliderFloat("radius", &l.radius, 1.0f, 120.0f, "%.1f");
+                ImGui::ColorEdit3("colour", &l.color.r);
+                ImGui::SliderFloat("intensity", &l.intensity, 0.0f, 12.0f, "%.2f");
+
+                int type = l.type == dvk::LightType::Spot ? 1 : 0;
+                if (ImGui::Combo("type", &type, "point\0spot\0")) {
+                    l.type = type == 1 ? dvk::LightType::Spot : dvk::LightType::Point;
+                }
+                if (l.type == dvk::LightType::Spot) {
+                    ImGui::DragFloat3("direction", &l.direction.x, 0.02f, -1.0f, 1.0f);
+                    ImGui::SliderFloat("cone", &l.coneDegrees, 5.0f, 170.0f, "%.0f deg");
+                }
+
+                if (reach) {
+                    l.segment = dvk::findSegment(level, l.position, l.segment);
+                    dvk::rebuildLightSegments(level, l);
+                }
+                if (ImGui::Button("Remove")) {
+                    level.lights.erase(level.lights.begin() + lightEditorSelection);
+                    lightEditorSelection = -1;
+                }
+            } else {
+                ImGui::TextDisabled("select a light to edit it");
+            }
         }
         ImGui::End();
         ImGui::Render();

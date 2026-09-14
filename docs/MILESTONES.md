@@ -175,6 +175,104 @@ about performance. M8 takes those numbers on the real machine.
 
 ---
 
-## M2 — Segments, portals, lights ⬜
+## M2 — Segments, portals, lights ✅
+
+The segment-graph level format, portal-traversal visibility, and the multi-pass
+lighting frame. Two of the three permanent bets land here. No shadows and no
+collision: the ship flies through walls this milestone, as planned.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| Debug / Release build clean | ✅ no warnings |
+| `test01` loads and validates | ✅ 14 segments, 14 portals, 112 wall triangles, 8 lights, 58 vertices |
+| Portal reciprocity + shared vertices | ✅ enforced at load, fatal on failure |
+| Non-planar side split | ✅ **42 of 84 sides take the alternate diagonal** at the minimum-crease rule |
+| Texture array | ✅ 256×256 × 5 layers (rock, panel, hazard, grate, hull) |
+| Unlit surfaces render black | ✅ no ambient term exists anywhere |
+| Falloff reaches zero at the radius | ✅ by construction, and checked numerically per segment |
+| Light editor Save | ✅ save/reload round trip preserves 14 segments, 8 lights, 112 walls |
+| Freeze-visible-set toggle | ✅ |
+| GL error-severity messages | ✅ 0 |
+| `--resize-test` | ✅ 119.7 / 120 |
+| `--flight-test` | ✅ still PASS, unchanged by this milestone |
+
+### Drawn-segment counts
+
+`--world-test` runs the portal walk from every segment over all six axis
+facings, with no window and no GL. Three positions the plan asks about:
+
+| Position | Visible best | Visible worst | Lights reaching the view |
+| --- | --- | --- | --- |
+| Segment 0, start of the corridor | 4 | 1 | 4 |
+| Segment 7, the 2×2 room | 8 | 3 | 5 |
+| Segment 11, foot of the shaft | 10 | 3 | 8 |
+
+At most **10 of 14** segments are visible from anywhere in the mine, so the
+cull is doing real work rather than passing everything through.
+
+### Lit pools and dark stretches
+
+Brightness at each segment centre, computed with the same falloff the shader
+uses:
+
+| Segment | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Brightness | 1.80 | **0.09** | 1.62 | 1.18 | **0.12** | 2.09 | 0.66 | 3.03 | 0.71 | 0.65 | 2.83 | 2.19 | 0.49 | 3.39 |
+
+Segments 1 and 4 are below the dark threshold — genuinely black stretches
+between the lit pools, which is the point of the no-ambient bet. The world test
+fails if no segment is dark, because a mine with nowhere to hide is a level bug
+that does not crash.
+
+### Two bugs worth recording
+
+**Shader invariance.** Walls rendered shredded with thin unlit lines.
+`wall.vert` computed `uProj * uView * (uModel * p)` while `depth.vert`
+computed `uProj * uView * uModel * p` — the same value in exact arithmetic,
+different in the last bit of a float, so the lighting pass's `GL_EQUAL` test
+against the prepass depth rejected scattered fragments. Fixed by declaring
+`invariant gl_Position` in every pass that draws into this depth and spelling
+the expression identically. Nothing about the symptom pointed at the vertex
+shader.
+
+**Near-plane portal clipping.** The first portal walk reported *all 14
+segments visible from anywhere in the mine*, and `--world-test` failed on
+"portal culling is doing nothing". A portal beside the camera straddles the
+near plane; projecting a corner behind the eye divides by a negative `w` and
+mirrors it across the screen. The first version detected that and fell back to
+the parent window, which is conservative and useless — at a segment's centre
+nearly every portal straddles. Fixed with a Sutherland-Hodgman clip against
+`w > epsilon` before projecting.
+
+Both were invisible as code and obvious as output, which is what the headless
+tests are for.
+
+### Light falloff scale
+
+An absolute inverse-square falloff (`1/(d² + 1)`) left the mine essentially
+black at 20-unit segment scale: it wants intensities in the hundreds and still
+gives a pinprick at the source. Changed to radius-relative, so `radius` sets
+both reach and shape and `intensity` stays a small readable number. Level
+intensities are 2.2–3.4.
+
+### Removed
+
+The M1 reference environment went with the milestone that needed it:
+`makeInsideBox`, `makeGridTile`, `shaders/textured.*`, `assets/textures/` and
+`Texture2D` (nothing loads a texture from a file any more — every tile is
+generated). `stb_image`'s loader stays compiled in `stb_impl.cpp` for the
+screenshot writer's sake.
+
+### Not verified here
+
+Iconify/restore, as in M1 — Xvfb has no window manager. Software rendering
+makes the frame rates (11–14 fps) meaningless as performance; M8 takes those
+numbers on the real machine.
+
+---
+
+## M3 — Stencil shadow volumes ⬜
 
 Not started.

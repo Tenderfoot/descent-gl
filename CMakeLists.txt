@@ -27,7 +27,11 @@ add_executable(descent
     src/core/log.cpp
     src/core/options.cpp
     src/core/window.cpp
+    src/game/level.cpp
+    src/game/visibility.cpp
+    src/game/world_test.cpp
     src/render/debug.cpp
+    src/render/level_mesh.cpp
     src/render/mesh.cpp
     src/render/model.cpp
     src/render/procedural.cpp
@@ -36,7 +40,7 @@ add_executable(descent
     src/render/shader.cpp
     src/render/stb_impl.cpp
     src/render/target.cpp
-    src/render/texture.cpp
+    src/render/texture_array.cpp
     src/sim/flight.cpp
     src/sim/flight_test.cpp
     src/sim/ship.cpp

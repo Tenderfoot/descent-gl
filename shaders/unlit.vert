@@ -1,8 +1,10 @@
 #version 460 core
 
+// The unlit pass: emissive surfaces and debug geometry, drawn once at full
+// brightness after every light has had its turn. From M5 this carries bolts,
+// flares and explosions; from M7 the HUD.
+
 layout(location = 0) in vec3 aPos;
-layout(location = 1) in vec3 aNormal;
-layout(location = 2) in vec2 aUV;
 
 layout(std140, binding = 0) uniform Camera {
     mat4 uView;
@@ -11,11 +13,8 @@ layout(std140, binding = 0) uniform Camera {
 
 uniform mat4 uModel;
 
-out vec2 vUV;
-out vec3 vNormal;
+invariant gl_Position;
 
 void main() {
-    vUV = aUV;
-    vNormal = mat3(uModel) * aNormal;
     gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
 }
