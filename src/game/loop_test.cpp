@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/level_list.h"
 #include "game/menu.h"
 #include "game/session.h"
 #include "sim/collision.h"
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <format>
 #include <string>
+#include <vector>
 
 namespace dvk {
 
@@ -152,6 +154,36 @@ bool verifyLevelSession(const Level& level, const sim::RobotConfig& robots) {
     return ok;
 }
 
+bool verifyLevelList(const char* levelPath) {
+    bool ok = true;
+    const std::vector<LevelEntry> levels = discoverLevels("assets/levels", levelPath);
+    ok &= expect(!levels.empty(), "the level directory lists at least one level");
+    if (levels.empty()) {
+        log::info("level list: FAIL");
+        return false;
+    }
+
+    ok &= expect(levels.front().path == levelPath,
+                 "the level a plain run would start is listed first");
+
+    bool named = true;
+    bool jsonOnly = true;
+    for (const LevelEntry& entry : levels) {
+        named &= !entry.name.empty();
+        jsonOnly &= entry.path.size() > 5 && entry.path.compare(entry.path.size() - 5, 5, ".json") == 0;
+        log::info("level '{}' at {}{}", entry.name, entry.path,
+                  entry.comment.empty() ? "" : " (described)");
+    }
+    ok &= expect(named, "every listed level has a name");
+    ok &= expect(jsonOnly, "only .json files are listed");
+
+    // A missing directory is a menu with nothing in it, not a crash.
+    ok &= expect(discoverLevels("assets/levels-that-are-not-there").empty(),
+                 "a missing level directory lists nothing");
+    log::info("level list: {}", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 bool verifyPlayerMenu() {
     bool ok = true;
     PlayerMenu menu;
@@ -196,6 +228,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     bool ok = true;
     ok &= verifyLevelSession(rig.level, rig.robotCfg);
     ok &= verifyPlayerMenu();
+    ok &= verifyLevelList(levelPath);
 
     // Only a campaign level has a loop to test. test01 is a renderer and
     // physics fixture with no doors, no exit and no reactor, and running the

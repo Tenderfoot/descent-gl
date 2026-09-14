@@ -2,37 +2,14 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/level_list.h"
 #include "render/model.h"
 #include "render/shadow.h"
 
-#include <algorithm>
-#include <filesystem>
 #include <string>
 #include <vector>
 
 namespace dvk {
-
-namespace {
-
-std::vector<std::string> filesWithExtension(const char* directory, const char* extension) {
-    std::vector<std::string> found;
-    std::error_code ec;
-    const std::filesystem::path dir(directory);
-    if (!std::filesystem::is_directory(dir, ec)) return found;
-
-    for (const std::filesystem::directory_entry& entry :
-         std::filesystem::directory_iterator(dir, ec)) {
-        if (!entry.is_regular_file(ec)) continue;
-        if (entry.path().extension() != extension) continue;
-        found.push_back(entry.path().generic_string());
-    }
-    // directory_iterator order is unspecified, and a report whose line order
-    // changes between machines is a report nobody can diff.
-    std::sort(found.begin(), found.end());
-    return found;
-}
-
-} // namespace
 
 int validateAssets() {
     int failures = 0;
