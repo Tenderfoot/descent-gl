@@ -1052,3 +1052,76 @@ Playing `mine01` end to end on the dev machine: whether the key routing reads,
 whether 45 seconds is the right countdown, and whether 16 robots is too many or
 too few. That is a judgement call at a keyboard, not something the container can
 answer.
+
+---
+
+## E0–E2 — The level editor: viewer, validation parity, round trip ✅
+
+A browser tool for authoring `assets/levels/*.json`, in `tools/editor/`. Not
+part of the game build: no CMake target, no vcpkg entry, no node toolchain,
+three.js vendored beside it. See `docs/ARCHITECTURE.md`, *Authoring: the level
+editor*.
+
+E0 is the viewer, E1 is validation parity with the game, E2 is saving. It does
+not modify geometry yet — that is E3. Doing the round trip first is the point:
+a save that is only nearly faithful turns every later edit into an
+unreviewable diff, and it is much easier to prove a no-op before there is
+anything that could make it stop being one.
+
+### Verified
+
+Measured in the Linux dev container (software rendering; the editor is a
+browser page, so the development machine's numbers do not apply).
+
+| Check | Result |
+| --- | --- |
+| Editor reproduces the game's counts, `mine01` | ✅ 34 segments, 244 wall triangles, 124 welded vertices, 366 edges |
+| Editor reproduces the game's counts, `test01` | ✅ 14 segments, 112 wall triangles, 58 welded vertices, 168 edges |
+| Triangulation port is faithful | ✅ **81 of 204** and **42 of 84** sides take the alternate diagonal — the same numbers the loader logs |
+| Closed wall surface | ✅ V−E+F = 2 on both, matching `--validate-assets` |
+| Open and save is byte-exact | ✅ `git diff` empty on both shipped levels, through the unit test *and* through the real Save button in Chromium |
+| Validator agreement | ✅ 15 broken levels, one per rule: editor rejects, game aborts, both name the same segment and side |
+| Editor-only rules stay editor-only | ✅ overlap and unreachable: editor warns, game loads silently |
+| Conformance run | ✅ 36 assertions, 0 failures |
+| Verify button runs the real binary | ✅ `--world-test`, `--collision-test`, `--loop-test` all PASS on the saved `mine01`, reported into the panel |
+| Page drives clean in Chromium | ✅ no console errors, no page errors, no failed requests; WebGL2 |
+| Path traversal into the repo | ✅ refused: `/../../CLAUDE.md` 404, `..%2f..%2f` level names 400 |
+| Game still builds and passes | ✅ `--validate-assets` unchanged, no asset touched |
+
+### What is in it
+
+Orbit and click-to-select, segments coloured by texture index with the split
+diagonal visible, portals and doors as translucent quads, lights with a reach
+sphere, objects, pickups, the start and the exit as gizmos. Selecting a light
+outlines every segment its flood fill reaches, which is the property hardest to
+picture from the file. X-ray drops the walls to a shell, because a mine seen
+from outside is a closed hull; double-click flies the camera into a segment.
+
+2,100 lines of JavaScript and Python, plus 712 KB of vendored three.js.
+
+### Two things the editor catches that the game does not
+
+Both warnings, both asserted by the conformance run to be things the game
+loads without complaint:
+
+- **Overlapping segments.** `findSegment` returns whichever it tests first, so
+  a ship flying there jumps between rooms.
+- **Unreachable segments.** Dead data, or a room nobody can ever enter.
+
+### Two ways its writer beats `saveLevel()`
+
+Neither changes what loads; both make the file better. It **preserves
+`comment`**, which `saveLevel` drops — so the prose atop `mine01.json` survives
+a save — and it **writes a light's `segment`** instead of making the loader
+search for it again. It is also the only one of the two that can round-trip at
+all: `nlohmann::json` sorts keys alphabetically and widens `float` to `double`,
+which turns `0.86` into `0.8600000143051147`.
+
+### Not done here
+
+E3 (extrude, join, delete, vertex dragging), E4 (entity tools, OBJ preview),
+E5 (2D map view, undo/redo, the checklist panel). The riskiest piece is E3's
+corner correspondence: getting the mapping from a new segment's eight corner
+slots onto four existing and four new vertices wrong produces a twisted
+segment that still validates. It gets tested against the validator in every
+rotation.

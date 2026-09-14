@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>descent level editor</title>
+<link rel="stylesheet" href="src/editor.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <aside id="panel">
+    <header>
+      <h1>descent level editor</h1>
+      <div class="row">
+        <select id="level-select" title="Levels in assets/levels/"></select>
+        <button id="reload" title="Discard changes and re-read the file">Reload</button>
+      </div>
+      <div class="row">
+        <button id="save" class="primary">Save</button>
+        <button id="verify" title="Run the game's own headless checks over the saved file">Verify</button>
+      </div>
+      <p id="status" class="status"></p>
+    </header>
+
+    <section>
+      <h2>Level</h2>
+      <dl id="stats"></dl>
+    </section>
+
+    <section>
+      <h2>Show</h2>
+      <div id="layers" class="layers"></div>
+    </section>
+
+    <section>
+      <h2>Selection</h2>
+      <div id="selection" class="selection">Click a wall or a gizmo.</div>
+    </section>
+
+    <section>
+      <h2 id="findings-title">Checks</h2>
+      <div id="findings" class="findings"></div>
+    </section>
+
+    <section id="verify-section" hidden>
+      <h2>Game report</h2>
+      <pre id="verify-output"></pre>
+    </section>
+  </aside>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

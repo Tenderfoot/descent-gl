@@ -120,6 +120,26 @@ allocations made by the sim step and the draw path. All three should be boring.
 `CLAUDE.md` lists the rest of the flags. `docs/MILESTONES.md` records what was
 actually measured at each milestone, including the numbers and the bugs.
 
+## Editing levels
+
+`tools/editor/` is a browser tool for authoring `assets/levels/*.json`. It is
+not part of the game build — no CMake target, no vcpkg entry, no node
+toolchain.
+
+```
+tools/editor/serve.py        # then open http://127.0.0.1:8080
+```
+
+It draws the mine with the game's own triangulation, checks every structural
+rule the loader checks (and two it does not), and saves byte-exactly, so
+opening a level and saving it is a no-op. **Verify** in the panel runs the real
+binary over the saved file and prints what it said. See
+`tools/editor/README.md`.
+
+```
+node tools/editor/tests/conformance.mjs   # the editor's validator vs the game's
+```
+
 ## Credits
 
 - **Descent** (Parallax Software, 1995) for the segment-and-portal mine, the
@@ -131,4 +151,6 @@ actually measured at each milestone, including the numbers and the bugs.
   are a look worth committing to rather than a limitation to work around.
 
 Dependencies, all from vcpkg and deliberately few: `glfw3`, `glad`, `glm`,
-`imgui`, `stb`, `nlohmann-json`, `tinyobjloader`.
+`imgui`, `stb`, `nlohmann-json`, `tinyobjloader`. The level editor is a
+separate tool and not part of that build; it vendors three.js (MIT) in
+`tools/editor/vendor/`.

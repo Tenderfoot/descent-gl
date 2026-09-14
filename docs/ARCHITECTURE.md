@@ -146,6 +146,104 @@ tile across a 20-unit wall.
 
 ---
 
+## Authoring: the level editor (E0-E2)
+
+`tools/editor/`. A browser tool that reads and writes `assets/levels/*.json`.
+It is not part of the game build — no CMake target, no vcpkg entry, no node
+toolchain — and three.js is vendored beside it.
+
+`mine01` is 124 vertices and 34 segments written by hand, which is about the
+ceiling for a text editor. The reason a tool is needed rather than more
+patience is the format's central rule: two segments joined through a portal
+reference **the same four vertex indices**, not four coincident positions.
+Nothing about that is visible while typing JSON, and getting it wrong produces
+a light leak that looks like a renderer bug.
+
+So the editor is segment-graph-native. It knows about segments, portals and
+the shared vertex array; from E3 the primitive operation is *extrude a side
+into a new segment*, which creates the reciprocal portal and shares the four
+vertices by construction. There is no free vertex-soup mode.
+
+### It draws the game's triangulation, not its own
+
+`tools/editor/src/geometry.js` is a port of `splitSides()`. A side is a general
+quad, split at load by whichever diagonal leaves the smaller crease, and
+**every later system uses those triangles and never the quad**. An editor that
+drew the quads, or split them the other way, would be showing a mine subtly
+different from the one the game builds, with no error anywhere to say so.
+
+That the port is faithful is checked by a number rather than by reading it:
+the editor must reproduce the loader's own log line, *"81 of 204 sides took the
+alternate diagonal"*, exactly, for both shipped levels. That number moves if
+the rule is ported wrong.
+
+### Two validators, and the conformance run
+
+`tools/editor/src/validate.js` reimplements `validate()`, the door and entity
+resolution that follows it in `loadLevel()`, and `asset_check.cpp`'s
+closed-surface check. Two implementations of one format drift, and the way
+anyone finds out is by authoring a level the editor called fine and the game
+aborts on.
+
+So `tools/editor/tests/conformance.mjs` mutates a three-segment base level one
+rule at a time and asks both: the editor must reject it, the game must abort
+on it, and the two must name the same segment and side. Fifteen cases, one per
+rule. Compiling the C++ validator to WASM was the alternative and was rejected:
+a whole toolchain, for seventy lines.
+
+Two checks exist only in the editor, as warnings, because the game makes
+neither and both produce behaviour that looks like a bug elsewhere:
+**overlapping segments** (`findSegment` answers with whichever it tests first,
+so a ship jumps between rooms) and **unreachable segments** (dead data, or a
+room nobody can enter). The conformance run asserts the *inverse* for these —
+the editor warns and the game loads the level silently — which is what keeps
+them honest about being editor-only.
+
+### Saving is a no-op
+
+Opening a shipped level and pressing Save produces the same bytes: `git diff`
+is empty. This is proved before any editing feature exists, because a round
+trip that is only *nearly* faithful turns every later save into an
+unreviewable diff.
+
+`saveLevel()` cannot manage it. `nlohmann::json` sorts object keys
+alphabetically, and a `float` widened to `double` on the way out turns `0.86`
+into `0.8600000143051147`. The editor's writer keeps each object's source key
+order, omits fields sitting at their default, and formats numbers the way the
+files do — floats with a `.0`, indices bare. It also fixes two things
+`saveLevel` gets wrong: it **preserves `comment`**, which `saveLevel` drops (so
+the prose atop `mine01.json` survives a save), and it **writes a light's
+`segment`** rather than making the loader search for it again.
+
+### The server, and Verify
+
+`tools/editor/serve.py` is loopback-only and does the three things a browser
+cannot: list the levels, read one, write one back. It also exposes **Verify**,
+which runs the real binary — `--world-test`, `--collision-test`, `--loop-test`
+— over the saved file and prints what it said into the panel. The editor's own
+checks are the fast feedback; the game is the answer. Nothing new was invented
+to verify levels, because the headless flags already do it.
+
+The level name in a request is matched against a strict pattern and joined to
+`assets/levels/` rather than taken as a path, static files are resolved and
+then confirmed to still be inside `tools/editor/`, and a save parses the body
+before replacing the file — unreadable JSON in `assets/levels/` makes every
+later game start fatal, editor or not.
+
+### What it is not
+
+Not the renderer. No shadows, no falloff, no reversed-Z, and the colours are
+flat and deliberately unlike the game's: this is a diagram, and reading it as
+a screenshot would be a mistake. A mine seen from outside is a closed hull, so
+walls are `DoubleSide` and an x-ray toggle drops them to a shell; double-click
+flies the camera into a segment. "How does this look" is answered by
+`--segment N --no-ui --screenshot`.
+
+The in-game ImGui light editor stays. Tweaking a light under real shadowed
+lighting is not something a browser can do; structure is what the editor owns.
+
+---
+
 ## Portal visibility
 
 `src/game/visibility.h`. From the segment the camera is in, recurse through
