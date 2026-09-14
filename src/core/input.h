@@ -28,6 +28,7 @@ public:
     bool anyKeyPressed() const;
 
     glm::vec2 consumeMouseDelta();     // pixels moved since last consume
+    glm::vec2 cursorPosition() const { return cursorPosition_; }
     bool mouseCaptured() const { return captured_; }
     void setMouseCaptured(GLFWwindow* w, bool captured);
 
@@ -44,6 +45,7 @@ private:
     std::array<bool, kMaxButtons> buttonCur_{};
     std::array<bool, kMaxButtons> buttonPrev_{};
     glm::dvec2 lastCursor_{0.0, 0.0};
+    glm::vec2 cursorPosition_{0.0f, 0.0f};
     bool haveLastCursor_ = false;
     glm::vec2 delta_{0.0f, 0.0f};
     bool captured_ = false;

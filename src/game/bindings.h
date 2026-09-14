@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/input.h"
+#include "game/menu.h"
 #include "sim/ship.h"
 
 #include <GLFW/glfw3.h>
@@ -63,7 +64,7 @@ enum class Toggle {
     Headlight,
     Flare,
     Automap,
-    Capture,
+    Pause,
     Mute,
     Count,
 };
@@ -80,7 +81,7 @@ inline constexpr std::array<ToggleBinding, static_cast<size_t>(Toggle::Count)> k
     {Toggle::Headlight, GLFW_KEY_H, "H"},
     {Toggle::Flare, GLFW_KEY_F, "F"},
     {Toggle::Automap, GLFW_KEY_TAB, "Tab"},
-    {Toggle::Capture, GLFW_KEY_ESCAPE, "Escape"},
+    {Toggle::Pause, GLFW_KEY_ESCAPE, "Escape"},
     {Toggle::Mute, GLFW_KEY_M, "M"},
 }};
 
@@ -90,6 +91,16 @@ inline int keyFor(Toggle t) {
 
 // Weapon selection is 1..4 in order, so it is a base rather than a table.
 inline constexpr int kWeaponSelectBase = GLFW_KEY_1;
+
+inline MenuInput readMenuInput(const Input& input, const glm::vec2& pointer) {
+    MenuInput menu;
+    menu.previous = input.pressed(GLFW_KEY_UP) || input.pressed(GLFW_KEY_W);
+    menu.next = input.pressed(GLFW_KEY_DOWN) || input.pressed(GLFW_KEY_S);
+    menu.confirm = input.pressed(GLFW_KEY_ENTER) || input.pressed(GLFW_KEY_SPACE);
+    menu.pointerPressed = input.mousePressed(GLFW_MOUSE_BUTTON_LEFT);
+    menu.pointer = pointer;
+    return menu;
+}
 
 // Samples the bindings into the device-independent control struct the
 // simulation consumes. Mouse motion is only applied while the cursor is

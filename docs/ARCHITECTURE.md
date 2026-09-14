@@ -997,9 +997,29 @@ string literals rather than at anything it has to free.
 ### Four phases, and one direction through them
 
 `Playing → Countdown → Won`, or either of the first two → `Lost`. `stepGame`
-returns immediately in `Won` and `Lost`, so an end screen is a frozen
-simulation rather than a separate mode with its own loop. The phase never runs
-backwards; restarting rebuilds the state from the level instead of unwinding it.
+returns immediately in `Won` and `Lost`. The phase never runs backwards;
+restarting rebuilds the state from the level instead of unwinding it.
+
+### The application owns the run
+
+`src/game/session.h` separates application state from level state. `AppMode`
+tracks the main menu, active play, pause and the run summary while `GamePhase`
+continues to describe only events inside the simulation. That keeps a pause
+menu from becoming a simulated phase and gives later player-facing screens one
+place to decide whether the fixed step may advance.
+
+`LevelSession` owns the initial, previous and current `SimState`. Starting a
+level builds all three from the level and robot definitions. Restart copies the
+stored initial state back into both interpolation endpoints, so no velocity,
+projectile, door position or render interpolation survives. Leaving a run
+returns the application to the main menu without trying to reverse simulation
+events.
+
+Only `AppMode::Playing` admits fixed steps. Entering pause clears the
+accumulator, and resuming begins with an empty accumulator, so time spent in a
+menu cannot turn into a burst of catch-up simulation. Paused and summary time
+is excluded from the achieved-step-rate denominator for the same reason that
+minimized time is excluded.
 
 The reactor is not a special object type. It is a **robot whose definition sets
 `isReactor`**, which means it already has health, line of sight, a weapon and a
@@ -1075,6 +1095,27 @@ the call site because neither fails loudly:
 ImGui is debug-only from this milestone and starts hidden; F3 toggles it,
 `--debug-ui` starts with it open, and `--no-ui` keeps it shut so a screenshot
 shows the game.
+
+### Player-facing menus
+
+`src/game/menu.h` owns menu state, navigation and layout without depending on
+OpenGL. It produces a `MenuView` containing fixed-capacity button data and
+framebuffer-space rectangles. Keyboard and pointer input both resolve to the
+same `MenuAction`, so clicking a button and confirming a focused button cannot
+drift into separate behavior.
+
+The renderer consumes that view through the existing HUD batch. Menus are
+therefore screen-space text and rectangles drawn after the MSAA resolve, with
+no new shader, texture or dependency. The same rectangles drive pointer hit
+testing and rendering. Cursor coordinates are scaled from GLFW window space to
+framebuffer space so high-DPI windows do not move the clickable area away from
+the visible button.
+
+A normal launch prepares the level as a frozen background and opens the main
+menu. Command-line runs still begin in play so screenshots, resize runs and the
+existing harness retain their behavior; `--start-menu` selects the menu for a
+visual check. Pause and run summary use the same menu model, while ImGui remains
+debug-only.
 
 ---
 

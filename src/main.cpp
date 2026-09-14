@@ -13,6 +13,7 @@
 #include "game/collision_test.h"
 #include "game/loop_test.h"
 #include "game/robots_test.h"
+#include "game/session.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
@@ -192,16 +193,19 @@ int main(int argc, char** argv) {
     dvk::sim::FlightConfig flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
     const dvk::sim::FlightConfig flightDefaults;
 
-    dvk::SimState prev;
-    dvk::SimState cur;
-    cur.ship.body.position = level.start.position;
-    cur.ship.body.segment = level.start.segment;
-    cur.ship.orientation = level.start.orientation;
-    if (opts.startSegment >= 0 && opts.startSegment < level.segmentCount()) {
-        cur.ship.body.segment = opts.startSegment;
-        cur.ship.body.position = level.segments[static_cast<size_t>(opts.startSegment)].center;
+    dvk::LevelSession session;
+    session.load(level, robotConfig, opts.startSegment);
+    dvk::SimState& prev = session.previous();
+    dvk::SimState& cur = session.current();
+    dvk::PlayerMenu menu;
+
+    const bool commandLineRun = argc > 1 && !opts.startMenu;
+    if (commandLineRun) {
+        session.start();
+        menu.hide();
+    } else {
+        menu.showMain();
     }
-    prev = cur;
 
     dvk::sim::ContactLog contacts;
 
@@ -231,11 +235,8 @@ int main(int argc, char** argv) {
     dvk::LightFlood flood;
 
     dvk::sim::WeaponConfig weapons = dvk::sim::loadWeaponConfig(kWeaponConfigPath);
-    dvk::sim::initObjects(level, robotConfig, cur.combat.objects);
-    dvk::sim::spawnRobots(level, robotConfig, cur.robots);
 
     const dvk::sim::GameConfig gameConfig;
-    dvk::sim::initGame(level, cur.robots, cur.game);
 
     // Rebuilt each step and handed to collision, line of sight and projectiles
     // alike, so none of them can disagree about whether a door is shut.
@@ -246,11 +247,6 @@ int main(int argc, char** argv) {
     // time a door changes between see-through and shut, so a light beside a
     // shut door stops at it the way a bolt light does.
     int lightDoorSignature = -1;
-
-    // A fresh start, kept so any key can restart from an end screen without
-    // reloading the level.
-    const dvk::SimState initialState = cur;
-    prev = cur;
 
     // Rebuilt every frame and reused, so the vectors inside each Light keep
     // their capacity and the draw path does not allocate. Index 0 is always
@@ -290,8 +286,14 @@ int main(int argc, char** argv) {
     bool scriptFired[std::size(kResizeScript)] = {};
     int minimizedFrames = 0;
     double minimizedSeconds = 0.0;
+    double suspendedSeconds = 0.0;
+
+    if (session.advancesSimulation() && opts.frames < 0 && !opts.resizeTest) {
+        input.setMouseCaptured(window.handle(), true);
+    }
 
     while (!window.shouldClose()) {
+        const bool simulationWasAdvancing = session.advancesSimulation();
         input.beginFrame();
         window.poll();
 
@@ -328,6 +330,8 @@ int main(int argc, char** argv) {
         elapsed = std::min(elapsed, kMaxFrameTime);
         accumulator += elapsed;
 
+        if (!window.minimized() && !simulationWasAdvancing) suspendedSeconds += elapsed;
+
         if (window.minimized()) {
             // Nothing to draw and no valid framebuffer size; keep the sim from
             // banking time while the window is away.
@@ -341,21 +345,70 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Capture))) {
-            input.setMouseCaptured(window.handle(), !input.mouseCaptured());
-        }
-        // Any key restarts from an end screen. Checked before the toggles
-        // below so the restart key does not also flip the headlight.
-        if (cur.game.phase == dvk::sim::GamePhase::Won ||
-            cur.game.phase == dvk::sim::GamePhase::Lost) {
-            if (input.anyKeyPressed() || input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
-                cur = initialState;
-                prev = cur;
-                accumulator = 0.0;
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Pause))) {
+            if (session.mode() == dvk::AppMode::Playing) {
+                session.pause();
+                menu.showPause();
+                automap.open = false;
+                input.setMouseCaptured(window.handle(), false);
+            } else if (session.mode() == dvk::AppMode::Paused) {
+                session.resume();
+                menu.hide();
+                input.setMouseCaptured(window.handle(), true);
             }
-        } else if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
+            accumulator = 0.0;
+            prev = cur;
+        }
+
+        const glm::ivec2 menuFramebuffer = window.framebufferSize();
+        const glm::ivec2 menuWindow = window.windowSize();
+        const glm::vec2 pointerScale(
+            static_cast<float>(menuFramebuffer.x) / static_cast<float>(std::max(menuWindow.x, 1)),
+            static_cast<float>(menuFramebuffer.y) / static_cast<float>(std::max(menuWindow.y, 1)));
+        const dvk::MenuAction menuAction = menu.update(
+            dvk::readMenuInput(input, input.cursorPosition() * pointerScale), menuFramebuffer.x,
+            menuFramebuffer.y);
+        switch (menuAction) {
+            case dvk::MenuAction::Start:
+                session.start();
+                menu.hide();
+                lightDoorSignature = -1;
+                input.setMouseCaptured(window.handle(), true);
+                accumulator = 0.0;
+                break;
+            case dvk::MenuAction::Resume:
+                session.resume();
+                menu.hide();
+                input.setMouseCaptured(window.handle(), true);
+                accumulator = 0.0;
+                prev = cur;
+                break;
+            case dvk::MenuAction::Restart:
+                session.restart();
+                menu.hide();
+                contacts.clear();
+                automap.open = false;
+                lightDoorSignature = -1;
+                input.setMouseCaptured(window.handle(), true);
+                accumulator = 0.0;
+                break;
+            case dvk::MenuAction::MainMenu:
+                session.leave();
+                menu.showMain();
+                contacts.clear();
+                automap.open = false;
+                input.setMouseCaptured(window.handle(), false);
+                accumulator = 0.0;
+                prev = cur;
+                break;
+            case dvk::MenuAction::Quit: window.requestClose(); break;
+            case dvk::MenuAction::None: break;
+        }
+
+        if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
             showDebugUi = !showDebugUi;
-        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
+        } else if (session.mode() == dvk::AppMode::Playing &&
+                   input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
             // Refuses to come on with no energy left, which is the whole point
             // of it costing any.
             cur.combat.player.headlightOn =
@@ -365,7 +418,8 @@ int main(int argc, char** argv) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
         }
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
+        if (session.mode() == dvk::AppMode::Playing &&
+            input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
             automap.open = !automap.open;
         }
         if (input.pressed(dvk::keyFor(dvk::Toggle::Mute))) {
@@ -373,6 +427,8 @@ int main(int argc, char** argv) {
             // unmuting is instant and does not restart the engine mid-note.
             audio.setMuted(!audio.muted());
         }
+
+        if (!session.advancesSimulation()) accumulator = 0.0;
 
         dvk::alloc::Scope simAllocs;
         glm::vec2 mouseDelta = input.consumeMouseDelta();
@@ -388,7 +444,7 @@ int main(int argc, char** argv) {
         }
         bool consumedMouse = false;
         soundEvents.clear();
-        while (accumulator >= kSimStep) {
+        while (session.advancesSimulation() && accumulator >= kSimStep) {
             prev = cur;
             // The whole frame's motion belongs to the first step; later steps
             // in the same frame have no new input to apply.
@@ -443,6 +499,15 @@ int main(int argc, char** argv) {
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
+            if (cur.game.phase == dvk::sim::GamePhase::Won ||
+                cur.game.phase == dvk::sim::GamePhase::Lost) {
+                session.finish();
+                menu.showSummary(cur.game.phase == dvk::sim::GamePhase::Won, cur.game.endReason,
+                                 cur.game.elapsed, cur.game.robotsDestroyed,
+                                 cur.game.robotsAtStart);
+                input.setMouseCaptured(window.handle(), false);
+                accumulator = 0.0;
+            }
         }
         // CLAUDE.md says the sim step does not allocate. M8 says to instrument
         // that rather than believe it. The first few frames are exempt: pools
@@ -642,7 +707,8 @@ int main(int argc, char** argv) {
         }
 
         dvk::gl::HudData hud;
-        hud.show = !opts.noUi;
+        hud.show = !opts.noUi && session.active() &&
+                   session.mode() != dvk::AppMode::RunSummary;
         hud.shields = cur.combat.player.shields;
         hud.energy = cur.combat.player.energy;
         hud.weaponName = dvk::sim::kWeaponNames[static_cast<size_t>(cur.combat.player.weapon)];
@@ -665,6 +731,9 @@ int main(int argc, char** argv) {
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         hud.robotsTotal = cur.game.robotsAtStart;
+
+        dvk::MenuView menuView = menu.view(fb.x, fb.y);
+        if (opts.noUi) menuView.screen = dvk::MenuScreen::Hidden;
 
         if (automap.open) {
             automap.segmentCount = level.segmentCount();
@@ -728,9 +797,10 @@ int main(int argc, char** argv) {
                 addMarker(level.exitTrigger.position, glm::vec3(0.5f, 1.0f, 0.7f), 3.0f, false);
             }
 
-            renderer.drawAutomap(automap, level, hud);
+            renderer.drawAutomap(automap, level, hud, menuView);
         } else {
-            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud,
+                               menuView);
         }
         renderer.resolve();
         // The same question for the draw path: everything from beginFrame to
@@ -1168,7 +1238,8 @@ int main(int argc, char** argv) {
     // The step rate is the property worth checking: steps/elapsed must sit on
     // kSimHz regardless of how fast frames were drawn.
     const double elapsed =
-        (loopEnd > 0.0 ? loopEnd : clock.seconds()) - loopStart - minimizedSeconds;
+        (loopEnd > 0.0 ? loopEnd : clock.seconds()) - loopStart - minimizedSeconds -
+        suspendedSeconds;
     dvk::log::info("exited cleanly: {} frames, {} sim steps in {:.3f}s ({:.1f} steps/s, target {:.0f})",
                    frame, totalSteps, elapsed,
                    elapsed > 0.0 ? static_cast<double>(totalSteps) / elapsed : 0.0, kSimHz);

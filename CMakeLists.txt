@@ -38,7 +38,9 @@ add_executable(descent
     src/game/level.cpp
     src/game/visibility.cpp
     src/game/loop_test.cpp
+    src/game/menu.cpp
     src/game/robots_test.cpp
+    src/game/session.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp

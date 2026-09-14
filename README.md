@@ -79,6 +79,9 @@ performance measurement.**
 
 ## Controls
 
+A normal launch opens the main menu. Command-line verification runs continue
+to enter the selected level directly.
+
 | Input | Action |
 | --- | --- |
 | Mouse | Pitch and yaw (only while captured) |
@@ -95,7 +98,7 @@ performance measurement.**
 | Right mouse | Launch a missile |
 | F | Throw a flare |
 | H | Toggle the headlight |
-| Escape | Toggle mouse capture |
+| Escape | Pause / resume |
 
 Every one of these comes from a single table in `src/game/bindings.h`.
 

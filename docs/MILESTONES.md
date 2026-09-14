@@ -1408,3 +1408,51 @@ the names are the contract, not the contents.
   alone. The segment is already carried on every event for the day that changes.
 - **No reverb and no doppler.** The clips are dry deliberately — the sense of
   space comes from attenuation and panning, and baked-in reverb fights it.
+
+---
+
+## Player shell — Phase 1 ✅
+
+Application modes and level-session ownership establish the lifecycle that the
+player-facing menus will drive. The executable still enters the level directly
+until the Phase 2 screens exist.
+
+`LevelSession` owns the initial and interpolation states, provides start,
+restart, pause, resume, finish and leave transitions, and exposes the single
+answer to whether the fixed simulation may advance. Escape now pauses and
+resumes, releasing and recapturing the mouse. Win and loss enter a run-summary
+mode instead of relying on the simulation phase alone to freeze the game.
+
+| Check | Result |
+| --- | --- |
+| Session starts outside a level | ✅ main menu, inactive |
+| Starting a level | ✅ playing, simulation advances |
+| Pause and run summary | ✅ simulation does not advance |
+| Restart | ✅ elapsed time, player, robots and objects restored |
+| Leave | ✅ main menu, inactive |
+| Debug and Release headless suites | ✅ all eight pass in both configurations |
+| Debug and Release rendered startup | ✅ 60 frames, clean exit, no GL errors |
+| Release resize, minimize and restore | ✅ 119.8 / 120 steps/s |
+
+---
+
+## Player shell — Phase 2 ✅
+
+The player UI is a fixed-capacity menu model rendered through the existing HUD
+batch. It supports keyboard focus, mouse hover and clicks, high-DPI coordinate
+scaling, and explicit actions rather than screen-specific input branches.
+
+A normal launch now opens a main menu over the frozen mine. Pause offers
+resume, restart, main menu and quit. Win and loss open a run summary with the
+reason, elapsed time and robot tally, followed by retry and main-menu actions.
+Command-line runs retain direct startup, and `--start-menu` exposes the menu to
+the screenshot harness.
+
+| Check | Result |
+| --- | --- |
+| Keyboard navigation | ✅ selection and confirmation resolve one action |
+| Pointer navigation | ✅ rendered button bounds are the hit-test bounds |
+| Main menu at 1600×900 | ✅ visually verified |
+| Main menu at 640×360 | ✅ visually verified |
+| Release menu allocations after warm-up | ✅ none on 0 of 60 frames |
+| Loop and menu lifecycle regression | ✅ PASS |

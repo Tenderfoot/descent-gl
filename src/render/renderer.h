@@ -28,6 +28,7 @@ struct RayHit;
 struct RobotConfig;
 }
 struct Light;
+struct MenuView;
 struct RenderState;
 class PortalWalk;
 }
@@ -127,11 +128,12 @@ public:
     // every frame by the game layer.
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
                    const std::vector<Light>& dynamicLights, int shadowBudget,
-                   const HudData& hud);
+                   const HudData& hud, const MenuView& menu);
 
     // Draws the automap instead of the mine. The simulation is still running
     // behind it - this replaces the view, not the frame.
-    void drawAutomap(const AutomapData& map, const Level& level, const HudData& hud);
+    void drawAutomap(const AutomapData& map, const Level& level, const HudData& hud,
+                     const MenuView& menu);
 
     // Rebuilds the debug line list for this frame. Call before drawScene.
     // Everything here is a toggle because the mine is dark and these lines are
@@ -231,6 +233,7 @@ private:
     void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildDoors(const RenderState& rs, const Level& level);
     void buildHud(const HudData& hud);
+    void buildMenu(const MenuView& menu);
     void hudPass();
     void buildAutomapLines(const AutomapData& map, const Level& level);
 

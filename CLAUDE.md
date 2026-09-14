@@ -90,6 +90,7 @@ milestone rather than describing what the code should do:
 | `--sound-test` | Load every shipped clip and run the mixer headlessly: attenuation over distance, the stereo image, the voice pool under pressure, whether a loop loops, whether the bus clips, and whether the mix path allocates. Needs no window, no GL and no sound card. |
 | `--no-sound` | Do not open a playback device. |
 | `--volume V` | Master volume, 0..1. Default 0.8. |
+| `--start-menu` | Show the player main menu even during a frame-limited or screenshot run. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame
@@ -109,6 +110,9 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 
 ## Controls
 
+A normal launch opens the player main menu. Any command-line run enters the
+level directly unless `--start-menu` is present.
+
 | Input | Action |
 | --- | --- |
 | Mouse | Pitch and yaw (only while captured) |
@@ -126,7 +130,7 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 | F | Throw a flare |
 | H | Toggle the headlight |
 | M | Mute |
-| Escape | Toggle mouse capture |
+| Escape | Pause / resume |
 
 All of these come from one table in `src/game/bindings.h`; nothing else in the
 project names a GLFW key code for gameplay.
