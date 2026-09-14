@@ -230,7 +230,7 @@ void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
             if (!sd.isPortal()) continue;
-            if (doors && doors->isBlocked(si, side)) continue;
+            if (doors && doors->isOpaque(si, side)) continue;
             if (scratch.mark[static_cast<size_t>(sd.neighbour)] == scratch.stamp) continue;
 
             // Stop at a portal the light cannot reach. Measured to the nearest
@@ -250,6 +250,15 @@ void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
 
     // Sorted so the renderer can binary-search membership.
     std::sort(light.segments.begin(), light.segments.end());
+}
+
+void rebuildAllLightSegments(Level& level, LightFlood& scratch, const sim::DoorField* doors) {
+    for (Light& light : level.lights) {
+        if (light.segment < 0 || light.segment >= level.segmentCount()) {
+            light.segment = findSegment(level, light.position);
+        }
+        rebuildLightSegments(static_cast<const Level&>(level), light, scratch, doors);
+    }
 }
 
 void rebuildLightSegments(Level& level, Light& light) {

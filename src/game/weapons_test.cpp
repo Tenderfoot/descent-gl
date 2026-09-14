@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
@@ -29,7 +30,7 @@ struct Rig {
 
     void reset() {
         state = sim::CombatState{};
-        sim::initObjects(level, state.objects);
+        sim::initObjects(level, robotCfg, state.objects);
         sim::spawnRobots(level, robotCfg, robots);
         ship = sim::Body{};
         ship.position = level.start.position;
@@ -224,6 +225,112 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
             log::info("target: {} with {:.0f} health, {:.0f} damage per shot, destroyed after "
                       "{:.2f}s",
                       def.name, health, damage, static_cast<float>(steps) * kStep);
+        }
+    }
+
+    // --- a robot's spawn point is not a target once the robot has moved ------
+    //
+    // Robots come from the level's object list, and the object list is also
+    // what bolts test against. Every robot's spawn point used to stay behind
+    // as an invisible, indestructible sphere that stopped shots for no visible
+    // reason. Here the robot is removed and a bolt is fired straight through
+    // where it stood; it has to reach the wall beyond.
+    {
+        rig.reset();
+        rig.state.player.headlightOn = false;
+        if (rig.robots.count > 0) {
+            sim::Robot& robot = rig.robots.robots[0];
+            const glm::vec3 spawn = robot.body.position;
+            const int segment = robot.body.segment;
+            robot.alive = false;
+
+            // The axis with the most room on both sides of the spawn point:
+            // behind it for the ship to sit, ahead of it for the bolt to pass
+            // the spawn point and still fly on.
+            const glm::vec3 axes[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                                       {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+            const auto clearRun = [&](const glm::vec3& d) {
+                const sim::RayHit hit = sim::raycast(rig.level, spawn, d, 200.0f, segment);
+                return hit.hit ? hit.distance : 200.0f;
+            };
+            glm::vec3 dir(0.0f, 0.0f, -1.0f);
+            float clear = 0.0f;
+            float room = 0.0f;
+            for (const glm::vec3& axis : axes) {
+                const float ahead = clearRun(axis);
+                const float behindRun = clearRun(-axis);
+                if (std::min(ahead, behindRun) > std::min(clear, room)) {
+                    clear = ahead;
+                    room = behindRun;
+                    dir = axis;
+                }
+            }
+            const float back = std::min(5.0f, room - 1.0f);
+            rig.ship.position = spawn - dir * back;
+            rig.ship.segment = findSegment(rig.level, rig.ship.position, segment);
+            rig.aimAt(spawn);
+            ok &= expect(rig.ship.segment >= 0, "the firing position is inside the mine");
+
+            rig.held = sim::FireControls{};
+            rig.held.selectWeapon = sim::WeaponLaser;
+            rig.held.primary = true;
+            rig.run(1);
+            rig.held = sim::FireControls{};
+
+            float furthest = 0.0f;
+            for (int i = 0; i < 240 && playerBolts(rig) > 0; ++i) {
+                rig.run(1);
+                for (const sim::Projectile& p : rig.state.projectiles.items) {
+                    if (!p.alive || p.owner >= 0) continue;
+                    furthest = std::max(furthest, glm::length(p.position - rig.ship.position));
+                }
+            }
+            // Past the spawn point by more than the old phantom's 2.4 unit
+            // radius plus the bolt's own.
+            const bool passed = furthest > back + 4.0f;
+            ok &= expect(passed, "a bolt flew through a dead robot's spawn point");
+            log::info("phantom: bolt reached {:.1f} units past a spawn point with {:.1f} units of "
+                      "clear run ({})",
+                      furthest - back, clear, passed ? "passed through" : "STOPPED");
+        }
+    }
+
+    // --- a homing missile seeks a robot -------------------------------------
+    {
+        rig.reset();
+        rig.state.player.headlightOn = false;
+        if (rig.robots.count > 0) {
+            const int slot = 0;
+            sim::Robot& robot = rig.robots.robots[static_cast<size_t>(slot)];
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(robot.body.segment)].center;
+            robot.body.position = centre + glm::vec3(0.0f, 0.0f, -7.0f);
+            rig.ship.position = centre + glm::vec3(0.0f, 0.0f, 7.0f);
+            rig.ship.segment = robot.body.segment;
+            // Aimed a little off, so only a missile that turns can connect.
+            rig.aimAt(robot.body.position + glm::vec3(3.0f, 0.0f, 0.0f));
+
+            const float before = robot.health;
+            rig.held = sim::FireControls{};
+            rig.held.selectWeapon = sim::WeaponHoming;
+            rig.held.secondary = true;
+            rig.run(1);
+            rig.held = sim::FireControls{};
+
+            int acquired = -1;
+            for (const sim::Projectile& p : rig.state.projectiles.items) {
+                if (p.alive && p.owner < 0 && p.kind == sim::ProjectileKind::Homing) {
+                    acquired = p.targetRobot;
+                }
+            }
+            ok &= expect(acquired == slot, "the missile locked on to the robot");
+            rig.run(240);
+            const float after = rig.robots.robots[static_cast<size_t>(slot)].alive
+                                    ? rig.robots.robots[static_cast<size_t>(slot)].health
+                                    : 0.0f;
+            ok &= expect(after < before, "the missile hit the robot it locked on to");
+            log::info("homing: locked robot {}, target health {:.0f} -> {:.1f}", acquired, before,
+                      after);
         }
     }
 

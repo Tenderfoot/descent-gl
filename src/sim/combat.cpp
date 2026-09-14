@@ -144,19 +144,21 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
 
 } // namespace
 
-void initObjects(const Level& level, ObjectHealth& out) {
+void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& out) {
     out.count = std::min(static_cast<int>(level.objects.size()), kMaxObjects);
     for (int i = 0; i < out.count; ++i) {
         const LevelObject& obj = level.objects[static_cast<size_t>(i)];
         out.health[static_cast<size_t>(i)] = obj.health;
-        // Health of zero means indestructible scenery, not already dead.
-        out.alive[static_cast<size_t>(i)] = true;
+        // Health of zero means indestructible scenery, not already dead. A
+        // robot's entry is dead from the start: the robot list owns it.
+        out.alive[static_cast<size_t>(i)] = !objectIsRobot(robots, obj.type);
     }
 }
 
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
-                const FireControls& controls, float dt, RobotState* robots) {
+                const FireControls& controls, float dt, RobotState* robots,
+                const SolidDoors* doors) {
     PlayerState& player = state.player;
 
     if (controls.selectWeapon >= 0 && controls.selectWeapon < WeaponCount) {
@@ -245,18 +247,35 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         // rather than a missile.
         if (weaponId == WeaponHoming) {
             float bestScore = -1.0f;
+            const auto consider = [&](const glm::vec3& position) {
+                const glm::vec3 to = position - origin;
+                const float dist = glm::length(to);
+                if (dist > def.seekRange || dist < 0.001f) return false;
+                const float cosAngle = glm::dot(to / dist, forward);
+                if (cosAngle < std::cos(def.seekCone)) return false;
+                const float score = cosAngle - dist / def.seekRange;
+                if (score <= bestScore) return false;
+                bestScore = score;
+                return true;
+            };
+            // Robots are what a missile is for. Destructible scenery is a
+            // target too, but only if nothing alive scores better.
+            if (robots) {
+                for (int i = 0; i < robots->count; ++i) {
+                    const Robot& robot = robots->robots[static_cast<size_t>(i)];
+                    if (!robot.alive) continue;
+                    if (consider(robot.body.position)) {
+                        p.targetRobot = i;
+                        p.target = -1;
+                    }
+                }
+            }
             for (int i = 0; i < state.objects.count; ++i) {
                 if (!state.objects.alive[static_cast<size_t>(i)]) continue;
                 if (level.objects[static_cast<size_t>(i)].health <= 0.0f) continue;
-                const glm::vec3 to = level.objects[static_cast<size_t>(i)].position - origin;
-                const float dist = glm::length(to);
-                if (dist > def.seekRange || dist < 0.001f) continue;
-                const float cosAngle = glm::dot(to / dist, forward);
-                if (cosAngle < std::cos(def.seekCone)) continue;
-                const float score = cosAngle - dist / def.seekRange;
-                if (score > bestScore) {
-                    bestScore = score;
+                if (consider(level.objects[static_cast<size_t>(i)].position)) {
                     p.target = i;
+                    p.targetRobot = -1;
                 }
             }
         }
@@ -299,9 +318,19 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             continue;
         }
 
-        if (p.kind == ProjectileKind::Homing && p.target >= 0 &&
-            state.objects.alive[static_cast<size_t>(p.target)]) {
-            const glm::vec3 to = level.objects[static_cast<size_t>(p.target)].position - p.position;
+        // Where a homing missile is steering: a live robot first, else a
+        // destructible object. A target that has died is simply flown past.
+        const glm::vec3* homingGoal = nullptr;
+        if (p.kind == ProjectileKind::Homing) {
+            if (robots && p.targetRobot >= 0 && p.targetRobot < robots->count &&
+                robots->robots[static_cast<size_t>(p.targetRobot)].alive) {
+                homingGoal = &robots->robots[static_cast<size_t>(p.targetRobot)].body.position;
+            } else if (p.target >= 0 && state.objects.alive[static_cast<size_t>(p.target)]) {
+                homingGoal = &level.objects[static_cast<size_t>(p.target)].position;
+            }
+        }
+        if (homingGoal) {
+            const glm::vec3 to = *homingGoal - p.position;
             const float dist = glm::length(to);
             if (dist > 0.001f) {
                 const float speed = glm::length(p.velocity);
@@ -373,7 +402,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             }
         }
 
-        const RayHit wall = sweepSphere(level, from, dir, p.radius, distance, p.segment);
+        const RayHit wall = sweepSphere(level, from, dir, p.radius, distance, p.segment, doors);
 
         if (hitPlayer && (!wall.hit || glm::length(playerPoint - from) <= wall.distance)) {
             state.player.shields -= p.damage;

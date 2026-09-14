@@ -659,6 +659,102 @@ Worth recording, because all three were the tests and not the code:
 
 ---
 
+## Fixes after M7 — doors, phantoms, homing
+
+Three gameplay bugs reported from play on the dev machine, all in `src/sim`:
+
+- **Shots stopped mid-air for no reason.** Every level object was a hit
+  target, including the 16 that had become robots, so each robot's spawn
+  point was an invisible, indestructible 2.4-unit sphere. `initObjects` now
+  marks robot entries dead. The renderer's prop list indexed object health
+  by prop index rather than object index, which the fix exposed; corrected.
+- **Robots moved and shot through doors, and bolts passed through them.**
+  `SolidDoors` was built each step and handed only to the ship's collision.
+  It now goes to `stepCombat` and `stepRobots` too: projectile sweeps, robot
+  sight lines, robot containment and debris all stop at a shut door, and the
+  path search treats a locked shut door as a wall.
+- **Homing missiles never sought robots.** Acquisition only looked at level
+  objects with health, which on `mine01` is nothing. It now prefers robots.
+
+### Verified (Linux container, software GL; sim is configuration-independent)
+
+| Check | Result |
+| --- | --- |
+| A bolt through a removed robot's spawn point | ✅ flew **15.3 units past** it on `mine01`, 49.0 on `test01` |
+| Homing locks and hits | ✅ locked robot 0, health 26 → 0 |
+| A bolt at a shut door | ✅ stopped **0.0 units** short of the door plane; the same shot carried through once the door opened |
+| A robot chasing through a locked door for 5 s | ✅ **0 steps** on the wrong side, door stayed at 0.00, shields lost 0.0 |
+| A robot behind a shut door | ✅ unseen for 1 s shut, seen within 3 s of opening |
+| Weapons, robots, loop, world tests on `mine01` | ✅ PASS |
+| Weapons, robots tests on `test01` | ✅ PASS (loop SKIPPED, no doors) |
+| Pillars still drawn after the prop index fix | ✅ headless screenshot from segment 12 |
+| `--collision-test` | ❌ still the pre-existing one-ray diagonal case, unchanged by this |
+
+---
+
+## Fixes after M7 — lights and doors
+
+Reported from play: the room behind a door only appeared once the door was
+fully open; one side of a doorway fizzed with shadow artifacts while the other
+was clean; and a shadow budget of 32 always looked better than the default 8.
+
+- **Doors are see-through as soon as they crack open.** `DoorField` now
+  carries `blocked` (a body, below 0.75 open) and `opaque` (sight and light,
+  fully shut only), and the portal walk and light flood consult `opaque`.
+- **Level lights and the headlight respect doors.** Level light sets were
+  computed once at load with no door state and never rebuilt; the headlight's
+  per-frame rebuild also omitted the field. Only bolt lights used it. They are
+  now rebuilt against the field at start and whenever a door's opaque state
+  changes. On `mine01`, **3 of 14** level lights reached both sides of door 0
+  door-blind; **0** do now.
+- **The headlight claims a shadow slot first.** It was claimed after every
+  visible level light, so with eight of those on screen it cast nothing and
+  lit through walls and robots. Level lights are now taken nearest first, and
+  the default budget is 16.
+- **Door slabs are oversized by 0.25 units into the frame** so no face is
+  exactly coplanar with the adjacent wall, and they are drawn and cast at
+  every openness rather than vanishing at 0.75.
+
+### Verified (Linux container, software GL)
+
+| Check | Result |
+| --- | --- |
+| A door at 0.04 open | ✅ see-through, still blocks a body, light reaches through |
+| Level lights vs shut door 0 | ✅ **0 of 14** reach both sides (3 door-blind) |
+| Portal walk fixture (world test) | ✅ opens and closes on the `opaque` flag |
+| World, loop, weapons, robots tests on `mine01` | ✅ PASS |
+| World test on `test01` | ✅ PASS |
+| Headless render from both sides of door 0 | ✅ no GL error or fatal lines, 111 steps/s at 640×360 |
+| Shadow budget order and the 16 default | ⚠️ not measurable here; needs the dev machine's overlay and frame rate |
+
+---
+
+## Fixes after M7 — self-shadow fizz on meshes
+
+Reported from play: the ship showed strange shadow artifacts in the chase
+camera. The same artifact was on every robot, pillar and door slab.
+
+The M3 rule that the volume's front cap must be bit-identical to the depth
+prepass was only applied to the mine, whose model matrix is the identity.
+Mesh occluders were transformed to world space on the CPU and drawn with an
+identity matrix, which computes the same point by a different association;
+the cap landed an ulp in front of the surface, was not counted, and the
+surface shadowed itself. Volumes are now emitted in each occluder's own space
+and drawn per occluder with the model matrix the prepass used.
+
+### Verified (Linux container, software GL)
+
+| Check | Result |
+| --- | --- |
+| Pillar under the headlight, segment 12, before | ❌ almost entirely black with fizzing edges |
+| Same view after | ✅ fully lit |
+| Chase-camera ship, before / after | ❌ speckled hull → ✅ clean |
+| World test volume closure, 14 `mine01` and 8 `test01` lights | ✅ PASS (the check now runs on object-space output) |
+| World, loop, weapons, robots tests on `mine01` | ✅ PASS |
+| Headless renders | ✅ no GL error or fatal lines |
+
+---
+
 ## M8 — Polish and performance ⬜
 
 Not started.

@@ -150,7 +150,14 @@ private:
         glm::mat4 model{1.0f};
         int segment = -1;
         int textureLayer = 0;
+        // Index into Level::objects, which is also the index into the sim's
+        // object health. Robots are skipped when props are built, so the
+        // prop index and the object index are not the same number.
+        int objectIndex = -1;
     };
+
+    // Whether the level object a prop came from is still standing.
+    static bool propAlive(const Prop& prop, const RenderState& rs);
 
     glm::mat4 buildView(const RenderState& rs) const;
     glm::vec3 eyePos(const RenderState& rs) const;

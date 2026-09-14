@@ -34,10 +34,6 @@ void portalTriangles(const Level& level, int segment, int side, glm::vec3 out[6]
 
 } // namespace
 
-namespace {
-
-// True if the door faces block the way from `segment` through `side`. The
-// caller has already established the side is a portal.
 bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
     if (!doors) return false;
     for (int i = 0; i < doors->count; ++i) {
@@ -49,8 +45,6 @@ bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
     }
     return false;
 }
-
-} // namespace
 
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
                      ContactLog* log, const SolidDoors* doors) {

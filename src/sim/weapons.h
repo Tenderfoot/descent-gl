@@ -63,7 +63,7 @@ struct WeaponConfig {
     // lights; the ones over budget simply stop casting. See the note in
     // docs/ARCHITECTURE.md - this is the one number that decides whether a
     // corridor full of vulcan fire stays playable.
-    int shadowBudget = 8;
+    int shadowBudget = 16;
 
     static WeaponConfig defaults();
 };

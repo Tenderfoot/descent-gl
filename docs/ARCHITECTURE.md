@@ -428,6 +428,28 @@ Side quads take the edge as the *light-facing* triangle winds it, which is what
 makes the quad's outward normal point out of the volume — and therefore what
 makes "front face" and "back face" mean what the stencil ops assume.
 
+### Volumes are built in the occluder's own space
+
+`appendShadowVolume` decides which triangles face the light in world space,
+but emits the vertices in the **mesh's own space**, and each occluder's run of
+triangles is drawn with the same model matrix the mesh was drawn with in the
+depth prepass (`ShadowVolumes::Draw`). The direction to infinity is
+`p − light` with the light brought into object space, since
+`M·(p − l, 0) = M·(p, 1) − M·(l, 1)`.
+
+This is the same invariance argument as the `GL_GREATER` section below, applied
+to every mesh rather than only the mine. The front cap is the occluder's own
+light-facing triangles and has to land at *exactly* the depth the prepass
+wrote. Transforming to world space on the CPU and drawing with an identity
+matrix computes the same point by a different association, and the last bit
+differs: a cap an ulp in front of its own surface is not counted, and the
+surface shadows itself in a fizz of scattered pixels. The mine's matrix is the
+identity, so it never had the problem, which is why M3 looked right on the
+walls while the ship, robots, pillars and door slabs all fizzed. Under
+software GL a pillar under the headlight rendered almost entirely black before
+this and fully lit after, and the chase-camera ship's hull went from speckled
+to clean.
+
 ### `GL_GREATER`, and why it is not `GL_GEQUAL`
 
 The volume pass uses `glDepthFunc(GL_GREATER)` where the rest of the frame uses
@@ -445,9 +467,10 @@ the entire mine renders black. `GL_GREATER` restores the strict comparison
 depth-fail assumes.
 
 Getting there also required `invariant gl_Position` in `shadow.vert`, spelled
-identically to `depth.vert` including a `uModel` that is always identity. With
-a different association the coincident cap lands a bit off, scattered pixels
-count as behind, and the walls crawl with stripes of false shadow.
+identically to `depth.vert` and fed the same `uModel` the prepass used for
+that occluder. With a different association the coincident cap lands a bit
+off, scattered pixels count as behind, and the walls crawl with stripes of
+false shadow.
 
 ### Why depth-fail and not depth-pass
 
@@ -596,19 +619,30 @@ afterwards. `--weapons-test` fires a bolt at 2000 units/s — 16.7 units per
 
 ### The shadow budget
 
-At most `shadowBudget` lights (default 8) **cast** per frame. Every light still
-*lights*; the budget only decides which also cast, because casting is what
-costs: a silhouette extraction and a stencil pass per light per frame. Under
-sustained vulcan fire there can be thirty bolts in the air, and thirty stencil
-passes is not a frame.
+At most `shadowBudget` lights (default 16) **cast** per frame. Every light
+still *lights*; the budget only decides which also cast, because casting is
+what costs: a silhouette extraction and a stencil pass per light per frame.
+Under sustained vulcan fire there can be thirty bolts in the air, and thirty
+stencil passes is not a frame.
 
-Priority is deliberate:
+A light that lights without casting shines straight through every robot,
+pillar and wall inside its segment set, so **whichever lights lose the budget
+leak**. The order decides who leaks:
 
-1. The level's own lights, but only those the portal walk says are visible — an
-   off-screen light casting into nothing is the cheapest thing to give up.
-2. The headlight.
-3. Everything dynamic, **nearest to the camera first**. A bolt across the room
-   contributes a shadow nobody can resolve.
+1. The headlight. It is the light the player looks along, and the one whose
+   shadows move with every turn. It used to be claimed after the level lights,
+   so in any room with eight visible level lights it got no slot and lit
+   through everything — which read as light leaks, and was why a budget of 32
+   always looked better than 8.
+2. The level's own lights the portal walk can see, **nearest to the camera
+   first**. An off-screen light casting into nothing is the cheapest thing to
+   give up, and a distant one is the next cheapest.
+3. Everything dynamic, nearest first. A bolt across the room contributes a
+   shadow nobody can resolve.
+
+The default moved from 8 to 16 with the reorder. Since the whole closed mine is
+extruded for every casting light, the right number is a measurement for M8 on
+the real GPU; the slider goes to 32.
 
 The overlay reports slots used and how many lights lit without casting, so the
 cap can be watched rather than assumed.
@@ -618,6 +652,24 @@ cap can be watched rather than assumed.
 The headlight drains energy and **switches itself off at zero**. In a game with
 no ambient term that is a real consequence, which is the point of it costing
 anything. Shields at zero resets to the player start.
+
+### Objects, robots and targets
+
+`Level::objects` is one list, but two systems own its entries. An object whose
+type names a robot definition is spawned as a robot and stepped by
+`stepRobots`; everything else is static scenery with health in `ObjectHealth`.
+`initObjects` marks the robot entries **dead from the start**, so the object
+hit test never sees them. Before that rule every robot's spawn point stayed
+behind as an invisible, indestructible sphere that stopped shots for no visible
+reason — sixteen of them in `mine01`. The weapons test now fires through a
+removed robot's spawn point and fails if the bolt stops.
+
+The renderer builds its prop list from the same objects, skipping robots, so a
+prop's index and its object's index are different numbers; `Prop::objectIndex`
+carries the mapping for the alive check.
+
+Homing acquires **robots first**, then destructible scenery, and steers at
+whichever it locked; a target that dies is flown past.
 
 ### Fire points
 
@@ -630,6 +682,58 @@ of thin air beside the hull. Laser and vulcan alternate between them.
 Impact flashes and explosions are short-lived additive billboards in the unlit
 pass, expanded on the CPU into one buffer and drawn in one call. There is no
 particle system beyond that, deliberately.
+
+---
+
+## Doors
+
+A door is a **portal in the graph** carrying a slab that fills the opening
+while it is shut, rather than a new kind of side. The two segments still share
+their four vertices, so the mine's wall surface stays closed and the shadow
+occluder still validates.
+
+Two views of the same state exist, both derived from `GameState::doors` every
+step:
+
+- **`DoorField`** — two bytes per segment side. `blocked` is what a body
+  cannot get through, set while openness is below `kPassableAt` (0.75).
+  `opaque` is what nothing can be seen or lit through, set only while the
+  door is **fully shut**. The portal walk and the light flood consult
+  `opaque`, so the room behind a door comes into view the moment it cracks
+  open; until then the walk stops and the room is not drawn at all.
+- **`SolidDoors`** — the world-space triangles of every shut door, built by
+  `buildSolidDoors` with the `blocked` threshold and handed to
+  `resolveCollision`, `raycast` and `sweepSphere`. Answers "where is the
+  surface a body or bolt stops at".
+
+The level's own lights get their segment sets at load with no door state.
+`main.cpp` rebuilds them all against the `DoorField` at start and again
+whenever the number of opaque sides changes, and the headlight's per-frame
+rebuild takes the field too. Before that, three of `mine01`'s fourteen lights
+reached both sides of door 0 and lit the far room through the doorway, held
+back only by the slab's shadow volume — which is where the fizzing artifacts
+on one side of a doorway came from.
+
+The door slab halves are oversized by a quarter unit at the frame and at the
+top and bottom, so their outer faces sit inside the rock rather than exactly
+in the plane of the adjacent wall; coplanar faces from two meshes z-fight in
+the prepass and then disagree in every light pass. The halves are always drawn
+and always cast: fully open they are buried in the wall, and while opening
+they are the only thing occluding the doorway.
+
+`main.cpp` builds `SolidDoors` once per step and passes the same pointer to the
+ship's collision, `stepCombat` and `stepRobots`. **Nothing geometric runs
+door-blind.** The first M7 build handed it to the ship only, so robots saw,
+shot and flew through shut doors and bolts from either side passed through.
+The loop test now fires at a shut door, parks a robot behind one, and fails if
+anything gets through.
+
+Robots carry no keys, but an unkeyed door opens for anything that comes near.
+So the path search treats a **locked** shut door as a wall and an unlocked one
+as a corridor: a robot walks up to an unlocked door and it opens, while a keyed
+door stays locked until the player opens it. The distance field is rebuilt
+whenever the number of shut door faces changes, not only when the player
+changes segment.
 
 ---
 

@@ -30,7 +30,7 @@ struct Rig {
 
     void reset() {
         combat = sim::CombatState{};
-        sim::initObjects(level, combat.objects);
+        sim::initObjects(level, robotCfg, combat.objects);
         sim::spawnRobots(level, robotCfg, robots);
         player = sim::Body{};
         player.radius = 1.6f;

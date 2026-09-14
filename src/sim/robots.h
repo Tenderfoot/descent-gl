@@ -16,6 +16,7 @@ namespace dvk::sim {
 
 struct CombatState;
 struct WeaponConfig;
+struct SolidDoors;
 
 // What a robot is doing. Every transition is reported in the ImGui readout,
 // because a state machine you cannot watch is a state machine you cannot tune.
@@ -156,6 +157,9 @@ struct RobotState {
     std::array<int16_t, kMaxPathSegments> distanceToPlayer{};
     int pathSegment = -1;      // the player segment the field was built for
     int pathValidCount = 0;
+    // How many shut door faces the field was built against, so a door opening
+    // or closing rebuilds it: a locked door is a wall to the path search.
+    int pathDoorCount = -1;
 
     int aliveCount() const {
         int n = 0;
@@ -174,8 +178,12 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out);
 // knows not to draw it as a static prop.
 bool objectIsRobot(const RobotConfig& cfg, const std::string& type);
 
-// One fixed step of every robot.
+// One fixed step of every robot. `doors` is the shut-door set for this step:
+// a robot can neither see, path nor fly through a shut door. Unlocked doors
+// open for robots, so the path search only treats a LOCKED shut door as a
+// wall; a shut door with no key is walked up to and opened.
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
-                RobotState& state, CombatState& combat, Body& player, float dt);
+                RobotState& state, CombatState& combat, Body& player, float dt,
+                const SolidDoors* doors = nullptr);
 
 } // namespace dvk::sim

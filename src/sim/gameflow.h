@@ -11,19 +11,35 @@ namespace dvk::sim {
 struct CombatState;
 struct RobotState;
 struct RobotConfig;
+struct SolidDoors;
 
-// Which side of a segment is currently shut. One array, consulted by the portal
-// walk, the light flood fill and collision alike, so those three can never
-// disagree about whether a door is in the way - which is exactly the
-// disagreement that produces light shining through a closed door.
+// Which side of a segment is currently shut, in the two senses a door has.
+//
+// `blocked` is what a body cannot get through: a door counts as passable a
+// little before it is fully open. `opaque` is what nothing can be seen or lit
+// through: only a door that is FULLY shut. The moment a door starts to open
+// the room behind it comes into view through the gap, while the slab still
+// stops the ship for most of its travel. Both arrays are written together
+// from the same door state, so the portal walk, the light flood and collision
+// can never disagree about the same door.
 inline constexpr int kMaxFlowSegments = 128;
 
 struct DoorField {
     std::array<uint8_t, kMaxFlowSegments * SideCount> blocked{};
+    std::array<uint8_t, kMaxFlowSegments * SideCount> opaque{};
 
     bool isBlocked(int segment, int side) const {
         const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
         return i < blocked.size() && blocked[i] != 0;
+    }
+    bool isOpaque(int segment, int side) const {
+        const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
+        return i < opaque.size() && opaque[i] != 0;
+    }
+    int opaqueCount() const {
+        int n = 0;
+        for (uint8_t v : opaque) n += v;
+        return n;
     }
 };
 
@@ -80,5 +96,11 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.
 bool sidePassable(const GameState& state, int segment, int side);
+
+// The world-space faces of every door that is currently shut, using the same
+// threshold as the DoorField. Rebuilt once per step and handed to collision,
+// line of sight and projectiles alike, so none of them can disagree with the
+// portal walk and the light flood about whether a door is in the way.
+void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out);
 
 } // namespace dvk::sim

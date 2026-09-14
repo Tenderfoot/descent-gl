@@ -1,6 +1,7 @@
 #include "sim/gameflow.h"
 
 #include "core/log.h"
+#include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/robots.h"
 
@@ -17,12 +18,14 @@ namespace {
 // through one does not feel like squeezing past it.
 constexpr float kPassableAt = 0.75f;
 
-void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked) {
+void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked,
+                bool opaque) {
     const Door& door = level.doors[doorIndex];
     const auto mark = [&](int segment, int side) {
         const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
         if (i < state.doorField.blocked.size()) {
             state.doorField.blocked[i] = blocked ? 1u : 0u;
+            state.doorField.opaque[i] = opaque ? 1u : 0u;
         }
     };
     mark(door.segment, door.side);
@@ -49,12 +52,30 @@ bool sidePassable(const GameState& state, int segment, int side) {
     return !state.doorField.isBlocked(segment, side);
 }
 
+void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out) {
+    out.clear();
+    for (size_t di = 0; di < level.doors.size() && di < kMaxDoors; ++di) {
+        if (state.doors[di].openness >= kPassableAt) continue;
+        const Door& door = level.doors[di];
+        const int split[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (int t = 0; t < 2 && out.count < SolidDoors::kCapacity; ++t) {
+            SolidDoors::Face& face = out.faces[static_cast<size_t>(out.count++)];
+            for (int k = 0; k < 3; ++k) {
+                face.p[static_cast<size_t>(k)] = door.corners[static_cast<size_t>(split[t][k])];
+            }
+            face.normal = door.normal;
+            face.segmentA = door.segment;
+            face.segmentB = door.neighbour;
+        }
+    }
+}
+
 void initGame(const Level& level, const RobotState& robots, GameState& out) {
     out = GameState{};
     out.robotsAtStart = robots.aliveCount();
     out.reactorAlive = false;
     for (size_t i = 0; i < level.doors.size() && i < kMaxDoors; ++i) {
-        setBlocked(out, level, i, true);
+        setBlocked(out, level, i, true, true);
     }
 }
 
@@ -98,7 +119,9 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         ds.openness = std::clamp(ds.openness + (ds.wantOpen ? rate : -rate), 0.0f, 1.0f);
         if (ds.openness > 0.0f) ds.everOpened = true;
 
-        setBlocked(state, level, di, ds.openness < kPassableAt);
+        // Passable a little before fully open; see-through as soon as it has
+        // cracked open at all.
+        setBlocked(state, level, di, ds.openness < kPassableAt, ds.openness <= 0.0f);
     }
 
     // --- pickups ---------------------------------------------------------

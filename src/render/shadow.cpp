@@ -3,6 +3,7 @@
 #include "core/log.h"
 
 #include <glm/geometric.hpp>
+#include <glm/matrix.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -152,7 +153,13 @@ void Occluder::reset(const OccluderMesh* mesh, const glm::mat4& transform) {
     setTransform(transform);
 }
 
+glm::vec3 Occluder::toObject(const glm::vec3& world) const {
+    return glm::vec3(inverse_ * glm::vec4(world, 1.0f));
+}
+
 void Occluder::setTransform(const glm::mat4& transform) {
+    transform_ = transform;
+    inverse_ = glm::inverse(transform);
     if (!mesh_) return;
     for (size_t i = 0; i < mesh_->positions.size(); ++i) {
         worldPos_[i] = glm::vec3(transform * glm::vec4(mesh_->positions[i], 1.0f));
@@ -179,19 +186,25 @@ ShadowVolumes::~ShadowVolumes() {
 
 void ShadowVolumes::beginFrame() {
     vertices_.clear();
+    draws_.clear();
     silhouetteEdges_ = 0;
 }
 
 void ShadowVolumes::beginLight() {
     lightFirst_ = static_cast<GLint>(vertices_.size());
+    lightFirstDraw_ = static_cast<int>(draws_.size());
 }
 
 ShadowVolumes::Range ShadowVolumes::endLight() {
-    return {lightFirst_, static_cast<GLsizei>(vertices_.size()) - lightFirst_};
+    return {lightFirst_, static_cast<GLsizei>(vertices_.size()) - lightFirst_, lightFirstDraw_,
+            static_cast<int>(draws_.size()) - lightFirstDraw_};
 }
 
 void ShadowVolumes::add(const Occluder& occluder, const glm::vec3& lightPos) {
+    const auto first = static_cast<GLint>(vertices_.size());
     silhouetteEdges_ += appendShadowVolume(occluder, lightPos, vertices_, facesLight_);
+    const auto count = static_cast<GLsizei>(vertices_.size()) - first;
+    if (count > 0) draws_.push_back({first, count, occluder.transform()});
 }
 
 int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
@@ -200,8 +213,12 @@ int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
     const OccluderMesh* mesh = occluder.mesh();
     if (!mesh || mesh->triangles.empty()) return 0;
 
-    const std::vector<glm::vec3>& pos = occluder.worldPositions();
+    // Facing is decided in world space, where the light is. The vertices are
+    // emitted in the mesh's own space so the front cap goes through exactly
+    // the prepass's expression - see the declaration.
+    const std::vector<glm::vec3>& pos = mesh->positions;
     const std::vector<glm::vec4>& planes = occluder.worldPlanes();
+    const glm::vec3 lightObj = occluder.toObject(lightPos);
 
     // Which triangles face the light. Computed once here rather than twice per
     // edge below.
@@ -216,8 +233,10 @@ int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
     // A vertex at infinity carries the direction away from the light, with
     // w = 0. Under the project's infinite far plane it lands exactly on the far
     // plane instead of being clipped, which is what keeps the counts right.
+    // The model matrix maps an object-space direction to the world one, since
+    // M * (p - l, 0) = M * (p, 1) - M * (l, 1).
     const auto emitInfinite = [&](const glm::vec3& p) {
-        vertices.emplace_back(p - lightPos, 0.0f);
+        vertices.emplace_back(p - lightObj, 0.0f);
     };
     // --- sides: one quad per silhouette edge -----------------------------
     for (const OccluderMesh::Edge& edge : mesh->edges) {
@@ -291,9 +310,5 @@ void ShadowVolumes::upload() {
     glNamedBufferSubData(vbo_, 0, static_cast<GLsizeiptr>(bytes), vertices_.data());
 }
 
-void ShadowVolumes::draw(Range range) const {
-    if (range.count <= 0) return;
-    glDrawArrays(GL_TRIANGLES, range.first, range.count);
-}
 
 } // namespace dvk::gl

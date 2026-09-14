@@ -235,6 +235,12 @@ void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
 // matter.
 void rebuildLightSegments(Level& level, Light& light);
 
+// Every level light at once, against the current door state. Called at start
+// and again whenever a door becomes see-through or shut: a level light's set
+// is otherwise computed once at load with no doors at all, and a light beside
+// a shut door then lights the far side through the doorway.
+void rebuildAllLightSegments(Level& level, LightFlood& scratch, const sim::DoorField* doors);
+
 // Which segment contains p, or -1. `hint` is tried first and its neighbours
 // next, so the common case of "still where it was last step" is a few plane
 // tests rather than a search.

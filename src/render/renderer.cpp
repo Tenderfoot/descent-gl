@@ -153,8 +153,14 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
     robotOccluderType_.assign(sim::kMaxRobots, -1);
 }
 
+bool Renderer::propAlive(const Prop& prop, const RenderState& rs) {
+    if (prop.objectIndex < 0 || prop.objectIndex >= rs.objectCount) return true;
+    return rs.objectAlive[static_cast<size_t>(prop.objectIndex)];
+}
+
 void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
-    for (const LevelObject& obj : level.objects) {
+    for (size_t oi = 0; oi < level.objects.size(); ++oi) {
+        const LevelObject& obj = level.objects[oi];
         // An object whose type names a robot definition is not scenery: the
         // simulation owns it and it is drawn from the robot list instead.
         if (sim::objectIsRobot(robots, obj.type)) continue;
@@ -171,6 +177,7 @@ void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
         prop.mesh = &propMeshes_.at(obj.type);
         prop.occluderMesh = &propOccluders_.at(obj.type);
         prop.segment = obj.segment;
+        prop.objectIndex = static_cast<int>(oi);
         prop.textureLayer = obj.type == "pillar" ? WallRock : WallPanel;
         prop.model = glm::translate(glm::mat4(1.0f), obj.position) *
                      glm::mat4_cast(obj.orientation) * glm::scale(glm::mat4(1.0f), glm::vec3(obj.scale));
@@ -204,10 +211,20 @@ void Renderer::gatherLights(const Level& level, const std::vector<Light>& dynami
     // stencil pass per light per frame. Under sustained vulcan fire there can
     // be thirty bolts in the air, and thirty stencil passes is not a frame.
     //
-    // The level's own lights and the headlight take slots first, because they
-    // are the ones a player has time to look at. Projectile, flare and
-    // explosion lights compete for what is left, nearest to the camera first -
-    // a bolt across the room contributes a shadow nobody can resolve.
+    // A light that lights without casting shines straight through every
+    // robot, pillar and wall inside its segment set, so whichever lights lose
+    // the budget leak. The order decides who leaks:
+    //
+    // 1. The headlight. It is the light the player is looking along, and the
+    //    one whose shadows move with every turn. It used to be claimed after
+    //    the level lights, so in any room with eight visible level lights it
+    //    got no slot at all and lit through everything - which read as light
+    //    leaks and was why a budget of 32 always looked better than 8.
+    // 2. The level's own lights that the portal walk can see, nearest to the
+    //    camera first. An off-screen light casting into nothing is the
+    //    cheapest thing to give up, and a distant one is the next cheapest.
+    // 3. Projectile, flare and explosion lights, nearest first - a bolt across
+    //    the room contributes a shadow nobody can resolve.
     castsShadow_.assign(active_.size(), 0);
     stats_.shadowBudget = shadowBudget;
 
@@ -220,10 +237,11 @@ void Renderer::gatherLights(const Level& level, const std::vector<Light>& dynami
         return true;
     };
 
+    if (headlightIndex_ >= 0) claim(static_cast<size_t>(headlightIndex_));
+
     const size_t staticCount = level.lights.size();
+    shadowOrder_.clear();
     for (size_t i = 0; i < staticCount && i < active_.size(); ++i) {
-        // Only if it can be seen at all: an off-screen light casting into
-        // nothing is the cheapest thing to give up.
         bool visible = false;
         for (int segment : active_[i]->segments) {
             if (walk.isVisible(segment)) {
@@ -231,9 +249,14 @@ void Renderer::gatherLights(const Level& level, const std::vector<Light>& dynami
                 break;
             }
         }
-        if (visible) claim(i);
+        if (!visible) continue;
+        shadowOrder_.emplace_back(glm::length(active_[i]->position - eye), static_cast<int>(i));
     }
-    if (headlightIndex_ >= 0) claim(static_cast<size_t>(headlightIndex_));
+    std::sort(shadowOrder_.begin(), shadowOrder_.end());
+    for (const auto& [distance, index] : shadowOrder_) {
+        (void)distance;
+        claim(static_cast<size_t>(index));
+    }
 
     shadowOrder_.clear();
     for (size_t i = staticCount; i < active_.size(); ++i) {
@@ -277,7 +300,22 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
 // Places the two halves of every door. A door slides apart across the opening,
 // so the halves stay inside the doorway's own plane and end up buried in the
 // wall to either side rather than poking through the ceiling.
+//
+// Each half is oversized by kSlabMargin at the frame and at the top and
+// bottom, so its outer faces sit inside the rock rather than exactly in the
+// plane of the adjacent wall. Exactly coplanar faces from two different
+// meshes z-fight in the depth prepass and then disagree in every light pass,
+// which showed as a fizzing strip around the door frame. The halves still
+// meet exactly at the centre seam: those two faces face away from each other,
+// so only one is ever drawn.
+//
+// The slabs are always drawn and always cast, whatever the openness. Fully
+// open they are buried in the wall, where the depth test hides them and
+// their volumes fall inside the mine's own shadow; while opening they are the
+// only thing occluding the doorway, since the portal walk and the light flood
+// see through a door from the moment it cracks open.
 void Renderer::buildDoors(const RenderState& rs, const Level& level) {
+    constexpr float kSlabMargin = 0.25f;
     const size_t count = std::min(level.doors.size(), static_cast<size_t>(sim::kMaxDoors));
     for (size_t di = 0; di < count; ++di) {
         const Door& door = level.doors[di];
@@ -303,21 +341,23 @@ void Renderer::buildDoors(const RenderState& rs, const Level& level) {
         basis[1] = glm::vec4(up, 0.0f);
         basis[2] = glm::vec4(normal, 0.0f);
 
+        // Half the opening plus the margin, as a half-extent, and how far the
+        // half slides to end up entirely inside the wall when fully open.
+        const float halfWidth = width * 0.25f + kSlabMargin * 0.5f;
+        const float travel = width * 0.5f + kSlabMargin;
         for (int half = 0; half < 2; ++half) {
             const float side = half == 0 ? -1.0f : 1.0f;
-            const float slide = side * (0.25f + openness * 0.5f) * width;
+            const float slide = side * (halfWidth + openness * travel);
             const glm::vec3 centre = door.center + across * slide;
 
             glm::mat4 model = glm::translate(glm::mat4(1.0f), centre) * basis;
-            model = glm::scale(model, glm::vec3(width * 0.5f, height, 0.9f));
+            model = glm::scale(model,
+                               glm::vec3(halfWidth * 2.0f, height + kSlabMargin * 2.0f, 0.9f));
 
             DoorSlab& slab = doorSlabs_[di * 2 + static_cast<size_t>(half)];
             slab.model = model;
-            // A door that is open enough to fly through stops blocking light
-            // and stops casting; below that it is a wall.
-            const bool solid = openness < 0.75f;
-            slab.segmentA = solid ? door.segment : -1;
-            slab.segmentB = solid ? door.neighbour : -1;
+            slab.segmentA = door.segment;
+            slab.segmentB = door.neighbour;
             doorOccluders_[di * 2 + static_cast<size_t>(half)].setTransform(model);
         }
     }
@@ -624,7 +664,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
 
             for (size_t pi = 0; pi < props_.size(); ++pi) {
                 const Prop& prop = props_[pi];
-                if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+                if (!propAlive(prop, rs)) continue;
                 if (prop.segment >= 0 &&
                     !std::binary_search(light.segments.begin(), light.segments.end(),
                                         prop.segment)) {
@@ -714,7 +754,7 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
     for (size_t pi = 0; pi < props_.size(); ++pi) {
         const Prop& prop = props_[pi];
         if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
-        if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+        if (!propAlive(prop, rs)) continue;
         depthShader_->setMat4("uModel", prop.model);
         prop.mesh->draw();
     }
@@ -788,10 +828,12 @@ void Renderer::stencilPass(ShadowVolumes::Range range) {
     glStencilOpSeparate(GL_BACK, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
     glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
 
+    // Each occluder's volume is in its own space and is drawn with the same
+    // model matrix the mesh was drawn with in the prepass, so the front cap's
+    // depth is bit-identical to the surface it sits on. See appendShadowVolume.
     shadowShader_->bind();
-    shadowShader_->setMat4("uModel", glm::mat4(1.0f));
     volumes_.bind();
-    volumes_.draw(range);
+    volumes_.draw(range, [&](const glm::mat4& model) { shadowShader_->setMat4("uModel", model); });
 
     glEnable(GL_CULL_FACE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -865,7 +907,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         for (size_t pi = 0; pi < props_.size(); ++pi) {
             const Prop& prop = props_[pi];
             if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
-            if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+            if (!propAlive(prop, rs)) continue;
             if (prop.segment >= 0 && !std::binary_search(light.segments.begin(),
                                                          light.segments.end(), prop.segment)) {
                 continue;
@@ -953,10 +995,12 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         glDisable(GL_CULL_FACE);
         glDepthMask(GL_FALSE);
         shadowShader_->bind();
-        shadowShader_->setMat4("uModel", glm::mat4(1.0f));
         shadowShader_->setVec3("uColor", glm::vec3(0.15f, 0.9f, 0.35f));
         volumes_.bind();
-        for (const ShadowVolumes::Range& range : ranges_) volumes_.draw(range);
+        for (const ShadowVolumes::Range& range : ranges_) {
+            volumes_.draw(range,
+                          [&](const glm::mat4& model) { shadowShader_->setMat4("uModel", model); });
+        }
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
         glEnable(GL_CULL_FACE);
         glDepthMask(GL_TRUE);

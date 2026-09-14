@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
     dvk::LightFlood flood;
 
     dvk::sim::WeaponConfig weapons = dvk::sim::loadWeaponConfig(kWeaponConfigPath);
-    dvk::sim::initObjects(level, cur.combat.objects);
+    dvk::sim::initObjects(level, robotConfig, cur.combat.objects);
     dvk::sim::spawnRobots(level, robotConfig, cur.robots);
 
     const dvk::sim::GameConfig gameConfig;
@@ -189,6 +189,12 @@ int main(int argc, char** argv) {
     // Rebuilt each step and handed to collision, line of sight and projectiles
     // alike, so none of them can disagree about whether a door is shut.
     dvk::sim::SolidDoors solidDoors;
+
+    // The level's own lights had their segment sets computed at load with no
+    // doors. They are recomputed against the door state now, and again every
+    // time a door changes between see-through and shut, so a light beside a
+    // shut door stops at it the way a bolt light does.
+    int lightDoorSignature = -1;
 
     // A fresh start, kept so any key can restart from an end screen without
     // reloading the level.
@@ -317,23 +323,8 @@ int main(int argc, char** argv) {
             cur.ship.body.radius = flight.shipRadius;
             // The shut-door faces for this step, built before anything asks a
             // geometric question.
-            solidDoors.clear();
-            for (size_t di = 0; di < level.doors.size() && di < dvk::sim::kMaxDoors; ++di) {
-                if (cur.game.doors[di].openness >= 0.75f) continue;
-                const dvk::Door& door = level.doors[di];
-                const int split[2][3] = {{0, 1, 2}, {0, 2, 3}};
-                for (int t = 0; t < 2 && solidDoors.count < dvk::sim::SolidDoors::kCapacity; ++t) {
-                    dvk::sim::SolidDoors::Face& face =
-                        solidDoors.faces[static_cast<size_t>(solidDoors.count++)];
-                    for (int k = 0; k < 3; ++k) {
-                        face.p[static_cast<size_t>(k)] =
-                            door.corners[static_cast<size_t>(split[t][k])];
-                    }
-                    face.normal = door.normal;
-                    face.segmentA = door.segment;
-                    face.segmentB = door.neighbour;
-                }
-            }
+            dvk::sim::buildSolidDoors(level, cur.game, solidDoors);
+
 
             dvk::sim::resolveCollision(level, cur.ship.body, collision,
                                        static_cast<float>(kSimStep), &contacts, &solidDoors);
@@ -359,9 +350,9 @@ int main(int argc, char** argv) {
                 }
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
-                                 fire, static_cast<float>(kSimStep), &cur.robots);
+                                 fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors);
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
-                                 cur.ship.body, static_cast<float>(kSimStep));
+                                 cur.ship.body, static_cast<float>(kSimStep), &solidDoors);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep));
             // In M5 zero shields respawned you on the spot. From M7 it ends
@@ -441,7 +432,14 @@ int main(int argc, char** argv) {
             hl.direction = shipForward;
             hl.segment = rs.shipSegment;
             hl.segments.clear();
-            if (cur.combat.player.headlightOn) dvk::rebuildLightSegments(level, hl, flood);
+            if (cur.combat.player.headlightOn) {
+                dvk::rebuildLightSegments(level, hl, flood, &cur.game.doorField);
+            }
+        }
+
+        if (cur.game.doorField.opaqueCount() != lightDoorSignature) {
+            lightDoorSignature = cur.game.doorField.opaqueCount();
+            dvk::rebuildAllLightSegments(level, flood, &cur.game.doorField);
         }
 
         // Every bolt in flight is a moving light. A laser going down a corridor
@@ -770,7 +768,7 @@ int main(int argc, char** argv) {
                 added.position = rs.shipPos;
                 added.segment = rs.shipSegment;
                 added.radius = 30.0f;
-                dvk::rebuildLightSegments(level, added);
+                dvk::rebuildLightSegments(level, added, flood, &cur.game.doorField);
                 level.lights.push_back(added);
                 lightEditorSelection = static_cast<int>(level.lights.size()) - 1;
             }
@@ -814,7 +812,7 @@ int main(int argc, char** argv) {
 
                 if (reach) {
                     l.segment = dvk::findSegment(level, l.position, l.segment);
-                    dvk::rebuildLightSegments(level, l);
+                    dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
                 }
                 if (ImGui::Button("Remove")) {
                     level.lights.erase(level.lights.begin() + lightEditorSelection);
