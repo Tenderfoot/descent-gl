@@ -2,12 +2,14 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/gameflow.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -31,7 +33,7 @@ struct Rig {
 
     void reset() {
         combat = sim::CombatState{};
-        sim::initObjects(level, combat.objects);
+        sim::initObjects(level, robotCfg, combat.objects);
         sim::spawnRobots(level, robotCfg, robots);
         sim::initGame(level, robots, game);
         player = sim::Body{};
@@ -44,15 +46,37 @@ struct Rig {
     // Robots are deliberately not stepped in most of these checks: this test is
     // about the level's flow, and a gunner emptying the player's shields
     // halfway through a door test would be noise.
+    // The player's trigger, held across run() so a test can fire while it
+    // steps.
+    sim::FireControls held;
+
     void run(int steps, bool withRobots = false) {
-        const sim::FireControls idle;
+        // Exactly the game's own order: doors first, so every geometric
+        // question this step is asked against the same shut-door set.
+        sim::SolidDoors doors;
         for (int i = 0; i < steps; ++i) {
-            sim::stepCombat(level, combat, player, orientation, weapons, idle, kStep, &robots);
+            sim::buildSolidDoors(level, game, doors);
+            sim::stepCombat(level, combat, player, orientation, weapons, held, kStep, &robots,
+                            &doors);
             if (withRobots) {
-                sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep);
+                sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, &doors);
             }
             sim::stepGame(level, gameCfg, game, combat, robots, robotCfg, player, kStep);
         }
+    }
+
+    void aimAt(const glm::vec3& target) {
+        const glm::vec3 to = target - player.position;
+        if (glm::length(to) < 1e-4f) return;
+        orientation = glm::quatLookAt(glm::normalize(to), glm::vec3(0.0f, 1.0f, 0.0f));
+    }
+
+    int playerBolts() const {
+        int n = 0;
+        for (const sim::Projectile& p : combat.projectiles.items) {
+            if (p.alive && p.owner < 0) ++n;
+        }
+        return n;
     }
 
     void teleport(const glm::vec3& position, int segment) {
@@ -159,6 +183,131 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
         ok &= expect(reaches, "the same light reached through once the door opened");
         log::info("light through a door: {} segments shut, {} open", shutCount,
                   probe.segments.size());
+    }
+
+    // --- a shut door stops bolts, sight lines and robots ----------------------
+    //
+    // The door faces are built from the same threshold as the DoorField and
+    // handed to combat and robots alike. Before this only the player's own
+    // collision knew about doors: robots saw, shot and flew straight through.
+    {
+        const Door& door = rig.level.doors[0];
+        const auto keyIndex = static_cast<size_t>(door.key);
+        // Side normals point into their own segment, so this is inside the
+        // door's segment, a few units back from the slab.
+        const glm::vec3 inFront = door.center + door.normal * 8.0f;
+        const glm::vec3 behind = rig.level.segments[static_cast<size_t>(door.neighbour)].center;
+
+        // A bolt fired at a shut door stops at it.
+        rig.reset();
+        rig.combat.player.headlightOn = false;
+        rig.teleport(inFront, door.segment);
+        rig.aimAt(door.center);
+        rig.held = sim::FireControls{};
+        rig.held.selectWeapon = sim::WeaponLaser;
+        rig.held.primary = true;
+        rig.run(1);
+        rig.held = sim::FireControls{};
+        bool crossed = false;
+        float furthest = 0.0f;
+        for (int i = 0; i < 240 && rig.playerBolts() > 0; ++i) {
+            rig.run(1);
+            for (const sim::Projectile& p : rig.combat.projectiles.items) {
+                if (!p.alive || p.owner >= 0) continue;
+                // Signed distance past the door plane, positive beyond it.
+                const float past = -glm::dot(p.position - door.center, door.normal);
+                furthest = std::max(furthest, past);
+                if (past > 1.0f) crossed = true;
+            }
+        }
+        ok &= expect(!crossed, "a bolt did not pass through a shut door");
+        ok &= expect(rig.playerBolts() == 0, "the bolt hit the door and expired");
+
+        // With the door open the same shot carries on into the next segment.
+        rig.reset();
+        rig.combat.player.headlightOn = false;
+        rig.game.keys[keyIndex] = true;
+        rig.teleport(inFront, door.segment);
+        rig.run(240);
+        ok &= expect(rig.game.doors[0].openness > 0.99f, "the door opened for the key");
+        rig.aimAt(door.center);
+        rig.held.selectWeapon = sim::WeaponLaser;
+        rig.held.primary = true;
+        rig.run(1);
+        rig.held = sim::FireControls{};
+        bool carriedOn = false;
+        for (int i = 0; i < 240 && rig.playerBolts() > 0; ++i) {
+            rig.run(1);
+            for (const sim::Projectile& p : rig.combat.projectiles.items) {
+                if (!p.alive || p.owner >= 0) continue;
+                if (-glm::dot(p.position - door.center, door.normal) > 1.0f) carriedOn = true;
+            }
+        }
+        ok &= expect(carriedOn, "the same bolt flew through once the door was open");
+        log::info("door vs bolts: shut stopped it {:.1f} units short of the plane, open let it "
+                  "through",
+                  -furthest);
+
+        // A robot behind the shut door neither sees nor shoots the player,
+        // and cannot get through. Every other robot is removed so nothing
+        // else in the level can shoot the player during the check.
+        rig.reset();
+        rig.combat.player.headlightOn = false;
+        sim::Robot* gunner = nullptr;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
+            if (!gunner && r.alive && rig.robotCfg.types[static_cast<size_t>(r.type)].name == "gunner") {
+                gunner = &r;
+            } else {
+                r.alive = false;
+            }
+        }
+        ok &= expect(gunner != nullptr, "the level has a gunner");
+        if (gunner) {
+            gunner->body.position = behind;
+            gunner->body.segment = door.neighbour;
+            rig.teleport(inFront, door.segment);
+            rig.aimAt(door.center);
+            const float shields = rig.combat.player.shields;
+
+            int throughDoor = 0;
+            for (int i = 0; i < 600; ++i) {
+                // Kept hunting, so this tests the door and not perception.
+                gunner->awareness = 1.0f;
+                gunner->hasLastKnown = true;
+                gunner->lastKnown = rig.player.position;
+                rig.run(1, true);
+                if (gunner->body.segment == door.segment) ++throughDoor;
+            }
+            const float shotThrough = shields - rig.combat.player.shields;
+            ok &= expect(shotThrough <= 0.0f, "no robot fire came through the shut door");
+            ok &= expect(throughDoor == 0, "the robot did not get through the locked door");
+            ok &= expect(rig.game.doors[0].openness <= 0.01f,
+                         "the locked door did not open for the robot");
+            const float gap = glm::dot(gunner->body.position - door.center, door.normal);
+            log::info("door vs robot: 5 s of chasing, {} steps through, door {:.2f} open, robot "
+                      "{:.1f} units on its own side, shields lost {:.1f}",
+                      throughDoor, rig.game.doors[0].openness, -gap, shotThrough);
+
+            // Line of sight: with the door shut a fresh robot never notices
+            // the player; with it open it does.
+            gunner->awareness = 0.0f;
+            gunner->hasLastKnown = false;
+            gunner->mode = sim::RobotMode::Idle;
+            gunner->body.position = behind;
+            gunner->body.velocity = glm::vec3(0.0f);
+            gunner->body.segment = door.neighbour;
+            rig.run(120, true);
+            const bool sawThroughShut = gunner->awareness > 0.0f;
+            ok &= expect(!sawThroughShut, "a robot cannot see through a shut door");
+
+            rig.game.keys[keyIndex] = true;
+            rig.run(360, true);
+            const bool sawThroughOpen = gunner->awareness > 0.0f;
+            ok &= expect(sawThroughOpen, "the same robot sees the player once the door opens");
+            log::info("door vs sight: shut {}, open {}", sawThroughShut ? "SEEN" : "unseen",
+                      sawThroughOpen ? "seen" : "UNSEEN");
+        }
     }
 
     // --- the reactor starts the countdown ------------------------------------

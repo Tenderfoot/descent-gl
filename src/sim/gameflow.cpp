@@ -1,6 +1,7 @@
 #include "sim/gameflow.h"
 
 #include "core/log.h"
+#include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/robots.h"
 
@@ -47,6 +48,24 @@ bool hasKey(const GameState& state, KeyColor key) {
 
 bool sidePassable(const GameState& state, int segment, int side) {
     return !state.doorField.isBlocked(segment, side);
+}
+
+void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out) {
+    out.clear();
+    for (size_t di = 0; di < level.doors.size() && di < kMaxDoors; ++di) {
+        if (state.doors[di].openness >= kPassableAt) continue;
+        const Door& door = level.doors[di];
+        const int split[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (int t = 0; t < 2 && out.count < SolidDoors::kCapacity; ++t) {
+            SolidDoors::Face& face = out.faces[static_cast<size_t>(out.count++)];
+            for (int k = 0; k < 3; ++k) {
+                face.p[static_cast<size_t>(k)] = door.corners[static_cast<size_t>(split[t][k])];
+            }
+            face.normal = door.normal;
+            face.segmentA = door.segment;
+            face.segmentB = door.neighbour;
+        }
+    }
 }
 
 void initGame(const Level& level, const RobotState& robots, GameState& out) {

@@ -319,13 +319,24 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
 
 namespace {
 
+// A portal a robot cannot get through: a shut door it has no way to open.
+// Robots carry no keys, so a keyed door is a wall until the player opens it;
+// an unkeyed door opens for anything that comes near, so it is a corridor.
+bool portalLockedShut(const Level& level, const SolidDoors* doors, int segment,
+                      const SideData& sd) {
+    if (sd.door < 0 || !doorShut(doors, segment, sd.neighbour)) return false;
+    return level.doors[static_cast<size_t>(sd.door)].key != KeyColor::None;
+}
+
 // Breadth-first over the segment graph from the player's segment. One search
 // per player-segment change serves every robot: each simply walks downhill.
-void rebuildPathField(const Level& level, RobotState& state, int playerSegment) {
+void rebuildPathField(const Level& level, RobotState& state, int playerSegment,
+                      const SolidDoors* doors) {
     const int n = std::min(level.segmentCount(), kMaxPathSegments);
     state.pathValidCount = n;
     for (int i = 0; i < n; ++i) state.distanceToPlayer[static_cast<size_t>(i)] = -1;
     state.pathSegment = playerSegment;
+    state.pathDoorCount = doors ? doors->count : 0;
     if (playerSegment < 0 || playerSegment >= n) return;
 
     // The queue is the distance array itself walked in order, so no allocation.
@@ -340,6 +351,9 @@ void rebuildPathField(const Level& level, RobotState& state, int playerSegment) 
         for (const SideData& sd : level.segments[static_cast<size_t>(si)].sides) {
             if (!sd.isPortal() || sd.neighbour >= n) continue;
             if (state.distanceToPlayer[static_cast<size_t>(sd.neighbour)] >= 0) continue;
+            // The search runs from the player outwards, so the door is
+            // crossed from the neighbour's side; a door is shut from both.
+            if (portalLockedShut(level, doors, si, sd)) continue;
             state.distanceToPlayer[static_cast<size_t>(sd.neighbour)] = static_cast<int16_t>(d + 1);
             queue[static_cast<size_t>(tail++)] = static_cast<int16_t>(sd.neighbour);
         }
@@ -349,7 +363,7 @@ void rebuildPathField(const Level& level, RobotState& state, int playerSegment) 
 // Where to head to get one segment closer to the player: the centre of the
 // portal into the neighbour with the lower distance.
 bool nextWaypoint(const Level& level, const RobotState& state, int fromSegment,
-                  glm::vec3* waypoint) {
+                  const SolidDoors* doors, glm::vec3* waypoint) {
     if (fromSegment < 0 || fromSegment >= state.pathValidCount) return false;
     const int16_t here = state.distanceToPlayer[static_cast<size_t>(fromSegment)];
     if (here <= 0) return false;
@@ -358,6 +372,7 @@ bool nextWaypoint(const Level& level, const RobotState& state, int fromSegment,
     for (int side = 0; side < SideCount; ++side) {
         const SideData& sd = seg.sides[static_cast<size_t>(side)];
         if (!sd.isPortal() || sd.neighbour >= state.pathValidCount) continue;
+        if (portalLockedShut(level, doors, fromSegment, sd)) continue;
         if (state.distanceToPlayer[static_cast<size_t>(sd.neighbour)] == here - 1) {
             *waypoint = sd.center;
             return true;
@@ -404,11 +419,13 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
 } // namespace
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
-                RobotState& state, CombatState& combat, Body& player, float dt) {
+                RobotState& state, CombatState& combat, Body& player, float dt,
+                const SolidDoors* doors) {
     (void)weapons;
 
-    if (state.pathSegment != player.segment) {
-        rebuildPathField(level, state, player.segment);
+    const int shutDoors = doors ? doors->count : 0;
+    if (state.pathSegment != player.segment || state.pathDoorCount != shutDoors) {
+        rebuildPathField(level, state, player.segment, doors);
     }
 
     CollisionConfig collision;
@@ -435,9 +452,9 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         if (distance < def.sightRange && distance > 1e-3f) {
             const glm::vec3 dir = toPlayer / distance;
             const RayHit hit =
-                raycast(level, robot.body.position, dir, distance, robot.body.segment);
-            // The ray stops at the first wall; if that is farther than the
-            // player, nothing is in the way.
+                raycast(level, robot.body.position, dir, distance, robot.body.segment, doors);
+            // The ray stops at the first wall or shut door; if that is farther
+            // than the player, nothing is in the way.
             canSee = !hit.hit || hit.distance >= distance - 0.5f;
         }
 
@@ -523,7 +540,8 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 glm::vec3 waypoint;
                 const bool sameSegment = robot.body.segment == player.segment;
                 const glm::vec3 goal = sameSegment || !nextWaypoint(level, state,
-                                                                    robot.body.segment, &waypoint)
+                                                                    robot.body.segment, doors,
+                                                                    &waypoint)
                                            ? (robot.hasLastKnown ? robot.lastKnown
                                                                  : player.position)
                                            : waypoint;
@@ -607,7 +625,8 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         robot.body.position += robot.body.velocity * dt;
         // Robots are Bodies, so they cannot leave the mine any more than the
         // player can. No separate containment logic, and no separate bugs.
-        resolveCollision(level, robot.body, collision, dt, nullptr);
+        // The same shut doors stop them too.
+        resolveCollision(level, robot.body, collision, dt, nullptr, doors);
 
         // --- death -------------------------------------------------------
         if (robot.health <= 0.0f) {
@@ -638,7 +657,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             continue;
         }
         d.body.position += d.body.velocity * dt;
-        resolveCollision(level, d.body, collision, dt, nullptr);
+        resolveCollision(level, d.body, collision, dt, nullptr, doors);
         // Bleed speed so chunks settle rather than pinballing forever.
         d.body.velocity *= std::exp(-1.4f * dt);
     }

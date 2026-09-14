@@ -76,6 +76,10 @@ struct SolidDoors {
     }
 };
 
+// True if a shut door lies between two neighbouring segments. `doors` may be
+// null, in which case nothing is shut.
+bool doorShut(const SolidDoors* doors, int segment, int neighbour);
+
 struct CollisionConfig {
     // How many times the push-out is repeated per step. Corners need more than
     // one pass: resolving against one wall can push the body into another.

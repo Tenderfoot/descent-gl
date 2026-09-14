@@ -659,6 +659,39 @@ Worth recording, because all three were the tests and not the code:
 
 ---
 
+## Fixes after M7 — doors, phantoms, homing
+
+Three gameplay bugs reported from play on the dev machine, all in `src/sim`:
+
+- **Shots stopped mid-air for no reason.** Every level object was a hit
+  target, including the 16 that had become robots, so each robot's spawn
+  point was an invisible, indestructible 2.4-unit sphere. `initObjects` now
+  marks robot entries dead. The renderer's prop list indexed object health
+  by prop index rather than object index, which the fix exposed; corrected.
+- **Robots moved and shot through doors, and bolts passed through them.**
+  `SolidDoors` was built each step and handed only to the ship's collision.
+  It now goes to `stepCombat` and `stepRobots` too: projectile sweeps, robot
+  sight lines, robot containment and debris all stop at a shut door, and the
+  path search treats a locked shut door as a wall.
+- **Homing missiles never sought robots.** Acquisition only looked at level
+  objects with health, which on `mine01` is nothing. It now prefers robots.
+
+### Verified (Linux container, software GL; sim is configuration-independent)
+
+| Check | Result |
+| --- | --- |
+| A bolt through a removed robot's spawn point | ✅ flew **15.3 units past** it on `mine01`, 49.0 on `test01` |
+| Homing locks and hits | ✅ locked robot 0, health 26 → 0 |
+| A bolt at a shut door | ✅ stopped **0.0 units** short of the door plane; the same shot carried through once the door opened |
+| A robot chasing through a locked door for 5 s | ✅ **0 steps** on the wrong side, door stayed at 0.00, shields lost 0.0 |
+| A robot behind a shut door | ✅ unseen for 1 s shut, seen within 3 s of opening |
+| Weapons, robots, loop, world tests on `mine01` | ✅ PASS |
+| Weapons, robots tests on `test01` | ✅ PASS (loop SKIPPED, no doors) |
+| Pillars still drawn after the prop index fix | ✅ headless screenshot from segment 12 |
+| `--collision-test` | ❌ still the pre-existing one-ray diagonal case, unchanged by this |
+
+---
+
 ## M8 — Polish and performance ⬜
 
 Not started.

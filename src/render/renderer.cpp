@@ -153,8 +153,14 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
     robotOccluderType_.assign(sim::kMaxRobots, -1);
 }
 
+bool Renderer::propAlive(const Prop& prop, const RenderState& rs) {
+    if (prop.objectIndex < 0 || prop.objectIndex >= rs.objectCount) return true;
+    return rs.objectAlive[static_cast<size_t>(prop.objectIndex)];
+}
+
 void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
-    for (const LevelObject& obj : level.objects) {
+    for (size_t oi = 0; oi < level.objects.size(); ++oi) {
+        const LevelObject& obj = level.objects[oi];
         // An object whose type names a robot definition is not scenery: the
         // simulation owns it and it is drawn from the robot list instead.
         if (sim::objectIsRobot(robots, obj.type)) continue;
@@ -171,6 +177,7 @@ void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
         prop.mesh = &propMeshes_.at(obj.type);
         prop.occluderMesh = &propOccluders_.at(obj.type);
         prop.segment = obj.segment;
+        prop.objectIndex = static_cast<int>(oi);
         prop.textureLayer = obj.type == "pillar" ? WallRock : WallPanel;
         prop.model = glm::translate(glm::mat4(1.0f), obj.position) *
                      glm::mat4_cast(obj.orientation) * glm::scale(glm::mat4(1.0f), glm::vec3(obj.scale));
@@ -624,7 +631,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
 
             for (size_t pi = 0; pi < props_.size(); ++pi) {
                 const Prop& prop = props_[pi];
-                if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+                if (!propAlive(prop, rs)) continue;
                 if (prop.segment >= 0 &&
                     !std::binary_search(light.segments.begin(), light.segments.end(),
                                         prop.segment)) {
@@ -714,7 +721,7 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
     for (size_t pi = 0; pi < props_.size(); ++pi) {
         const Prop& prop = props_[pi];
         if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
-        if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+        if (!propAlive(prop, rs)) continue;
         depthShader_->setMat4("uModel", prop.model);
         prop.mesh->draw();
     }
@@ -865,7 +872,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         for (size_t pi = 0; pi < props_.size(); ++pi) {
             const Prop& prop = props_[pi];
             if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
-            if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
+            if (!propAlive(prop, rs)) continue;
             if (prop.segment >= 0 && !std::binary_search(light.segments.begin(),
                                                          light.segments.end(), prop.segment)) {
                 continue;

@@ -11,6 +11,7 @@ namespace dvk::sim {
 struct CombatState;
 struct RobotState;
 struct RobotConfig;
+struct SolidDoors;
 
 // Which side of a segment is currently shut. One array, consulted by the portal
 // walk, the light flood fill and collision alike, so those three can never
@@ -80,5 +81,11 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.
 bool sidePassable(const GameState& state, int segment, int side);
+
+// The world-space faces of every door that is currently shut, using the same
+// threshold as the DoorField. Rebuilt once per step and handed to collision,
+// line of sight and projectiles alike, so none of them can disagree with the
+// portal walk and the light flood about whether a door is in the way.
+void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out);
 
 } // namespace dvk::sim

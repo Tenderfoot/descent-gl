@@ -619,6 +619,24 @@ The headlight drains energy and **switches itself off at zero**. In a game with
 no ambient term that is a real consequence, which is the point of it costing
 anything. Shields at zero resets to the player start.
 
+### Objects, robots and targets
+
+`Level::objects` is one list, but two systems own its entries. An object whose
+type names a robot definition is spawned as a robot and stepped by
+`stepRobots`; everything else is static scenery with health in `ObjectHealth`.
+`initObjects` marks the robot entries **dead from the start**, so the object
+hit test never sees them. Before that rule every robot's spawn point stayed
+behind as an invisible, indestructible sphere that stopped shots for no visible
+reason — sixteen of them in `mine01`. The weapons test now fires through a
+removed robot's spawn point and fails if the bolt stops.
+
+The renderer builds its prop list from the same objects, skipping robots, so a
+prop's index and its object's index are different numbers; `Prop::objectIndex`
+carries the mapping for the alive check.
+
+Homing acquires **robots first**, then destructible scenery, and steers at
+whichever it locked; a target that dies is flown past.
+
 ### Fire points
 
 `kShipFirePoints` in `src/sim/ship.h` must stay on the ship model's widest
@@ -630,6 +648,38 @@ of thin air beside the hull. Laser and vulcan alternate between them.
 Impact flashes and explosions are short-lived additive billboards in the unlit
 pass, expanded on the CPU into one buffer and drawn in one call. There is no
 particle system beyond that, deliberately.
+
+---
+
+## Doors
+
+A door is a **portal in the graph** carrying a slab that fills the opening
+while it is shut, rather than a new kind of side. The two segments still share
+their four vertices, so the mine's wall surface stays closed and the shadow
+occluder still validates.
+
+Two views of the same state exist, both derived from `GameState::doors` every
+step, and both using the same `kPassableAt` threshold:
+
+- **`DoorField`** — a byte per segment side, consulted by the portal walk and
+  the light flood fill. Answers "can anything get through this side".
+- **`SolidDoors`** — the world-space triangles of every shut door, built by
+  `buildSolidDoors` and handed to `resolveCollision`, `raycast` and
+  `sweepSphere`. Answers "where is the surface a body or bolt stops at".
+
+`main.cpp` builds `SolidDoors` once per step and passes the same pointer to the
+ship's collision, `stepCombat` and `stepRobots`. **Nothing geometric runs
+door-blind.** The first M7 build handed it to the ship only, so robots saw,
+shot and flew through shut doors and bolts from either side passed through.
+The loop test now fires at a shut door, parks a robot behind one, and fails if
+anything gets through.
+
+Robots carry no keys, but an unkeyed door opens for anything that comes near.
+So the path search treats a **locked** shut door as a wall and an unlocked one
+as a corridor: a robot walks up to an unlocked door and it opens, while a keyed
+door stays locked until the player opens it. The distance field is rebuilt
+whenever the number of shut door faces changes, not only when the player
+changes segment.
 
 ---
 

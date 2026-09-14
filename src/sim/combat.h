@@ -39,7 +39,8 @@ struct Projectile {
     float lightRadius = 0.0f;
     float lightIntensity = 0.0f;
     float turnRate = 0.0f;
-    int target = -1;       // homing only
+    int target = -1;       // homing only: a destructible level object
+    int targetRobot = -1;  // homing only: a robot, preferred over `target`
     int owner = -1;        // -1 is the player
 };
 
@@ -142,17 +143,24 @@ struct CombatState {
     ObjectHealth objects;
 };
 
-// Sets up object health from the level's objects.
-void initObjects(const Level& level, ObjectHealth& out);
-
 struct RobotState;
+struct RobotConfig;
+struct SolidDoors;
+
+// Sets up object health from the level's objects. An object whose type names
+// a robot definition is not scenery: the simulation owns it as a robot, so it
+// is marked dead here and never acts as a target. Before this, every robot's
+// spawn point was an invisible, indestructible sphere that stopped shots.
+void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& out);
 
 // One fixed step of everything in this file. `ship` is the player's body, used
 // for fire points, as a target for robot fire, and for taking splash damage.
-// `robots` may be null before M6's robots exist.
+// `robots` may be null before M6's robots exist. `doors` is the shut-door set
+// for this step; a bolt stops at a shut door as it does at a wall.
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
-                const FireControls& controls, float dt, RobotState* robots);
+                const FireControls& controls, float dt, RobotState* robots,
+                const SolidDoors* doors = nullptr);
 
 // Resets the player after a death. Returns true if a death happened this step.
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
