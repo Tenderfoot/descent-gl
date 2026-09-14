@@ -46,6 +46,15 @@ namespace dvk {
 //   --robots-test       drive the robot state machine through idle, alert,
 //                       chase, attack, retreat and death, and check they never
 //                       leave the mine. Needs no window and no GL.
+//   --headlight         start with the headlight on. It is off at the start
+//                       from now on, so a screenshot can no longer show it
+//                       without a keypress; this is the same gap --chase and
+//                       --automap fill.
+//   --light-test        drive the CPU illumination query: the falloff against
+//                       the shader's own formula, the spot cone, whether
+//                       occlusion blocks anything, and whether the level has
+//                       both lit and dark places to stand. Needs no window and
+//                       no GL.
 //   --loop-test         play the level's win and lose conditions through:
 //                       keys against doors, a shut door against light, the
 //                       reactor, the countdown, the exit and every pickup.
@@ -80,6 +89,8 @@ struct Options {
     bool weaponsTest = false;
     bool robotsTest = false;
     bool loopTest = false;
+    bool lightTest = false;
+    bool headlight = false;
     bool soundTest = false;
     bool noSound = false;
     float volume = 0.8f;

@@ -11,6 +11,7 @@
 #include "game/state.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
+#include "game/light_test.h"
 #include "game/loop_test.h"
 #include "game/robots_test.h"
 #include "game/session.h"
@@ -26,6 +27,7 @@
 #include "sim/flight.h"
 #include "sim/flight_test.h"
 #include "sim/gameflow.h"
+#include "sim/lighting.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 #include "sim/weapons.h"
@@ -79,7 +81,14 @@ constexpr float kEngineHighPitch = 1.28f;
 // way of seeing anything at all, so it is deliberately generous: a wide enough
 // cone to fly by and a range of three segments.
 constexpr float kHeadlightRadius = 62.0f;
-constexpr float kHeadlightCone = 34.0f;   // degrees, full angle
+constexpr float kHeadlightCone = 60.0f;   // degrees, full angle
+// Wide and soft rather than narrow and hot. A tight bright beam turned the
+// mine into a spotlight on a wall with nothing either side of it; widening the
+// cone and pulling the intensity down trades the hotspot for a pool of light
+// that shows where the corridor goes. It also leaves the level's own lamps as
+// the brightest things in the mine, which is what makes flying towards one
+// feel like progress.
+constexpr float kHeadlightIntensity = 2.0f;
 // Set a little ahead of the hull so the cone does not start inside the ship's
 // own geometry.
 constexpr float kHeadlightForward = 2.2f;
@@ -137,6 +146,9 @@ int main(int argc, char** argv) {
     }
     if (opts.loopTest) {
         return dvk::runLoopTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
+    }
+    if (opts.lightTest) {
+        return dvk::runLightTest(levelPath);
     }
     // The whole audio path with no device and no sound card. Sound is the one
     // subsystem a screenshot cannot show, so this is how a claim about it is
@@ -197,6 +209,17 @@ int main(int argc, char** argv) {
     session.load(level, robotConfig, opts.startSegment);
     dvk::SimState& prev = session.previous();
     dvk::SimState& cur = session.current();
+    // The headlight is off at the start, so a frame-limited run has no way to
+    // show it without someone pressing H. Both states have to be screenshot-
+    // able for the retune to be checkable at all. Set on the initial state
+    // rather than the current one: start() and every restart copy that over
+    // the live state, so anything set only on current() lasts until the run
+    // actually begins and no longer.
+    if (opts.headlight) {
+        session.initial().combat.player.headlightOn = true;
+        prev.combat.player.headlightOn = true;
+        cur.combat.player.headlightOn = true;
+    }
     dvk::PlayerMenu menu;
 
     const bool commandLineRun = argc > 1 && !opts.startMenu;
@@ -241,6 +264,10 @@ int main(int argc, char** argv) {
     // Rebuilt each step and handed to collision, line of sight and projectiles
     // alike, so none of them can disagree about whether a door is shut.
     dvk::sim::SolidDoors solidDoors;
+    // The player's own illumination, recomputed each frame and read by the
+    // debug panel. Held out here so it survives between frames rather than
+    // being rebuilt inside the UI block.
+    dvk::sim::Illumination playerLight;
 
     // The level's own lights had their segment sets computed at load with no
     // doors. They are recomputed against the door state now, and again every
@@ -635,7 +662,7 @@ int main(int argc, char** argv) {
             hl.radius = kHeadlightRadius;
             hl.coneDegrees = kHeadlightCone;
             hl.color = glm::vec3(1.0f, 0.97f, 0.9f);
-            hl.intensity = cur.combat.player.headlightOn ? 3.2f : 0.0f;
+            hl.intensity = cur.combat.player.headlightOn ? kHeadlightIntensity : 0.0f;
             hl.castsShadows = cur.combat.player.headlightOn;
             hl.position = rs.shipPos + shipForward * kHeadlightForward;
             hl.direction = shipForward;
@@ -690,6 +717,21 @@ int main(int argc, char** argv) {
         }
 
         dynamicLights.resize(dynamicUsed);
+
+        // How much light is actually falling on the player, as the simulation
+        // understands it rather than as the screen shows it. Asked once per
+        // frame, after both light lists exist, over the ship's collision sphere
+        // so the answer does not flicker as a shadow edge crosses a point.
+        // Nothing consumes it yet beyond the debug readout; it is here because
+        // "is the player in darkness" is a question about the world that the
+        // world should be able to answer.
+        dvk::sim::IlluminationQuery lightQuery;
+        lightQuery.point = rs.shipPos;
+        lightQuery.segment = rs.shipSegment;
+        lightQuery.bodyRadius = cur.ship.body.radius;
+        playerLight = dvk::sim::Illumination{};
+        dvk::sim::addIllumination(playerLight, lightQuery, level, level.lights, &solidDoors);
+        dvk::sim::addIllumination(playerLight, lightQuery, level, dynamicLights, &solidDoors);
 
         // A ray straight out of the nose, for the debug overlay and as a live
         // check that the query everything from M5 on depends on agrees with
@@ -989,6 +1031,22 @@ int main(int argc, char** argv) {
                         st.shadowLights, st.shadowBudget, st.budgetDenied);
             ImGui::SliderInt("budget", &weapons.shadowBudget, 1, 32);
             ImGui::Text("%d billboards", st.billboards);
+
+            ImGui::Separator();
+            // What the simulation believes about the light on the player, next
+            // to what the renderer did, because the two answer the same
+            // question by different means and the panel is where they can be
+            // caught disagreeing. The query traces walls and doors only, so a
+            // robot standing in the beam darkens the picture but not this
+            // number.
+            ImGui::Text("light on the player: %.3f  (%s)", playerLight.value,
+                        playerLight.dark() ? "DARK" : "lit");
+            ImGui::Text("  %.0f%% of the hull lit, brightest light %.3f, threshold %.2f",
+                        playerLight.litFraction() * 100.0f, playerLight.brightest,
+                        static_cast<double>(dvk::sim::kDarkThreshold));
+            ImGui::Text("  %d lights reach, %d unoccluded, %d shadow rays",
+                        playerLight.lightsReaching, playerLight.lightsVisible,
+                        playerLight.raysCast);
 
             ImGui::Separator();
             ImGui::TextDisabled("per light: edges / volume triangles / segments");

@@ -116,7 +116,10 @@ struct PlayerState {
     // Laser alternates wingtips. One bit of state that makes the weapon read
     // as a pair of guns rather than one.
     bool nextWingRight = false;
-    bool headlightOn = true;
+    // Off at the start. The mine opening in darkness, with H the first thing
+    // the player reaches for, is the introduction the lighting model deserves;
+    // starting lit gives that away before the level has said anything.
+    bool headlightOn = false;
     int deaths = 0;
 
     // Feel, not state anything reads back. Both decay in stepCombat and both
