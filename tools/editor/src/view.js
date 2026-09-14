@@ -24,6 +24,15 @@ const OBJECT_COLOR = 0xc06a4a;
 const PORTAL_COLOR = 0x39d0a0;
 const DOOR_COLOR = 0xe0913a;
 
+// Groups rebuilt from the level on every build(), and cleared before it.
+const LEVEL_GROUPS = ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
+                      'pickups', 'start', 'exit', 'vertices', 'highlight'];
+
+// Groups that do not come from the level and must survive a rebuild. Keeping
+// this list explicit is what stops the next thing added to the scene from
+// being re-created once per frame of a drag.
+const PERMANENT_GROUPS = ['studio'];
+
 const v3 = (p) => new THREE.Vector3(p[0], p[1], p[2]);
 
 // The file stores quaternions as [w, x, y, z]; THREE.Quaternion is (x, y, z, w).
@@ -35,12 +44,12 @@ export class LevelView {
         this.models = models;
         this.root = new THREE.Group();
         this.groups = {};
-        for (const name of ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
-                            'pickups', 'start', 'exit', 'vertices', 'highlight']) {
+        for (const name of [...LEVEL_GROUPS, ...PERMANENT_GROUPS]) {
             this.groups[name] = new THREE.Group();
             this.groups[name].name = name;
             this.root.add(this.groups[name]);
         }
+        this.buildStudioLighting();
         this.level = null;
         // Per wall triangle, which segment it belongs to, so a raycast hit can
         // be turned back into a segment index without searching.
@@ -48,6 +57,26 @@ export class LevelView {
         this.disposables = [];
         this.wallMaterials = [];
         this.xray = false;
+    }
+
+    // Something for MeshLambertMaterial to respond to. Deliberately not the
+    // level's lights: the mine is lit from a fixed pair of directions so that
+    // geometry reads the same everywhere, including in the rooms the level
+    // leaves black on purpose.
+    //
+    // Built ONCE, here, and never from build(). These do not depend on the
+    // level, and build() runs on every frame of a gizmo drag - adding them
+    // there stranded three more lights per frame, because dispose() clears the
+    // groups and these used to hang off `root` where it could not see them.
+    // The symptom was the whole scene washing out to white and the frame rate
+    // collapsing as the drag went on. They live in a group for the same
+    // reason: nothing of ours should be parented straight to `root`.
+    buildStudioLighting() {
+        const key = new THREE.DirectionalLight(0xffffff, 2.0);
+        key.position.set(0.4, 1.0, 0.7);
+        const fill = new THREE.DirectionalLight(0x88a0c0, 0.9);
+        fill.position.set(-0.6, -0.4, -0.5);
+        this.groups.studio.add(key, fill, new THREE.AmbientLight(0xffffff, 0.35));
     }
 
     setVisible(group, visible) {
@@ -58,7 +87,7 @@ export class LevelView {
         for (const d of this.disposables) d.dispose();
         this.disposables.length = 0;
         this.wallMaterials.length = 0;
-        for (const group of Object.values(this.groups)) group.clear();
+        for (const name of LEVEL_GROUPS) this.groups[name].clear();
     }
 
     track(resource) {
@@ -246,16 +275,6 @@ export class LevelView {
                 this.groups.lights.add(helper);
             }
         }
-
-        // Something for MeshLambertMaterial to respond to. Deliberately not the
-        // level's lights: the mine is lit from a fixed pair of directions so
-        // that geometry reads the same everywhere, including in the rooms the
-        // level leaves black on purpose.
-        const key = new THREE.DirectionalLight(0xffffff, 2.0);
-        key.position.set(0.4, 1.0, 0.7);
-        const fill = new THREE.DirectionalLight(0x88a0c0, 0.9);
-        fill.position.set(-0.6, -0.4, -0.5);
-        this.root.add(key, fill, new THREE.AmbientLight(0xffffff, 0.35));
     }
 
     // The real mesh where the cache has it, a box where it does not. A level
