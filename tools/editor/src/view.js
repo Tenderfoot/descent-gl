@@ -31,7 +31,8 @@ const v3 = (p) => new THREE.Vector3(p[0], p[1], p[2]);
 const quatFromLevel = (q) => new THREE.Quaternion(q[1], q[2], q[3], q[0]);
 
 export class LevelView {
-    constructor() {
+    constructor(models = null) {
+        this.models = models;
         this.root = new THREE.Group();
         this.groups = {};
         for (const name of ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
@@ -257,17 +258,28 @@ export class LevelView {
         this.root.add(key, fill, new THREE.AmbientLight(0xffffff, 0.35));
     }
 
+    // The real mesh where the cache has it, a box where it does not. A level
+    // naming a model that is not there is the author's problem to see, not a
+    // reason for the editor to stop drawing - and the box makes it obvious.
+    objectGeometry(object) {
+        const model = this.models?.get(object.type);
+        if (!model) return this.track(new THREE.BoxGeometry(3, 3, 3));
+        const geometry = this.track(new THREE.BufferGeometry());
+        geometry.setAttribute('position', new THREE.BufferAttribute(model.positions, 3));
+        geometry.computeVertexNormals();
+        return geometry;
+    }
+
     buildEntities(level) {
         for (let i = 0; i < level.objects.length; ++i) {
             const object = level.objects[i];
-            // A box, not the mesh. Loading OBJs is E4's job; what matters at
-            // E0 is where a thing is and which segment claims it.
-            const size = 3 * object.scale;
-            const mesh = new THREE.Mesh(
-                this.track(new THREE.BoxGeometry(size, size, size)),
-                this.track(new THREE.MeshLambertMaterial({ color: OBJECT_COLOR })));
+            const mesh = new THREE.Mesh(this.objectGeometry(object),
+                this.track(new THREE.MeshLambertMaterial({
+                    color: OBJECT_COLOR, flatShading: true,
+                })));
             mesh.position.copy(v3(object.position));
             mesh.quaternion.copy(quatFromLevel(object.orientation));
+            mesh.scale.setScalar(object.scale);
             mesh.userData.pick = { kind: 'object', index: i };
             this.groups.objects.add(mesh);
         }

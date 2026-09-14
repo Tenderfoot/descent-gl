@@ -9,7 +9,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
-import { PICKUP_NAMES, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import {
+    addDoor, addLight, addObject, addPickup, availableKeys, moveEntity, removeEntity,
+    segmentCentre, setExit,
+} from './entities.js';
+import { KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import { ModelCache } from './obj.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
@@ -34,7 +39,10 @@ const LAYERS = [
     ['exit', 'Exit', true],
 ];
 
-const MODES = [['segment', 'Segment'], ['side', 'Side'], ['vertex', 'Vertex']];
+const MODES = [['segment', 'Segment'], ['side', 'Side'], ['vertex', 'Vertex'],
+               ['entity', 'Entity']];
+
+const models = new ModelCache();
 
 const app = {
     level: null,
@@ -44,6 +52,8 @@ const app = {
     mode: 'segment',
     joinFrom: null,
     lastEditDetail: null,
+    lastSegment: null,
+    models: [],
     history: new History(),
 };
 
@@ -56,7 +66,7 @@ viewport.appendChild(renderer.domElement);
 
 const hud = document.createElement('div');
 hud.id = 'hud';
-hud.textContent = 'drag to orbit · click to select · double-click to fly in · 1/2/3 mode · F frame';
+hud.textContent = 'drag to orbit · click to select · double-click to fly in · 1/2/3/4 mode · F frame';
 viewport.appendChild(hud);
 
 const scene = new THREE.Scene();
@@ -66,7 +76,7 @@ const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
-const view = new LevelView();
+const view = new LevelView(models);
 scene.add(view.root);
 
 // A stand-in for the vertex being dragged. It lives outside view.root so that
@@ -202,6 +212,10 @@ async function loadLevel(name) {
 
     app.name = name;
     app.level = parseLevel(text, `assets/levels/${name}.json`);
+    // Fetch every mesh the level names before the first draw, so objects come
+    // up as themselves rather than as boxes that turn into robots a moment
+    // later.
+    await models.loadAll(app.level.objects.map((o) => o.type));
     app.selection = null;
     app.joinFrom = null;
     gizmo.detach();
@@ -246,14 +260,31 @@ async function verify() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? `verify failed (${response.status})`);
 
-        const failed = result.results.filter((r) => r.exit !== 0);
+        // A check the server marked advisory was written for another level and
+        // is reported, not counted. Folding --loop-test's mine01 assertions
+        // into the verdict for every level would train the author to ignore
+        // the one check that catches a mine you cannot finish.
+        const counted = result.results.filter((r) => !r.advisory);
+        const failed = counted.filter((r) => r.exit !== 0);
+        const advisory = result.results.filter((r) => r.advisory && r.exit !== 0);
+
         $('verify-section').hidden = false;
         $('verify-output').textContent = result.results
-            .map((r) => `$ descent ${r.argv.join(' ')}\n[exit ${r.exit}]\n${r.output.trim()}`)
+            .map((r) => {
+                const note = r.advisory
+                    ? `\n(advisory: --${r.check}-test is ${r.writtenFor}'s regression test, not a ` +
+                      'check of this level. Its verdict is shown but not counted.)'
+                    : '';
+                return `$ descent ${r.argv.join(' ')}\n[exit ${r.exit}]${note}\n${r.output.trim()}`;
+            })
             .join('\n\n');
-        status(failed.length === 0 ? 'all checks passed'
-                                   : `${failed.map((r) => r.check).join(', ')} failed`,
-               failed.length === 0 ? 'ok' : 'error');
+
+        const summary = failed.length > 0
+            ? `${failed.map((r) => r.check).join(', ')} failed`
+            : advisory.length > 0
+                ? `checks passed (${advisory.map((r) => r.check).join(', ')}: advisory, see below)`
+                : 'all checks passed';
+        status(summary, failed.length === 0 ? 'ok' : 'error');
     } finally {
         $('verify').disabled = false;
     }
@@ -372,9 +403,171 @@ function renderTools() {
         return;
     }
 
-    if (selection?.kind !== 'vertex') return hint('Click a vertex. Drag the gizmo to move it.');
-    const using = app.level.segments.filter((seg) => seg.verts.includes(selection.index)).length;
-    hint(`vertex ${selection.index}, used by ${using} segment(s)`);
+    if (app.mode === 'vertex') {
+        if (selection?.kind !== 'vertex') return hint('Click a vertex. Drag the gizmo to move it.');
+        const using = app.level.segments.filter((seg) => seg.verts.includes(selection.index)).length;
+        return hint(`vertex ${selection.index}, used by ${using} segment(s)`);
+    }
+
+    // --- entity mode --------------------------------------------------------
+    renderEntityTools(container, button, hint);
+}
+
+// Everything placed inside a mine. New things land in the centre of the
+// segment the author last had selected, because aiming a click into a room you
+// are looking at from outside is guesswork.
+function renderEntityTools(container, button, hint) {
+    const selection = app.selection;
+    const target = app.lastSegment;
+
+    const row = (label) => {
+        const el = document.createElement('div');
+        el.className = 'hint';
+        el.textContent = label;
+        container.appendChild(el);
+        return el;
+    };
+
+    const field = (label, value, attrs, onchange) => {
+        const wrap = document.createElement('label');
+        wrap.className = 'field';
+        wrap.append(label);
+        const input = document.createElement('input');
+        Object.assign(input, attrs);
+        input.value = value;
+        input.onchange = () => onchange(input);
+        wrap.appendChild(input);
+        container.appendChild(wrap);
+        return input;
+    };
+
+    if (selection && MOVABLE.has(selection.kind)) {
+        const kind = selection.kind;
+        const index = selection.index;
+
+        if (kind === 'light') {
+            const light = app.level.lights[index];
+            field('radius', light.radius, { type: 'number', min: 1, max: 400, step: 1 },
+                  (el) => edit(`light ${index} radius`, () => { light.radius = Number(el.value); }));
+            field('intensity', light.intensity, { type: 'number', min: 0, max: 40, step: 0.1 },
+                  (el) => edit(`light ${index} intensity`, () => { light.intensity = Number(el.value); }));
+            const hex = '#' + light.color.map((c) =>
+                Math.round(Math.min(Math.max(c, 0), 1) * 255).toString(16).padStart(2, '0')).join('');
+            field('colour', hex, { type: 'color' }, (el) => edit(`light ${index} colour`, () => {
+                const v = el.value;
+                light.color = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+            }));
+            button(light.type === 'spot' ? 'Make it a point light' : 'Make it a spot light',
+                   'A spot also writes a direction and a cone angle',
+                   () => edit(`light ${index} type`, () => {
+                       light.type = light.type === 'spot' ? 'point' : 'spot';
+                   }));
+            if (light.type === 'spot') {
+                field('cone°', light.coneDegrees, { type: 'number', min: 1, max: 179, step: 1 },
+                      (el) => edit(`light ${index} cone`, () => { light.coneDegrees = Number(el.value); }));
+            }
+        }
+
+        if (kind === 'object') {
+            const object = app.level.objects[index];
+            field('scale', object.scale, { type: 'number', min: 0.1, max: 20, step: 0.1 },
+                  (el) => edit(`object ${index} scale`, () => { object.scale = Number(el.value); }));
+            field('health', object.health,
+                  { type: 'number', min: 0, max: 5000, step: 1 },
+                  (el) => edit(`object ${index} health`, () => { object.health = Number(el.value); }));
+            row('health 0 is indestructible scenery; anything above makes it a target');
+        }
+
+        if (kind === 'exit') {
+            const exit = app.level.exitTrigger;
+            field('radius', exit.radius, { type: 'number', min: 1, max: 60, step: 0.5 },
+                  (el) => edit('exit radius', () => { exit.radius = Number(el.value); }));
+        }
+
+        if (kind !== 'start') {
+            button(`Delete ${kind}`, '', () => edit(`delete ${kind}`, (level) => {
+                removeEntity(level, kind, index);
+                app.selection = null;
+                gizmo.detach();
+            }));
+        } else {
+            row('the player start cannot be deleted');
+        }
+        return;
+    }
+
+    if (selection?.kind === 'side') {
+        const { segment, side } = selection;
+        const sd = app.level.segments[segment].sides[side];
+        if (sd.neighbour >= 0 && sd.door < 0) {
+            const keys = availableKeys(app.level);
+            row(`portal → ${sd.neighbour}`);
+            for (let key = -1; key < KEY_NAMES.length; ++key) {
+                const name = key < 0 ? 'no key' : KEY_NAMES[key];
+                const has = key < 0 || keys.has(key);
+                const el = button(`Add door (${name})`,
+                    has ? '' : `no ${name} key is placed in this level, so this door could never open`,
+                    () => edit(`door on ${segment} ${SIDE_NAMES[side]}`,
+                               (level) => addDoor(level, segment, side, key)));
+                el.disabled = !has;
+            }
+            return;
+        }
+        if (sd.door >= 0) {
+            const door = app.level.doors[sd.door];
+            row(`door ${sd.door}, key ${door.key < 0 ? 'none' : KEY_NAMES[door.key]}`);
+            button('Delete door', '', () => edit(`delete door ${sd.door}`,
+                                                 (level) => removeEntity(level, 'door', sd.door)));
+            return;
+        }
+        return hint('That side is a solid wall. A door has to be a portal.');
+    }
+
+    if (target === null || target === undefined) {
+        return hint('Select a segment first — new things are placed in its centre.');
+    }
+
+    row(`placing into segment ${target}`);
+    button('Add light', '', () => edit('add light', (level) => {
+        const index = addLight(level, segmentCentre(level, target));
+        app.selection = { kind: 'light', index };
+    }));
+
+    const objectRow = document.createElement('div');
+    objectRow.className = 'textures';
+    for (const type of app.models) {
+        const el = document.createElement('button');
+        el.textContent = type;
+        el.title = `place a ${type}`;
+        el.onclick = () => edit(`add ${type}`, (level) => {
+            const index = addObject(level, type, segmentCentre(level, target));
+            app.selection = { kind: 'object', index };
+        });
+        objectRow.appendChild(el);
+    }
+    container.appendChild(objectRow);
+
+    const pickupRow = document.createElement('div');
+    pickupRow.className = 'textures';
+    PICKUP_NAMES.forEach((name, kind) => {
+        const el = document.createElement('button');
+        el.textContent = name.replace('key_', '');
+        el.title = `place a ${name}`;
+        el.onclick = () => edit(`add ${name}`, (level) => {
+            const index = addPickup(level, kind, segmentCentre(level, target));
+            app.selection = { kind: 'pickup', index };
+        });
+        pickupRow.appendChild(el);
+    });
+    container.appendChild(pickupRow);
+
+    if (!app.level.exitTrigger) {
+        button('Add exit', 'Where the level is escaped from, once the reactor is gone',
+               () => edit('add exit', (level) => {
+                   setExit(level, segmentCentre(level, target));
+                   app.selection = { kind: 'exit', index: 0 };
+               }));
+    }
 }
 
 function setModeButtons() {
@@ -529,6 +722,7 @@ function renderSelection() {
 
 function selectSegment(index, frame = false) {
     app.selection = index >= 0 ? { kind: 'segment', index } : null;
+    if (index >= 0) app.lastSegment = index;
     if (frame && index >= 0) frameSegment(index);
     renderTools();
     renderSelection();
@@ -615,14 +809,21 @@ renderer.domElement.addEventListener('click', (e) => {
     const entity = view.pickEntity(raycaster);
     if (entity) {
         app.selection = entity;
+        const position = entityPosition(entity.kind, entity.index);
+        if (app.mode === 'entity' && position && MOVABLE.has(entity.kind)) attachGizmo(position);
+        else gizmo.detach();
         renderTools();
         renderSelection();
         return;
     }
 
-    if (app.mode === 'side') {
+    if (app.mode === 'side' || app.mode === 'entity') {
         const face = view.pickFace(raycaster);
+        // In entity mode a wall click is how a door gets placed and how the
+        // "place into segment N" target is chosen, so it does both.
+        if (face && app.mode === 'entity') app.lastSegment = face.segment;
         app.selection = face ? { kind: 'side', ...face } : null;
+        gizmo.detach();
         renderTools();
         renderSelection();
         return;
@@ -636,12 +837,19 @@ renderer.domElement.addEventListener('click', (e) => {
 // derived planes out of step with the vertices.
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
-    if (app.selection?.kind !== 'vertex') return;
+    const selection = app.selection;
+    if (!selection) return;
+    const draggable = selection.kind === 'vertex' || MOVABLE.has(selection.kind);
+    if (!draggable) return;
+
     if (e.value) {
         dragStart = app.history.snapshot(app.level);
     } else if (dragStart !== null) {
         // One undo entry per drag, not per frame.
-        app.history.past.push({ text: dragStart, label: `move vertex ${app.selection.index}` });
+        const what = selection.kind === 'vertex'
+            ? `move vertex ${selection.index}`
+            : `move ${selection.kind}`;
+        app.history.past.push({ text: dragStart, label: what });
         app.history.future.length = 0;
         dragStart = null;
         app.validation = validateLevel(app.level);
@@ -651,15 +859,41 @@ gizmo.addEventListener('dragging-changed', (e) => {
 });
 
 gizmo.addEventListener('objectChange', () => {
-    if (app.selection?.kind !== 'vertex') return;
-    const index = app.selection.index;
+    const selection = app.selection;
+    if (!selection) return;
     const position = [snap(handle.position.x), snap(handle.position.y), snap(handle.position.z)];
-    moveVertex(app.level, index, position);
+
+    if (selection.kind === 'vertex') {
+        moveVertex(app.level, selection.index, position);
+        view.build(app.level);
+        applyLayers();
+        view.highlightVertex(selection.index);
+        renderSelection();
+        return;
+    }
+
+    if (!MOVABLE.has(selection.kind)) return;
+    moveEntity(app.level, selection.kind, selection.index, position);
     view.build(app.level);
     applyLayers();
-    view.highlightVertex(index);
     renderSelection();
 });
+
+// The kinds the gizmo can drag. A door is not one: it belongs to a portal, not
+// to a place.
+const MOVABLE = new Set(['light', 'pickup', 'object', 'start', 'exit']);
+
+function attachGizmo(position) {
+    handle.position.set(...position);
+    gizmo.attach(handle);
+}
+
+function entityPosition(kind, index) {
+    if (kind === 'start') return app.level.start.position;
+    if (kind === 'exit') return app.level.exitTrigger?.position ?? null;
+    const list = { light: app.level.lights, pickup: app.level.pickups, object: app.level.objects }[kind];
+    return list?.[index]?.position ?? null;
+}
 
 // --- wiring -----------------------------------------------------------------
 
@@ -689,6 +923,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === '1') setMode('segment');
     if (e.key === '2') setMode('side');
     if (e.key === '3') setMode('vertex');
+    if (e.key === '4') setMode('entity');
     if (e.key === 'f' && app.level) frameLevel();
     if (e.key === 'Escape') { app.selection = null; app.joinFrom = null; gizmo.detach(); renderTools(); renderSelection(); }
 });
@@ -698,7 +933,12 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 guard(async () => {
-    const { levels, binary } = await listLevels();
+    const [{ levels, binary }, modelList] = await Promise.all([
+        listLevels(),
+        fetch('/api/models').then((r) => (r.ok ? r.json() : { models: [] })).catch(() => ({ models: [] })),
+    ]);
+    app.models = modelList.models ?? [];
+    await models.loadAll(app.models);
     if (levels.length === 0) throw new Error('no levels in assets/levels/');
     $('level-select').innerHTML = levels.map((n) => `<option>${n}</option>`).join('');
     if (!binary) {

@@ -280,6 +280,45 @@ through the writer and reader, which means an undone level is byte-identical
 to one loaded from the file — and that a bug in the writer surfaces here
 rather than a week later in a diff.
 
+### Entities, and the field the loader trusts (E4)
+
+Lights, robots and scenery, pickups, doors, the exit and the player start.
+Objects are drawn as their real meshes — `tools/editor/src/obj.js` is just
+enough OBJ to get a silhouette, checked against the triangle counts
+`--validate-assets` prints, because placing a robot as a grey box is placing it
+and hoping.
+
+The rule all of it protects is one field. Every entity caches which segment
+contains it, and `loadLevel` recomputes that field when it is missing or out of
+range — but **trusts it when it is merely wrong**. So an entity dragged across
+a portal without re-resolving produces a light that lights the wrong room, or a
+pickup in a segment the player never enters, and no validator anywhere
+complains because nothing is structurally invalid. Everything in the editor
+that moves an entity re-resolves the field against the same `findSegment` the
+loader uses, and the tests assert the answer matches `findSegment` rather than
+matching a hard-coded index.
+
+Two things the editor refuses that the game does not check: a door anywhere but
+on a portal (the game is fatal on this, so refusing is just saying it earlier),
+and a door keyed to a colour the level has no key for — a red door in a mine
+with no red key is a mine that cannot be finished, and nothing checks for it.
+
+### `--loop-test` is not a general oracle
+
+Worth recording, because the name says otherwise and the editor's Verify button
+originally believed it. `src/game/loop_test.cpp` asserts the level has exactly
+three keyed doors and a gunner: it is `mine01`'s regression test, not a check
+of whether an arbitrary level can be played. It skips only when a level has no
+doors or no exit, so an editor-built level with one door and no gunner is
+neither skipped nor passing.
+
+The server therefore marks a check with the level it was written for, and the
+panel reports that check under an advisory note without counting it. Folding
+its verdict into every level's result would train the author to ignore the one
+check that catches a mine you cannot finish. What *is* general in its output is
+still asserted in the editor's own tests: that the key the editor placed gets
+seen, collected, and has an effect.
+
 ### What it is not
 
 Not the renderer. No shadows, no falloff, no reversed-Z, and the colours are

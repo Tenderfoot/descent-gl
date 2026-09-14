@@ -28,8 +28,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 EDITOR = ROOT / "tools" / "editor"
 LEVELS = ROOT / "assets" / "levels"
+MODELS = ROOT / "assets" / "models"
+CONFIG = ROOT / "assets" / "config"
 
-# A level name is a bare stem: no separators, no dots, no traversal.
+# A level, model or config name is a bare stem: no separators, no dots, no
+# traversal. The extension is supplied here, never by the request.
 LEVEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 # Where the Linux dev build puts the binary, in the order worth trying.
@@ -37,10 +40,19 @@ BINARIES = ["build/Debug/descent", "build/Release/descent"]
 
 # The flags that need no window and no GL, which is all of them that matter
 # here: the server may be running over ssh with no display at all.
+#
+# The third field is the level a check was WRITTEN FOR, or None for one that
+# judges any level. --loop-test is the awkward case: despite the name it is
+# mine01's regression test, and src/game/loop_test.cpp asserts the level has
+# exactly three keyed doors and a gunner. Run against anything else it neither
+# skips (it skips only when there are no doors or no exit) nor passes, so its
+# verdict says nothing about whether the level is good. Reporting that as a
+# failure would train the author to ignore the one check that catches a mine
+# you cannot finish.
 CHECKS = [
-    ("structure", ["--world-test"]),
-    ("collision", ["--collision-test"]),
-    ("loop", ["--loop-test"]),
+    ("structure", ["--world-test"], None),
+    ("collision", ["--collision-test"], None),
+    ("loop", ["--loop-test"], "mine01"),
 ]
 
 
@@ -49,6 +61,13 @@ def level_path(name):
     if not LEVEL_NAME.match(name or ""):
         return None
     return LEVELS / f"{name}.json"
+
+
+def asset_path(directory, name, suffix):
+    """<directory>/<name><suffix>, or None if the name is not a bare stem."""
+    if not LEVEL_NAME.match(name or ""):
+        return None
+    return directory / f"{name}{suffix}"
 
 
 def find_binary():
@@ -98,6 +117,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/levels":
             names = sorted(p.stem for p in LEVELS.glob("*.json"))
             return self.send_json(200, {"levels": names, "binary": str(find_binary() or "")})
+
+        if path == "/api/models":
+            names = sorted(p.stem for p in MODELS.glob("*.obj"))
+            return self.send_json(200, {"models": names})
+
+        if path.startswith("/api/models/"):
+            resolved = asset_path(MODELS, path[len("/api/models/"):], ".obj")
+            if resolved is None or not resolved.is_file():
+                return self.send_json(404, {"error": "no such model"})
+            return self.send_bytes(200, resolved.read_bytes(), "text/plain")
+
+        if path.startswith("/api/config/"):
+            resolved = asset_path(CONFIG, path[len("/api/config/"):], ".json")
+            if resolved is None or not resolved.is_file():
+                return self.send_json(404, {"error": "no such config"})
+            return self.send_bytes(200, resolved.read_bytes(), "application/json")
 
         if path.startswith("/api/levels/"):
             resolved = level_path(path[len("/api/levels/"):])
@@ -159,14 +194,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             })
 
         results = []
-        for label, flags in CHECKS:
+        for label, flags, written_for in CHECKS:
             argv = [str(binary), *flags, "--level", str(resolved)]
             try:
                 done = subprocess.run(argv, cwd=ROOT, capture_output=True, text=True, timeout=180)
                 output, code = done.stdout + done.stderr, done.returncode
             except subprocess.TimeoutExpired:
                 output, code = "timed out after 180s", -1
-            results.append({"check": label, "argv": argv[1:], "exit": code, "output": output})
+            results.append({
+                "check": label,
+                "argv": argv[1:],
+                "exit": code,
+                "output": output,
+                "advisory": written_for is not None and written_for != name,
+                "writtenFor": written_for,
+            })
 
         return self.send_json(200, {"level": name, "results": results})
 

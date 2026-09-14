@@ -119,3 +119,11 @@ pre {
 .snap input { flex: 1; font: inherit; padding: 4px 6px; color: var(--text); background: #262b33; border: 1px solid var(--line); border-radius: 4px; }
 
 .dirty { color: var(--warn); }
+
+.field { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+.field input {
+    flex: 1; min-width: 0; font: inherit; padding: 4px 6px;
+    color: var(--text); background: #262b33;
+    border: 1px solid var(--line); border-radius: 4px;
+}
+.field input[type="color"] { padding: 2px; height: 26px; }

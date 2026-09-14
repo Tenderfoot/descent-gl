@@ -39,9 +39,8 @@ lighting is something a browser cannot do; structure is what this owns.
 
 ## State
 
-E0 (viewer), E1 (validation parity), E2 (round trip and server) and E3
-(geometry editing) are done. The editor reads, draws, checks, edits and
-writes. E4 adds the entity tools; E5 authoring quality of life.
+E0 (viewer), E1 (validation parity), E2 (round trip and server), E3 (geometry
+editing) and E4 (entities) are done. E5 adds authoring quality of life.
 
 ## Editing (E3)
 
@@ -56,6 +55,22 @@ Three selection modes — **1** segment, **2** side, **3** vertex.
 | **Texture** | Per wall, from the five tiles in `procedural.h`. |
 | **Vertex drag** | Moves one vertex; every segment referencing it deforms together, which is the shared vertex array doing its job. Optional grid snap, off by default. |
 
+Mode **4** places the things inside a mine: lights (radius, intensity, colour,
+point or spot), robots and scenery from `assets/models/` drawn as their real
+meshes, pickups including keys, the exit trigger, and doors on portals. Drag
+the gizmo to move any of them.
+
+The rule all of it protects is that an entity's cached `segment` says which
+segment actually contains it. The loader recomputes a `segment` that is missing
+or out of range but **trusts one that is merely wrong** — so a light dragged
+across a portal without re-resolving lights the wrong room and nothing anywhere
+complains. Everything that moves something re-resolves it, against the same
+`findSegment` the loader uses.
+
+A door can only go on a portal, and the key colours offered are only the ones
+the level actually has a key for: a red door in a mine with no red key is a
+mine that cannot be finished.
+
 Undo and redo are Ctrl+Z and Ctrl+Shift+Z, by snapshot through the writer and
 reader — so an undone level is byte-identical to one loaded from the file.
 
@@ -68,6 +83,10 @@ directly, so there is no way to change a level and forget to re-check it.
 **It will not make a portal by moving vertices until they coincide.** That is
 precisely the level file that validates, renders, walks — and leaks light.
 Join rewrites indices or refuses.
+
+**It will not offer a key colour the level has no key for.** A red door in a
+mine with no red key is a mine that cannot be finished, and nothing in the game
+checks for it.
 
 **It will not hide a pinched surface.** Removing a segment from the middle of
 a cluster can leave four faces meeting along one edge, which the shadow
@@ -86,12 +105,15 @@ one keystroke away.
 | `src/json_emit.js` | the number and layout rules the level files use |
 | `src/validate.js` | every structural rule, plus two the game does not check |
 | `src/ops.js` | extrude, join, delete and the rest of the structural edits |
+| `src/entities.js` | lights, robots, pickups, doors, the exit, the start |
+| `src/obj.js` | just enough OBJ to draw the shipped models |
 | `src/history.js` | undo and redo, by snapshot |
 | `src/view.js` | the only module that imports three.js |
 | `src/main.js` | the application |
 | `serve.py` | static files, level read/write, and the Verify endpoint |
 | `tests/conformance.mjs` | the editor's validator against the game's |
 | `tests/ops.mjs` | the structural edits, checked for shape and not just legality |
+| `tests/entities.mjs` | entity placement, and the segment-resolution rule |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
 ## Verification
@@ -99,6 +121,7 @@ one keystroke away.
 ```
 node tools/editor/tests/conformance.mjs   # the validator, against the game's
 node tools/editor/tests/ops.mjs           # the structural edits
+node tools/editor/tests/entities.mjs      # placement and segment resolution
 ```
 
 Both need a Linux debug build (`cmake --preset linux && cmake --build --preset
@@ -142,6 +165,15 @@ project that deliberately has none, for a function that is seventy lines.
 (`--world-test`, `--collision-test`, `--loop-test`) over the saved file and
 prints what it said. The editor's own checks are the fast feedback; the game
 is the answer.
+
+One of those three is reported but **not counted**. Despite its name,
+`--loop-test` is `mine01`'s regression test rather than a general playability
+check: `src/game/loop_test.cpp` asserts the level has exactly three keyed doors
+and a gunner. Run against anything else it neither skips (it skips only when
+there are no doors or no exit) nor passes, so its verdict says nothing about
+whether the level is any good. Counting it would train the author to ignore the
+one check that catches a mine you cannot finish, so the panel shows it under an
+"advisory" note and leaves it out of the headline.
 
 ### Two checks the game does not make
 

@@ -1185,3 +1185,60 @@ because it only asked whether the result validated, which it did.
   the author is told to join them.
 - **A delete that pinches** leaves four faces on one edge. Nothing in the
   delete can fix it; the closure check reports it and Save refuses.
+
+---
+
+## E4 — The level editor: entities ✅
+
+Lights, robots and scenery, pickups, doors, the exit and the player start.
+`tools/editor/src/entities.js` and `obj.js`. Still no change to the game.
+
+Objects are drawn as their real meshes rather than boxes, through a small OBJ
+parser checked against the counts `--validate-assets` prints.
+
+### The field the loader trusts
+
+Every entity caches which segment contains it. `loadLevel` recomputes that
+field when it is missing or out of range — and **trusts it when it is merely
+wrong**. An entity dragged across a portal without re-resolving is a light that
+lights the wrong room, and nothing anywhere complains, because nothing is
+structurally invalid. Everything that moves an entity re-resolves it against
+the same `findSegment` the loader uses.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| OBJ parser against the game's counts | ✅ brute 72, drone 20, gunner 48, pillar 28, reactor 76, ship 22 — exact |
+| A placed light, pickup, object, exit knows its segment | ✅ |
+| Moving a light across two portals re-resolves it | ✅ and **agrees with `findSegment`**, not with a hard-coded index |
+| Moving the player start re-resolves it | ✅ |
+| A pickup placed outside the mine | ✅ reported, not silently written |
+| A door is wired onto both sides of its portal | ✅ near and far both index 0 |
+| A door on a solid wall | ✅ refused, with the reason the game would give |
+| A portal cannot have two doors | ✅ |
+| Removing a door renumbers the rest, both sides | ✅ |
+| The player start cannot be removed | ✅ |
+| Key colours offered are only the ones the level has | ✅ |
+| A level with a new room, light, robot, reactor, key, door and exit | ✅ validates, round-trips, **the game loads it** |
+| The game walks to the editor-placed key and collects it | ✅ "1 of 1 collected and had an effect", key seen and collected |
+| `tests/entities.mjs` | ✅ 30 assertions |
+| `tests/ops.mjs`, `tests/conformance.mjs` still pass | ✅ 25 and 36 |
+| Entity placement in the browser | ✅ light 14→15, drone 18→19, property editors, checks clean |
+| Objects draw as their real meshes | ✅ |
+| No console or page errors | ✅ |
+
+### A finding: `--loop-test` is not a general oracle
+
+Despite its name, `src/game/loop_test.cpp` asserts the level has exactly three
+keyed doors and a gunner — it is `mine01`'s regression test, not a check of
+whether an arbitrary level can be played. It skips only when there are no doors
+or no exit, so an editor-built level with one door and no gunner is neither
+skipped nor passing.
+
+The editor's Verify button originally reported that as a failure. It now marks
+the check with the level it was written for and reports it under an advisory
+note without counting it, because folding it in would train the author to
+ignore the one check that catches a mine you cannot finish. The general part of
+its output — that the placed key is seen, collected and has an effect — is
+asserted in `tests/entities.mjs` instead.

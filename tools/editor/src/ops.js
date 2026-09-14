@@ -12,6 +12,7 @@
 
 import { OPPOSITE_SIDE, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
 import { add, distance, rebuildDerived, scale, sub } from './geometry.js';
+import { rewireDoors } from './entities.js';
 
 // The cube corner numbering the format is built on, from src/game/level.h:
 //   0 (-x,-y,-z)  1 (+x,-y,-z)  2 (+x,+y,-z)  3 (-x,+y,-z)
@@ -252,17 +253,7 @@ export function deleteSegment(level, si) {
     level.start.segment = shift(level.start.segment);
 
     // Door indices on sides are positions in level.doors, which just moved.
-    for (const seg of level.segments) for (const sd of seg.sides) sd.door = -1;
-    for (let di = 0; di < level.doors.length; ++di) {
-        const door = level.doors[di];
-        const sd = level.segments[door.segment]?.sides[door.side];
-        if (!sd || sd.neighbour < 0) continue;
-        sd.door = di;
-        const other = level.segments[sd.neighbour];
-        for (let os = 0; os < SIDE_COUNT; ++os) {
-            if (other.sides[os].neighbour === door.segment) other.sides[os].door = di;
-        }
-    }
+    rewireDoors(level);
 
     removed.vertices = compactVertices(level);
     rebuildDerived(level);
