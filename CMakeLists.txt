@@ -29,12 +29,17 @@ add_executable(descent
     src/core/window.cpp
     src/render/debug.cpp
     src/render/mesh.cpp
+    src/render/model.cpp
+    src/render/procedural.cpp
     src/render/renderer.cpp
     src/render/screenshot.cpp
     src/render/shader.cpp
     src/render/stb_impl.cpp
     src/render/target.cpp
     src/render/texture.cpp
+    src/sim/flight.cpp
+    src/sim/flight_test.cpp
+    src/sim/ship.cpp
 )
 
 target_include_directories(descent PRIVATE src)

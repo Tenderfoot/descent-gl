@@ -18,6 +18,10 @@ Options Options::parse(int argc, char** argv) {
             o.screenshot = argv[++i];
         } else if (a == "--resize-test") {
             o.resizeTest = true;
+        } else if (a == "--chase") {
+            o.chase = true;
+        } else if (a == "--flight-test") {
+            o.flightTest = true;
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }

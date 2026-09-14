@@ -76,6 +76,105 @@ hold only the fixed-timestep state.
 
 ---
 
-## M1 — 6DOF flight ⬜
+## M1 — 6DOF flight ✅
+
+Quaternion 6DOF ship, tunable flight model, chase camera, hand-authored ship
+mesh, reference environment. No levels, no collision, no weapons.
+
+### Verified
+
+Measured in the Linux dev container (zink over lavapipe, software GL — see the
+note at the end of this entry).
+
+| Check | Result |
+| --- | --- |
+| Debug builds clean | ✅ `-Wall -Wextra -Wpedantic`, no warnings |
+| Release builds clean | ✅ |
+| Ship mesh loads | ✅ `assets/models/ship.obj`, 13 vertices, 22 triangles |
+| Ship mesh is closed | ✅ 33 edges, every one shared by exactly 2 triangles; Euler 13−33+22 = 2 |
+| Ship winding | ✅ signed volume +3.724, i.e. outward |
+| Chase camera | ✅ F1, and `--chase` to start in it |
+| Flight config | ✅ loaded from `assets/config/flight.json`, live sliders, Save / Reset / Reload |
+| No gimbal lock | ✅ orientation is a quaternion throughout; no Euler angle is stored anywhere |
+| GL error-severity messages | ✅ 0 |
+| `--resize-test` | ✅ 5 sizes, target rebuilt each time, 119.9 / 120 |
+
+### Flight model, measured
+
+`--flight-test` runs the real `stepShip` at the real 120 Hz with no window and
+no GL, and fails the process if any number is out of range:
+
+| Measurement | Result | Wanted |
+| --- | --- | --- |
+| Top speed | 19.00 units/s (terminal 20.00, cap 20.0) | — |
+| Spin-up to 95% of top speed | **1.09 s** | 0.7 – 1.4 |
+| Coast to 5% of top speed | **0.98 s** | 0.7 – 1.4 |
+| 800 px mouse swipe | **174.3°** | 150 – 210 |
+
+Identical in Debug and Release, as it must be: the sim has no configuration
+dependence.
+
+### Step rate
+
+| Run | Frames | Steps | Rate |
+| --- | --- | --- | --- |
+| Debug, steady state | 90 | 491 | **119.9 / 120** |
+| Debug, resize test | 573 | 1080 | **119.9 / 120** |
+| Release, steady state | 120 | 641 | **119.8 / 120** |
+| Release, resize test | 562 | 1080 | **119.9 / 120** |
+
+### The constants, and why
+
+| Constant | Value | Reasoning |
+| --- | --- | --- |
+| `linearDamping` | 3.0 /s | tau = 0.33 s. Three time constants is ~1 s, which is both the spin-up and the settle target, so one number buys both. |
+| `forwardThrust` | 60.0 | Terminal speed under exponential drag is thrust/damping, so this is `maxSpeed * linearDamping` exactly. |
+| `strafeThrust`, `liftThrust` | 42.0 | 70% of forward. Sliding is useful but should never be the fast way to travel. |
+| `maxSpeed` | 20.0 units/s | One 20-unit segment per second, the scale M2's mine is authored to. |
+| `angularDamping` | 8.0 /s | tau = 0.125 s. Turns settle fast enough to aim with, slow enough to still read as a ship with mass. |
+| `mouseSensitivity` | 0.0315 (rad/s)/px | A swipe rotates by `impulse / angularDamping`, so this is π·8/800 — 180° per 800 px. |
+| `rollTorque` | 20.0 rad/s² | Steady roll rate of 2.5 rad/s (143°/s), under the 4.0 cap. |
+| `pitchTorque`, `yawTorque` | 14.0 rad/s² | Keyboard turning is deliberately slower than the mouse; it is a fallback, not the primary aim. |
+| `maxAngularSpeed` | 4.0 rad/s | Ceiling on thruster rotation only. |
+
+### What the flight test caught
+
+A full mouse swipe turned the ship **29°, not 180°**, and then 39° after a
+first attempt at a fix. The cause was `maxAngularSpeed` clamping the combined
+angular velocity: the mouse impulse survived the step it arrived on, and the
+clamp caught what remained of it on the *next* step and ate the rest of the
+turn. Both the bug and the incomplete fix were invisible by eye and obvious as
+a number.
+
+The fix is two angular channels — `thrusterSpin`, capped, and `aimSpin`,
+uncapped — summed to produce the real angular velocity. The alternative was
+raising the cap until it stopped biting, which would have made it useless for
+the thing it exists for. Documented in `docs/ARCHITECTURE.md`.
+
+### Deviation from the plan
+
+The M1 prompt asks for mouse pitch/yaw with "a max angular speed" over one
+angular velocity. That combination cannot hold both a meaningful thruster cap
+and a correct swipe-to-turn ratio, so the cap was narrowed to thruster-driven
+rotation. Everything else in the prompt is as written.
+
+### Not verified here
+
+Two things this container cannot check, both for the dev machine:
+
+- **Feel.** 1.09 s and 174° are the numbers the targets ask for, but whether
+  the ship is *fun* is a judgement only playing it can make. The sliders and
+  Save exist for exactly that.
+- **Iconify / restore.** `--resize-test` reports 0 frames skipped while
+  minimized because Xvfb runs with no window manager, so `glfwIconifyWindow`
+  is a no-op. The resize half of the test is genuinely exercised; the
+  iconify half is not. It passed on Windows in M0 and that path is unchanged.
+
+Software rendering also means the frame rates here (11–77 fps) say nothing
+about performance. M8 takes those numbers on the real machine.
+
+---
+
+## M2 — Segments, portals, lights ⬜
 
 Not started.

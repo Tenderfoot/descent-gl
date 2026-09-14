@@ -11,6 +11,10 @@ namespace dvk::gl {
 class Texture2D {
 public:
     explicit Texture2D(const std::string& path);
+    // From pixels already in memory, for procedurally generated tiles. rgba
+    // must hold width * height * 4 bytes, bottom row first to match the
+    // flipped load above.
+    Texture2D(int width, int height, const unsigned char* rgba, const char* label);
     ~Texture2D();
     Texture2D(const Texture2D&) = delete;
     Texture2D& operator=(const Texture2D&) = delete;

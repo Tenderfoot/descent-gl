@@ -3,11 +3,15 @@
 #include "core/options.h"
 #include "core/time.h"
 #include "core/window.h"
+#include "game/bindings.h"
 #include "game/state.h"
 #include "render/debug.h"
 #include "render/gl.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
+#include "sim/flight.h"
+#include "sim/flight_test.h"
+#include "sim/ship.h"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
@@ -31,39 +35,7 @@ constexpr double kSimStep = 1.0 / kSimHz;
 // trigger a burst of catch-up steps.
 constexpr double kMaxFrameTime = 0.25;
 
-constexpr float kCamSpeed = 4.0f;       // units/second
-constexpr float kMouseSens = 0.0022f;   // radians/pixel
-
-void stepSim(dvk::SimState& s, const dvk::Input& input, glm::vec2 mouseDelta, float dt) {
-    s.cubeAngle += dt * 0.9f;
-    if (s.cubeAngle > glm::two_pi<float>()) s.cubeAngle -= glm::two_pi<float>();
-
-    if (input.mouseCaptured()) {
-        s.camYaw += mouseDelta.x * kMouseSens;
-        s.camPitch -= mouseDelta.y * kMouseSens;
-        constexpr float kLimit = glm::radians(85.0f);
-        s.camPitch = std::clamp(s.camPitch, -kLimit, kLimit);
-    }
-
-    const glm::vec3 forward{
-        std::cos(s.camPitch) * std::sin(s.camYaw),
-        std::sin(s.camPitch),
-        -std::cos(s.camPitch) * std::cos(s.camYaw),
-    };
-    const glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-
-    glm::vec3 move(0.0f);
-    if (input.down(GLFW_KEY_W)) move += forward;
-    if (input.down(GLFW_KEY_S)) move -= forward;
-    if (input.down(GLFW_KEY_D)) move += right;
-    if (input.down(GLFW_KEY_A)) move -= right;
-    if (input.down(GLFW_KEY_SPACE)) move += glm::vec3(0.0f, 1.0f, 0.0f);
-    if (input.down(GLFW_KEY_LEFT_CONTROL)) move -= glm::vec3(0.0f, 1.0f, 0.0f);
-
-    if (glm::length(move) > 0.0001f) {
-        s.camPos += glm::normalize(move) * kCamSpeed * dt;
-    }
-}
+constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 
 // Scripted window events for --resize-test. Covers the two cases that break
 // silently: a framebuffer size change while drawing, and iconify/restore,
@@ -92,6 +64,12 @@ constexpr double kResizeTestSeconds = 9.0;
 
 int main(int argc, char** argv) {
     const dvk::Options opts = dvk::Options::parse(argc, argv);
+
+    // Measures the flight model and exits. Deliberately before the window
+    // exists: it needs no GL and no display, so it runs anywhere.
+    if (opts.flightTest) {
+        return dvk::sim::runFlightTest(kFlightConfigPath);
+    }
 
     dvk::Window::Desc desc;
 #ifdef DVK_DEBUG
@@ -125,8 +103,13 @@ int main(int argc, char** argv) {
     // ImGui installs its own GLFW callbacks and chains to ours.
     window.setInput(&input);
 
+    dvk::sim::FlightConfig flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
+    const dvk::sim::FlightConfig flightDefaults;
+
     dvk::SimState prev;
     dvk::SimState cur;
+    dvk::CameraMode camera =
+        opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
     dvk::Clock clock;
     // Measured from here, not from construction: startup (window, GL, texture,
     // shader compile) runs no sim steps and would drag the average down.
@@ -194,6 +177,10 @@ int main(int argc, char** argv) {
         if (input.pressed(GLFW_KEY_ESCAPE)) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
+        if (input.pressed(GLFW_KEY_F1)) {
+            camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
+                                                            : dvk::CameraMode::FirstPerson;
+        }
 
         const glm::vec2 mouseDelta = input.consumeMouseDelta();
         bool consumedMouse = false;
@@ -201,15 +188,17 @@ int main(int argc, char** argv) {
             prev = cur;
             // The whole frame's motion belongs to the first step; later steps
             // in the same frame have no new input to apply.
-            stepSim(cur, input, consumedMouse ? glm::vec2(0.0f) : mouseDelta,
-                    static_cast<float>(kSimStep));
+            dvk::sim::ShipControls controls =
+                dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta);
+            dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
         }
 
         const auto alpha = static_cast<float>(accumulator / kSimStep);
-        const dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
+        dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
+        rs.camera = camera;
 
         const glm::ivec2 fb = window.framebufferSize();
         renderer.beginFrame(fb.x, fb.y);
@@ -219,6 +208,8 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(330, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("descent-vk")) {
             ImGui::Text("%.2f ms  (%.0f fps)", frameMs, frameMs > 0.0 ? 1000.0 / frameMs : 0.0);
             ImGui::Text("sim steps: %lld  (%.0f Hz fixed)", totalSteps, kSimHz);
@@ -226,12 +217,55 @@ int main(int argc, char** argv) {
             ImGui::Text("framebuffer: %d x %d @ %dx MSAA", fb.x, fb.y,
                         static_cast<int>(dvk::gl::Renderer::kSamples));
             ImGui::Separator();
-            ImGui::Text("cam %.2f %.2f %.2f", rs.camPos.x, rs.camPos.y, rs.camPos.z);
+            ImGui::Text("pos %.1f %.1f %.1f", rs.shipPos.x, rs.shipPos.y, rs.shipPos.z);
+            ImGui::Text("speed %6.2f / %.0f units/s", rs.speed, flight.maxSpeed);
+            ImGui::Text("turn  %6.2f / %.1f rad/s", rs.angularSpeed, flight.maxAngularSpeed);
+            ImGui::Text("camera: %s  (F1 toggles)",
+                        camera == dvk::CameraMode::Chase ? "chase" : "first person");
             ImGui::Text("mouse captured: %s  (Escape toggles)",
                         input.mouseCaptured() ? "yes" : "no");
+        }
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(12, 210), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(390, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("flight tuning")) {
+            ImGui::TextDisabled("linear");
+            ImGui::SliderFloat("forward thrust", &flight.forwardThrust, 0.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("strafe thrust", &flight.strafeThrust, 0.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("lift thrust", &flight.liftThrust, 0.0f, 200.0f, "%.1f");
+            ImGui::SliderFloat("linear damping", &flight.linearDamping, 0.1f, 12.0f, "%.2f /s");
+            ImGui::SliderFloat("max speed", &flight.maxSpeed, 1.0f, 80.0f, "%.1f");
+            // The two numbers the defaults were actually tuned against: with
+            // exponential damping a decay is visually finished at about three
+            // time constants, and terminal speed is thrust / damping.
+            ImGui::TextDisabled("  tau %.2fs, settles ~%.2fs, terminal %.1f u/s",
+                                1.0f / flight.linearDamping, 3.0f / flight.linearDamping,
+                                flight.forwardThrust / flight.linearDamping);
+
             ImGui::Separator();
-            // Placeholder: M1 puts the flight tuning sliders here.
-            ImGui::TextDisabled("tuning panel (M1)");
+            ImGui::TextDisabled("angular");
+            ImGui::SliderFloat("mouse sensitivity", &flight.mouseSensitivity, 0.0f, 0.12f, "%.4f");
+            ImGui::SliderFloat("roll torque", &flight.rollTorque, 0.0f, 60.0f, "%.1f");
+            ImGui::SliderFloat("pitch torque", &flight.pitchTorque, 0.0f, 60.0f, "%.1f");
+            ImGui::SliderFloat("yaw torque", &flight.yawTorque, 0.0f, 60.0f, "%.1f");
+            ImGui::SliderFloat("angular damping", &flight.angularDamping, 0.5f, 25.0f, "%.2f /s");
+            ImGui::SliderFloat("max angular speed", &flight.maxAngularSpeed, 0.5f, 12.0f, "%.2f");
+            ImGui::Checkbox("invert pitch", &flight.invertPitch);
+            // A mouse impulse rotates the ship by impulse / damping in total,
+            // so this is the swipe length that produces a 180 degree turn.
+            const float halfTurnPixels =
+                flight.mouseSensitivity > 0.0f
+                    ? glm::pi<float>() * flight.angularDamping / flight.mouseSensitivity
+                    : 0.0f;
+            ImGui::TextDisabled("  180 deg turn = %.0f px of mouse travel", halfTurnPixels);
+
+            ImGui::Separator();
+            if (ImGui::Button("Save")) dvk::sim::saveFlightConfig(kFlightConfigPath, flight);
+            ImGui::SameLine();
+            if (ImGui::Button("Reset to defaults")) flight = flightDefaults;
+            ImGui::SameLine();
+            if (ImGui::Button("Reload")) flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
         }
         ImGui::End();
         ImGui::Render();

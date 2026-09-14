@@ -89,4 +89,35 @@ Mesh makeCube() {
     return Mesh(vertices, indices);
 }
 
+Mesh makeInsideBox(float size, float uvScale) {
+    // Same six faces as makeCube with the winding reversed and the normals
+    // negated, so the front faces and the lighting both point inward.
+    const glm::vec3 n[6] = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+    const glm::vec3 corners[6][4] = {
+        {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}},        // +Z
+        {{1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}},    // -Z
+        {{1, -1, 1}, {1, -1, -1}, {1, 1, -1}, {1, 1, 1}},        // +X
+        {{-1, -1, -1}, {-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}},    // -X
+        {{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}},        // +Y
+        {{-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}},    // -Y
+    };
+    const float t = size * uvScale;
+    const glm::vec2 uv[4] = {{0, 0}, {t, 0}, {t, t}, {0, t}};
+
+    std::vector<Vertex> vertices;
+    std::vector<GLuint> indices;
+    vertices.reserve(24);
+    indices.reserve(36);
+
+    for (int f = 0; f < 6; ++f) {
+        const auto base = static_cast<GLuint>(vertices.size());
+        for (int c = 0; c < 4; ++c) {
+            vertices.push_back({corners[f][c] * (size * 0.5f), n[f], uv[c]});
+        }
+        // Reversed relative to makeCube: 0,2,1 / 0,3,2.
+        indices.insert(indices.end(), {base, base + 2, base + 1, base, base + 3, base + 2});
+    }
+    return Mesh(vertices, indices);
+}
+
 } // namespace dvk::gl

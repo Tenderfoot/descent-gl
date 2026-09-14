@@ -38,4 +38,10 @@ private:
 // 12 triangles, closed.
 Mesh makeCube();
 
+// A cube of the given size seen from the inside: winding and normals both
+// reversed, and UVs scaled by uvScale per unit so a tiling texture keeps a
+// constant density however large the box is. M1's reference volume; M2 replaces
+// it with real segment geometry.
+Mesh makeInsideBox(float size, float uvScale);
+
 } // namespace dvk::gl

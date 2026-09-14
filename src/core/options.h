@@ -11,10 +11,17 @@ namespace dvk {
 //   --resize-test       drive a scripted sequence of window resizes, an
 //                       iconify and a restore, exercising the framebuffer
 //                       callback and render-target rebuild
+//   --chase             start in the chase camera (F1 at runtime), so a
+//                       screenshot can show the ship without a keypress
+//   --flight-test       run the flight model headlessly and report the
+//                       response times the tuning is supposed to hit, then
+//                       exit. Needs no window and no GL.
 struct Options {
     int frames = -1;
     std::string screenshot;
     bool resizeTest = false;
+    bool chase = false;
+    bool flightTest = false;
 
     static Options parse(int argc, char** argv);
 };

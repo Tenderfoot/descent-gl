@@ -67,6 +67,8 @@ milestone rather than describing what the code should do:
 | `--frames N` | Exit after N rendered frames. Disables vsync so the run is not pinned to the refresh rate. |
 | `--screenshot PATH` | Write the final frame to PATH as PNG before exiting. Implies `--frames 60` if no count is given. |
 | `--resize-test` | Drive a scripted 9-second sequence of window resizes, an iconify and a restore, then exit. Keeps vsync on so the window manager can deliver the events. |
+| `--chase` | Start in the chase camera, so a screenshot can show the ship without a keypress. |
+| `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
 
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
@@ -77,11 +79,17 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 
 | Input | Action |
 | --- | --- |
-| Mouse | Look (only while captured) |
+| Mouse | Pitch and yaw (only while captured) |
 | W / S | Forward / back |
-| A / D | Strafe |
+| A / D | Strafe left / right |
 | Space / Left Ctrl | Up / down |
+| Q / E | Roll left / right |
+| Arrow keys | Pitch and yaw without the mouse |
+| F1 | Toggle chase camera |
 | Escape | Toggle mouse capture |
+
+All of these come from one table in `src/game/bindings.h`; nothing else in the
+project names a GLFW key code for gameplay.
 
 ## Conventions
 

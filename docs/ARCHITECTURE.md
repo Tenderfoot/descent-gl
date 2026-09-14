@@ -170,6 +170,81 @@ both configurations at frame rates from 200 to 9600 fps.
 
 ---
 
+## The ship and the sim/render split (M1)
+
+`src/sim/ship.h` holds `ShipState`: position, orientation, linear velocity and
+two angular velocity channels. `src/game/state.h` holds the `SimState` that
+wraps it and the `RenderState` the renderer is handed.
+
+**Orientation is a quaternion and only a quaternion.** Euler angles are never
+stored and never accumulated. A 6DOF ship flies straight up a shaft and keeps
+going; there is no "up" to gimbal against.
+
+Frames are mixed on purpose:
+
+| Quantity | Frame | Why |
+| --- | --- | --- |
+| `position` | world | |
+| `velocity` | world | momentum carries on where the ship was going, not where it now points |
+| `thrusterSpin`, `aimSpin` | ship-local | x = pitch, y = yaw, z = roll |
+
+Thrust is built in the local frame and rotated once per step into world space.
+
+### Two angular channels
+
+`angularVelocity()` is the sum of two channels that exist because they have
+genuinely different limits:
+
+- **`thrusterSpin`** — what the manoeuvring thrusters produce, from the
+  keyboard axes. Capped by `maxAngularSpeed`.
+- **`aimSpin`** — what the mouse asks for. Not capped.
+
+This split is not decoration; it was arrived at by measurement. With one
+clamped channel a full mouse swipe turned the ship **29 degrees instead of
+180**: the impulse itself survived the step it arrived on, and the clamp then
+caught what was left of it on the *next* step and ate the rest of the turn.
+Raising the cap until it stopped biting would have made it meaningless for the
+thrusters, which is what it is actually for.
+
+Mouse motion is applied as an angular-velocity *impulse* rather than as a
+rotation, so a turn carries the ship's rotational inertia and settles instead
+of snapping. Because damping is what consumes the impulse, the total rotation
+is `impulse / angularDamping` however the motion was spread across steps — a
+swipe turns the ship by the same amount whether it arrived in one frame or
+thirty. That invariance is the property worth preserving here.
+
+### Damping is a rate, not a per-step factor
+
+Both dampings are exponential rates in 1/s: `v *= exp(-damping * dt)`. A
+per-step multiplier would silently change the feel if the step rate ever did.
+The time constant is `1/damping` and a decay is visually finished at about
+three of them, which is where the shipped defaults come from:
+`linearDamping = 3.0` gives tau = 0.33 s, so full throttle reaches top speed in
+about a second and releasing it coasts to a stop in about a second. Terminal
+speed under exponential drag is `thrust / damping`, so `forwardThrust` is set
+to `maxSpeed * linearDamping` and the speed clamp only catches the diagonal
+case of several axes thrusting at once.
+
+Every constant lives in `assets/config/flight.json`, is editable live in the
+ImGui tuning panel, and can be saved back over the file.
+
+### Input
+
+`src/game/bindings.h` is the single table of GLFW key codes. It samples into
+`sim::ShipControls`, which carries normalised axes and nothing device-specific,
+so `src/sim` never sees a key code. Rebinding later means editing that array.
+
+### `--flight-test`
+
+`src/sim/flight_test.cpp` runs the real `stepShip` at the real fixed rate with
+no window and no GL, and measures the three numbers M1 is tuned to hit:
+spin-up to 95% of top speed, coast-down to a visual stop, and the rotation one
+full mouse swipe produces. It exits non-zero if any is out of range. This is
+what caught the clamp bug above — it was invisible by eye and unmistakable as a
+number.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort
