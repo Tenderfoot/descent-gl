@@ -26,12 +26,18 @@ Options Options::parse(int argc, char** argv) {
             o.worldTest = true;
         } else if (a == "--collision-test") {
             o.collisionTest = true;
+        } else if (a == "--weapons-test") {
+            o.weaponsTest = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {
             o.wireframeVolumes = true;
         } else if (a == "--stencil-view") {
             o.stencilView = true;
+        } else if (a == "--no-ui") {
+            o.noUi = true;
+        } else if (a == "--autofire" && hasNext) {
+            o.autofire = std::atoi(argv[++i]);
         } else if (a == "--debug-lines") {
             o.debugLines = true;
         } else if (a == "--size" && i + 2 < argc) {

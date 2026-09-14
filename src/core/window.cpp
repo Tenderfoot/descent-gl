@@ -36,6 +36,7 @@ Window::Window(const Desc& desc) {
     glfwSetFramebufferSizeCallback(win_, onFramebufferSize);
     glfwSetKeyCallback(win_, onKey);
     glfwSetCursorPosCallback(win_, onCursor);
+    glfwSetMouseButtonCallback(win_, onMouseButton);
 
     glfwMakeContextCurrent(win_);
     glfwSwapInterval(desc.vsync ? 1 : 0);
@@ -69,6 +70,11 @@ void Window::onFramebufferSize(GLFWwindow* w, int width, int height) {
 void Window::onKey(GLFWwindow* w, int key, int /*scancode*/, int action, int /*mods*/) {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
     if (self->input_) self->input_->onKey(key, action);
+}
+
+void Window::onMouseButton(GLFWwindow* w, int button, int action, int) {
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
+    if (self && self->input_) self->input_->onMouseButton(button, action);
 }
 
 void Window::onCursor(GLFWwindow* w, double x, double y) {

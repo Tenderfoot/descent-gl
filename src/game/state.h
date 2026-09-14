@@ -1,9 +1,13 @@
 #pragma once
 
+#include "sim/combat.h"
 #include "sim/ship.h"
 
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
+
+#include <algorithm>
+#include <array>
 
 namespace dvk {
 
@@ -16,6 +20,9 @@ enum class CameraMode { FirstPerson, Chase };
 // interpolate lives here and nowhere else.
 struct SimState {
     sim::ShipState ship;
+    // Fixed-capacity pools held by value: SimState is copied every step, and a
+    // vector here would allocate in the simulation loop.
+    sim::CombatState combat;
 };
 
 // What the renderer draws: SimState interpolated between the two most recent
@@ -33,6 +40,29 @@ struct RenderState {
     // Readouts, not used to draw the scene.
     float speed = 0.0f;         // units/s
     float angularSpeed = 0.0f;  // rad/s
+
+    // What the unlit pass draws. Interpolated by pool slot, which is stable
+    // because the pools never compact.
+    struct Bolt {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 0.5f;
+    };
+    struct Flash {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        float fade = 1.0f;   // 1 at birth, 0 at death
+    };
+    std::array<Bolt, sim::kMaxProjectiles> bolts{};
+    int boltCount = 0;
+    std::array<Flash, sim::kMaxEffects> flashes{};
+    int flashCount = 0;
+
+    // Which level objects are still standing, so a destroyed target stops
+    // being drawn and stops casting.
+    std::array<bool, sim::kMaxObjects> objectAlive{};
+    int objectCount = 0;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
@@ -45,6 +75,50 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
     r.shipSegment = b.ship.body.segment;
     r.speed = glm::length(glm::mix(a.ship.body.velocity, b.ship.body.velocity, t));
     r.angularSpeed = glm::length(glm::mix(a.ship.angularVelocity(), b.ship.angularVelocity(), t));
+
+    // Projectiles interpolate by slot. A slot that was empty last step has no
+    // previous position to blend from, so it is drawn where it is - which is
+    // correct, since it was just created.
+    for (size_t i = 0; i < sim::kMaxProjectiles; ++i) {
+        const sim::Projectile& cur = b.combat.projectiles.items[i];
+        if (!cur.alive) continue;
+        const sim::Projectile& prev = a.combat.projectiles.items[i];
+        RenderState::Bolt bolt;
+        bolt.position = prev.alive ? glm::mix(prev.position, cur.position, t) : cur.position;
+        bolt.color = cur.color;
+        bolt.size = cur.kind == sim::ProjectileKind::Flare ? 0.8f : cur.radius * 2.2f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    // Flares that have landed do not move, so they need no interpolation - but
+    // they do need drawing, and they live in a different pool.
+    for (const sim::Flare& f : b.combat.flares.items) {
+        if (!f.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = f.position;
+        const float remaining = f.lifetime - f.age;
+        bolt.color = glm::vec3(1.0f, 0.72f, 0.36f) * std::min(1.0f, remaining / 4.0f);
+        bolt.size = 0.7f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    for (const sim::Effect& e : b.combat.effects.items) {
+        if (!e.alive) continue;
+        RenderState::Flash flash;
+        flash.position = e.position;
+        flash.color = e.color;
+        const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
+        flash.fade = std::max(0.0f, 1.0f - k);
+        // Expanding as it fades reads as an explosion rather than a fading dot.
+        flash.size = e.size * (0.55f + 0.85f * k);
+        r.flashes[static_cast<size_t>(r.flashCount++)] = flash;
+    }
+
+    r.objectCount = b.combat.objects.count;
+    for (int i = 0; i < r.objectCount; ++i) {
+        r.objectAlive[static_cast<size_t>(i)] = b.combat.objects.alive[static_cast<size_t>(i)];
+    }
+
     return r;
 }
 

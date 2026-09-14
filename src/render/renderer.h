@@ -1,6 +1,7 @@
 #pragma once
 
 #include "render/gl.h"
+#include "render/billboards.h"
 #include "render/debug_lines.h"
 #include "render/level_mesh.h"
 #include "render/mesh.h"
@@ -57,11 +58,12 @@ public:
     explicit Renderer(const Level& level);
 
     void beginFrame(int fbWidth, int fbHeight);
-    // `headlight` is the ship's own spotlight, or null when it is switched
-    // off. It is passed in rather than stored because it is simulation state:
-    // it moves with the ship and its segment set is rebuilt every step.
+    // `dynamicLights` holds everything that is not baked into the level: the
+    // headlight, every bolt in flight, every burning flare, every explosion.
+    // Passed in rather than stored because it is simulation state, rebuilt
+    // every frame by the game layer.
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
-                   const Light* headlight);
+                   const std::vector<Light>& dynamicLights, int shadowBudget);
 
     // Rebuilds the debug line list for this frame. Call before drawScene.
     // Everything here is a toggle because the mine is dark and these lines are
@@ -84,6 +86,10 @@ public:
         int shadowCasters = 0;
         int silhouetteEdges = 0;
         int volumeTriangles = 0;
+        int shadowBudget = 0;      // the cap in force this frame
+        int shadowLights = 0;      // how many of it were used
+        int budgetDenied = 0;      // lights that lit but did not cast
+        int billboards = 0;
     };
     const Stats& stats() const { return stats_; }
 
@@ -129,7 +135,9 @@ private:
     glm::mat4 shipModelMatrix(const RenderState& rs) const;
 
     void loadProps(const Level& level);
-    void gatherLights(const Level& level, const Light* headlight);
+    void gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
+                      const glm::vec3& eye, const PortalWalk& walk, int shadowBudget);
+    void buildBillboards(const RenderState& rs);
     void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
     void lightPasses(const RenderState& rs, const PortalWalk& walk);
@@ -169,8 +177,18 @@ private:
     // Parallel to active_: the ship is never an occluder for its own
     // headlight, and the headlight's own index is how that is known.
     int headlightIndex_ = -1;
+    // Where the level's own lights end and the dynamic ones begin. Only the
+    // static ones get a debug gizmo: a bolt already draws itself as a
+    // billboard, and a second marker on top of it just looks like a bug.
+    size_t staticLightCount_ = 0;
+    // Parallel to active_: whether this light won a slot in the shadow budget.
+    std::vector<uint8_t> castsShadow_;
+    // Scratch for the budget sort: index into active_ plus distance to the eye.
+    std::vector<std::pair<float, int>> shadowOrder_;
 
     DebugLines debugLines_;
+    Billboards billboards_;
+    std::unique_ptr<Shader> billboardShader_;
 
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order

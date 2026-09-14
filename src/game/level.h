@@ -124,6 +124,9 @@ struct LevelObject {
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
     float scale = 1.0f;
     int segment = -1;
+    // Zero means indestructible scenery. Anything positive is a target, and
+    // becomes a robot's starting health in M6.
+    float health = 0.0f;
 };
 
 struct Level {

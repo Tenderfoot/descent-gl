@@ -426,6 +426,70 @@ failing test is to go looking in the code under test.
 
 ---
 
-## M5 — Weapons, flares, energy ⬜
+## M5 — Weapons, flares, energy ✅
+
+Four weapons, projectile lights with a shadow budget, flares, impact and
+explosion effects, and the player's energy and shield pools.
+
+### Verified
+
+`--weapons-test` fires everything at walls and at targets with no window and no
+GL. Identical in Debug and Release:
+
+| Check | Result |
+| --- | --- |
+| All four weapons fire | ✅ laser 140 u/s, vulcan 220, concussion 55, homing 46 |
+| Rate of fire respected | ✅ no second shot inside the cooldown |
+| Energy and ammo spent | ✅ laser energy, vulcan/concussion/homing ammo |
+| Bolts hit walls | ✅ gone after 0.31 s, impact flash spawned |
+| **No tunnelling at 2000 u/s** | ✅ 16.7 units per step — most of a segment — still stopped at the wall |
+| Targets take damage and die | ✅ 30 health / 8 per shot = 4 shots, destroyed after 0.63 s |
+| Splash damage | ✅ a deliberate near miss took a target from 30 to 21.4 |
+| Flares stick and burn | ✅ landed after 1.36 s, burned 30 s, then went out |
+| Vulcan spam | ✅ 5 s of fire, pool never near its 128 capacity, 86 rounds spent |
+| Headlight drain | ✅ 1.60 energy/s against 1.60 configured; switches off at zero |
+| Death resets to start | ✅ segment 0, shields restored, death counted |
+| Shadow budget holds | ✅ overlay reports 6 of 8 slots used, 4 lights lit without casting |
+| Debug / Release build clean | ✅ no warnings |
+| All four headless tests | ✅ world, collision, weapons, flight — PASS in both configs |
+| `--resize-test` | ✅ completes |
+| Step rate, 640×360 under vulcan fire | **120.0 / 120** |
+
+### Seen on screen
+
+- A vulcan bolt in flight lighting the corridor floor and wall around it while
+  the pillars keep their hard shadows.
+- A flare thrown into the unlit room, landing, and lighting it warmly with a
+  hard pillar shadow across the floor — which is the mechanic the no-ambient
+  bet exists for.
+
+### Notes
+
+- Projectiles move by **swept sphere**, which is what the 2000 u/s test above is
+  really checking: at that speed a position-only test steps straight through a
+  wall.
+- Fixed-capacity pools held by value in `SimState`, because `SimState` is copied
+  every step and a vector there would allocate in the simulation loop.
+- Homing acquires **once, at launch**. Re-acquiring every step makes it feel
+  like a guided camera rather than a missile.
+- The headlight switching itself off at zero energy is deliberate: in a mine
+  with no ambient light that is a real consequence, and it is the point of the
+  headlight costing anything at all.
+
+### New harness flags
+
+`--weapons-test`, `--autofire W` (hold a trigger for screenshots) and `--no-ui`
+(hide the ImGui panels so a screenshot shows the game).
+
+### Not verified here
+
+Whether the shadow budget's *default of 8* is the right number for a real GPU —
+the cap is enforced and observable, but the value to set it to is a performance
+question M8 answers on the dev machine. Feel, iconify/restore and performance,
+as in every milestone so far.
+
+---
+
+## M6 — Robots ⬜
 
 Not started.

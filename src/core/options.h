@@ -31,6 +31,13 @@ namespace dvk {
 //                       rather than inferred from whether shadows look right
 //   --stencil-view      start in the stencil visualiser (also an ImGui
 //                       toggle): tints whatever the stencil marks as shadowed
+//   --weapons-test      fire every weapon at walls and at targets and check
+//                       what happened, then exit. Needs no window and no GL.
+//   --no-ui             hide the ImGui panels, so a screenshot shows the game
+//                       rather than the debug windows
+//   --autofire W        hold the trigger for weapon W (0 laser, 1 vulcan,
+//                       2 concussion, 3 homing, 4 flares), so a screenshot can
+//                       show bolts in flight and the lights they carry
 //   --debug-lines       start with wall normals, contact points and the nose
 //                       raycast drawn (all also ImGui toggles)
 //   --size W H          window size. Mostly for software-rendering
@@ -46,10 +53,13 @@ struct Options {
     bool flightTest = false;
     bool worldTest = false;
     bool collisionTest = false;
+    bool weaponsTest = false;
     int startSegment = -1;
     bool wireframeVolumes = false;
     bool stencilView = false;
     bool debugLines = false;
+    int autofire = -1;
+    bool noUi = false;
     int width = 1600;
     int height = 900;
 

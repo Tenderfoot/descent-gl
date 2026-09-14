@@ -565,6 +565,62 @@ the test is a suspect too** — and here it was the culprit twice running.
 
 ---
 
+## Weapons, projectiles and the light budget
+
+`src/sim/combat.h`. Projectiles, flares and effects are **fixed-capacity arrays
+held by value in `SimState`**, because `SimState` is copied every step and a
+`std::vector` there would allocate in the simulation loop. A full pool drops the
+newest request rather than growing.
+
+### Every bolt is a light
+
+A laser going down a corridor sweeps shadows off everything in it. That is the
+most cinematic thing the technique buys, and it costs one flood fill per bolt
+over a radius small enough that the fill stops almost immediately.
+
+Projectiles move by **swept sphere**, not by integrating position and checking
+afterwards. `--weapons-test` fires a bolt at 2000 units/s — 16.7 units per
+120 Hz step, most of a segment — and it still stops at the wall.
+
+### The shadow budget
+
+At most `shadowBudget` lights (default 8) **cast** per frame. Every light still
+*lights*; the budget only decides which also cast, because casting is what
+costs: a silhouette extraction and a stencil pass per light per frame. Under
+sustained vulcan fire there can be thirty bolts in the air, and thirty stencil
+passes is not a frame.
+
+Priority is deliberate:
+
+1. The level's own lights, but only those the portal walk says are visible — an
+   off-screen light casting into nothing is the cheapest thing to give up.
+2. The headlight.
+3. Everything dynamic, **nearest to the camera first**. A bolt across the room
+   contributes a shadow nobody can resolve.
+
+The overlay reports slots used and how many lights lit without casting, so the
+cap can be watched rather than assumed.
+
+### Resources
+
+The headlight drains energy and **switches itself off at zero**. In a game with
+no ambient term that is a real consequence, which is the point of it costing
+anything. Shields at zero resets to the player start.
+
+### Fire points
+
+`kShipFirePoints` in `src/sim/ship.h` must stay on the ship model's widest
+vertices — `assets/models/ship.obj` puts them at x = ±2.0 — or bolts appear out
+of thin air beside the hull. Laser and vulcan alternate between them.
+
+### Effects
+
+Impact flashes and explosions are short-lived additive billboards in the unlit
+pass, expanded on the CPU into one buffer and drawn in one call. There is no
+particle system beyond that, deliberately.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort

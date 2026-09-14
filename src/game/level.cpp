@@ -387,6 +387,7 @@ Level loadLevel(const std::string& path) {
                 obj.position = readVec3(oj.at("position"));
                 obj.scale = oj.value("scale", 1.0f);
                 obj.segment = oj.value("segment", -1);
+                obj.health = oj.value("health", 0.0f);
                 if (auto q = oj.find("orientation"); q != oj.end() && q->size() == 4) {
                     obj.orientation = glm::quat((*q)[0].get<float>(), (*q)[1].get<float>(),
                                                 (*q)[2].get<float>(), (*q)[3].get<float>());
@@ -481,6 +482,7 @@ bool saveLevel(const std::string& path, const Level& level) {
         oj["orientation"] = {obj.orientation.w, obj.orientation.x, obj.orientation.y,
                              obj.orientation.z};
         if (obj.scale != 1.0f) oj["scale"] = obj.scale;
+        if (obj.health > 0.0f) oj["health"] = obj.health;
         oj["segment"] = obj.segment;
         j["objects"].push_back(oj);
     }

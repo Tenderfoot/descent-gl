@@ -907,7 +907,8 @@
         0.173648,
         0.0
       ],
-      "segment": 2
+      "segment": 2,
+      "health": 30.0
     },
     {
       "type": "drone",
@@ -922,7 +923,8 @@
         -0.300706,
         0.0
       ],
-      "segment": 5
+      "segment": 5,
+      "health": 30.0
     },
     {
       "type": "pillar",
@@ -967,7 +969,8 @@
         0.406737,
         0.0
       ],
-      "segment": 12
+      "segment": 12,
+      "health": 30.0
     },
     {
       "type": "drone",
@@ -982,7 +985,8 @@
         0.573576,
         0.0
       ],
-      "segment": 8
+      "segment": 8,
+      "health": 30.0
     }
   ]
 }

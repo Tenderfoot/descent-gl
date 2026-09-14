@@ -30,8 +30,10 @@ add_executable(descent
     src/game/collision_test.cpp
     src/game/level.cpp
     src/game/visibility.cpp
+    src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
+    src/render/billboards.cpp
     src/render/debug_lines.cpp
     src/render/level_mesh.cpp
     src/render/mesh.cpp
@@ -45,9 +47,11 @@ add_executable(descent
     src/render/target.cpp
     src/render/texture_array.cpp
     src/sim/collision.cpp
+    src/sim/combat.cpp
     src/sim/flight.cpp
     src/sim/flight_test.cpp
     src/sim/ship.cpp
+    src/sim/weapons.cpp
 )
 
 target_include_directories(descent PRIVATE src)

@@ -59,6 +59,8 @@ Renderer::Renderer(const Level& level) {
         std::make_unique<Shader>("shaders/fullscreen.vert", "shaders/fullscreen.frag");
     debugLineShader_ =
         std::make_unique<Shader>("shaders/debugline.vert", "shaders/debugline.frag");
+    billboardShader_ =
+        std::make_unique<Shader>("shaders/billboard.vert", "shaders/billboard.frag");
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
     levelMesh_ = std::make_unique<LevelMesh>(level);
@@ -133,15 +135,98 @@ void Renderer::loadProps(const Level& level) {
     if (!props_.empty()) log::info("{} static objects placed", props_.size());
 }
 
-void Renderer::gatherLights(const Level& level, const Light* headlight) {
+void Renderer::gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
+                            const glm::vec3& eye, const PortalWalk& walk, int shadowBudget) {
     active_.clear();
     for (const Light& light : level.lights) active_.push_back(&light);
+    staticLightCount_ = active_.size();
 
     headlightIndex_ = -1;
-    if (headlight) {
-        headlightIndex_ = static_cast<int>(active_.size());
-        active_.push_back(headlight);
+    for (size_t i = 0; i < dynamicLights.size(); ++i) {
+        // By convention the game layer puts the headlight first, and it is the
+        // one the ship must never shadow.
+        if (i == 0 && dynamicLights[i].type == LightType::Spot) {
+            headlightIndex_ = static_cast<int>(active_.size());
+        }
+        active_.push_back(&dynamicLights[i]);
     }
+
+    // --- shadow budget ---------------------------------------------------
+    //
+    // Every light still lights. The budget only decides which of them also
+    // cast, because casting is what costs: a silhouette extraction and a
+    // stencil pass per light per frame. Under sustained vulcan fire there can
+    // be thirty bolts in the air, and thirty stencil passes is not a frame.
+    //
+    // The level's own lights and the headlight take slots first, because they
+    // are the ones a player has time to look at. Projectile, flare and
+    // explosion lights compete for what is left, nearest to the camera first -
+    // a bolt across the room contributes a shadow nobody can resolve.
+    castsShadow_.assign(active_.size(), 0);
+    stats_.shadowBudget = shadowBudget;
+
+    int used = 0;
+    const auto claim = [&](size_t index) {
+        if (used >= shadowBudget) return false;
+        if (!active_[index]->castsShadows) return false;
+        castsShadow_[index] = 1;
+        ++used;
+        return true;
+    };
+
+    const size_t staticCount = level.lights.size();
+    for (size_t i = 0; i < staticCount && i < active_.size(); ++i) {
+        // Only if it can be seen at all: an off-screen light casting into
+        // nothing is the cheapest thing to give up.
+        bool visible = false;
+        for (int segment : active_[i]->segments) {
+            if (walk.isVisible(segment)) {
+                visible = true;
+                break;
+            }
+        }
+        if (visible) claim(i);
+    }
+    if (headlightIndex_ >= 0) claim(static_cast<size_t>(headlightIndex_));
+
+    shadowOrder_.clear();
+    for (size_t i = staticCount; i < active_.size(); ++i) {
+        if (static_cast<int>(i) == headlightIndex_) continue;
+        shadowOrder_.emplace_back(glm::length(active_[i]->position - eye), static_cast<int>(i));
+    }
+    std::sort(shadowOrder_.begin(), shadowOrder_.end());
+    for (const auto& [distance, index] : shadowOrder_) {
+        (void)distance;
+        claim(static_cast<size_t>(index));
+    }
+
+    stats_.shadowLights = used;
+    stats_.budgetDenied = 0;
+    for (size_t i = 0; i < active_.size(); ++i) {
+        if (!castsShadow_[i] && active_[i]->castsShadows) ++stats_.budgetDenied;
+    }
+}
+
+void Renderer::buildBillboards(const RenderState& rs) {
+    billboards_.clear();
+
+    // The camera's right and up, read straight out of the view matrix, so every
+    // quad faces the viewer without per-sprite work.
+    const glm::mat4 view = buildView(rs);
+    const glm::vec3 right{view[0][0], view[1][0], view[2][0]};
+    const glm::vec3 up{view[0][1], view[1][1], view[2][1]};
+
+    for (int i = 0; i < rs.boltCount; ++i) {
+        const RenderState::Bolt& b = rs.bolts[static_cast<size_t>(i)];
+        billboards_.add(b.position, right, up, b.size, b.color);
+    }
+    for (int i = 0; i < rs.flashCount; ++i) {
+        const RenderState::Flash& f = rs.flashes[static_cast<size_t>(i)];
+        billboards_.add(f.position, right, up, f.size, f.color * f.fade);
+    }
+
+    billboards_.upload();
+    stats_.billboards = billboards_.count();
 }
 
 void Renderer::buildDebugLines(const Level& level, const RenderState& rs,
@@ -253,7 +338,8 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
             }
         }
 
-        if (anyVisible && light.castsShadows) {
+        const bool casts = li < castsShadow_.size() && castsShadow_[li] != 0;
+        if (anyVisible && casts) {
             std::fill(segmentMask_.begin(), segmentMask_.end(), uint8_t{0});
             for (int segment : light.segments) {
                 segmentMask_[static_cast<size_t>(segment)] = 1;
@@ -263,7 +349,9 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
             volumes_.add(mineOccluder_, light.position, &segmentMask_);
             ++stats_.shadowCasters;
 
-            for (const Prop& prop : props_) {
+            for (size_t pi = 0; pi < props_.size(); ++pi) {
+                const Prop& prop = props_[pi];
+                if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
                 if (prop.segment >= 0 &&
                     !std::binary_search(light.segments.begin(), light.segments.end(),
                                         prop.segment)) {
@@ -322,8 +410,10 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         ++stats_.segmentsDrawn;
     }
 
-    for (const Prop& prop : props_) {
+    for (size_t pi = 0; pi < props_.size(); ++pi) {
+        const Prop& prop = props_[pi];
         if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
+        if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
         depthShader_->setMat4("uModel", prop.model);
         prop.mesh->draw();
     }
@@ -453,8 +543,10 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             ++stats_.lightSegmentDraws;
         }
 
-        for (const Prop& prop : props_) {
+        for (size_t pi = 0; pi < props_.size(); ++pi) {
+            const Prop& prop = props_[pi];
             if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
+            if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
             if (prop.segment >= 0 && !std::binary_search(light.segments.begin(),
                                                          light.segments.end(), prop.segment)) {
                 continue;
@@ -521,6 +613,20 @@ void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
         glDepthMask(GL_TRUE);
     }
 
+    if (!billboards_.empty()) {
+        // Additive, depth-tested but not depth-writing: a bolt lights what is
+        // behind it and never occludes anything.
+        billboardShader_->bind();
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+        billboards_.draw();
+        glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+
     if (!debugLines_.empty()) {
         // Depth-tested so a line behind a wall is hidden, which is what makes
         // them readable as being in the world rather than drawn over it.
@@ -535,8 +641,7 @@ void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
     // Small emissive markers at each visible light. M5 replaces this pass's
     // contents with bolts, flares and explosions; the pass itself is the same.
     unlitShader_->bind();
-    for (size_t li = 0; li < active_.size(); ++li) {
-        if (static_cast<int>(li) == headlightIndex_) continue;   // no gizmo on the camera
+    for (size_t li = 0; li < staticLightCount_ && li < active_.size(); ++li) {
         const Light& light = *active_[li];
         if (!walk.isVisible(light.segment)) continue;
         glm::mat4 m = glm::translate(glm::mat4(1.0f), light.position);
@@ -549,7 +654,7 @@ void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
 }
 
 void Renderer::drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
-                         const Light* headlight) {
+                         const std::vector<Light>& dynamicLights, int shadowBudget) {
     const float aspect = target_.height() > 0
                              ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
                              : 1.0f;
@@ -559,7 +664,8 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     cam.proj = infiniteReversedZ(kFovY, aspect, kZNear);
     glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
 
-    gatherLights(level, headlight);
+    gatherLights(level, dynamicLights, eyePos(rs), walk, shadowBudget);
+    buildBillboards(rs);
     buildShadowVolumes(rs, walk);
     depthPrepass(rs, walk);
     lightPasses(rs, walk);

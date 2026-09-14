@@ -7,6 +7,8 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
+#include <array>
+
 namespace dvk::sim {
 
 // What the player is asking the ship to do this step, normalised and free of
@@ -59,6 +61,17 @@ struct ShipState {
 // Advances one fixed step. dt is always kSimStep; it is a parameter only so the
 // integration reads honestly.
 void stepShip(ShipState& s, const ShipControls& c, const FlightConfig& cfg, float dt);
+
+// The two wingtip gun ports, in the ship's local frame.
+//
+// These must stay on the ship model's widest vertices - assets/models/ship.obj
+// puts them at x = +/-2.0, z = 0 - or the bolts will appear to come out of thin
+// air beside the hull. Pulled a little inboard and forward of the ring so the
+// muzzle sits on the wing rather than exactly at its point.
+inline constexpr std::array<glm::vec3, 2> kShipFirePoints{{
+    glm::vec3(-1.75f, 0.0f, -0.35f),
+    glm::vec3(1.75f, 0.0f, -0.35f),
+}};
 
 // Local axes, derived from the orientation. Forward is -Z, matching GL's
 // convention and the projection in render/camera.h.

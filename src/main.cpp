@@ -8,15 +8,18 @@
 #include "game/state.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
+#include "game/weapons_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
 #include "render/gl.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "sim/collision.h"
+#include "sim/combat.h"
 #include "sim/flight.h"
 #include "sim/flight_test.h"
 #include "sim/ship.h"
+#include "sim/weapons.h"
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
@@ -44,6 +47,7 @@ constexpr double kMaxFrameTime = 0.25;
 
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kLevelPath = "assets/levels/test01.json";
+constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 
 // The headlight. In a game with no ambient term this is the player's primary
 // way of seeing anything at all, so it is deliberately generous: a wide enough
@@ -92,6 +96,9 @@ int main(int argc, char** argv) {
     }
     if (opts.collisionTest) {
         return dvk::runCollisionTest(kLevelPath, kFlightConfigPath);
+    }
+    if (opts.weaponsTest) {
+        return dvk::runWeaponsTest(kLevelPath, kWeaponConfigPath);
     }
 
     dvk::Window::Desc desc;
@@ -155,13 +162,19 @@ int main(int argc, char** argv) {
     dvk::PortalWalk walk;
     dvk::LightFlood flood;
 
-    dvk::Light headlight;
-    headlight.type = dvk::LightType::Spot;
-    headlight.radius = kHeadlightRadius;
-    headlight.coneDegrees = kHeadlightCone;
-    headlight.color = glm::vec3(1.0f, 0.97f, 0.9f);
-    headlight.intensity = 3.2f;
-    bool headlightOn = true;
+    dvk::sim::WeaponConfig weapons = dvk::sim::loadWeaponConfig(kWeaponConfigPath);
+    dvk::sim::initObjects(level, cur.combat.objects);
+    prev = cur;
+
+    // Rebuilt every frame and reused, so the vectors inside each Light keep
+    // their capacity and the draw path does not allocate. Index 0 is always
+    // the headlight, which is the convention the renderer relies on to know
+    // which light the ship must not shadow.
+    std::vector<dvk::Light> dynamicLights;
+    dynamicLights.reserve(1 + dvk::sim::kMaxProjectiles + dvk::sim::kMaxFlares +
+                          dvk::sim::kMaxEffects);
+    int lightEditorSelection2 = -1;
+    (void)lightEditorSelection2;
 
     // Freezing the visible set leaves the last portal walk in place while the
     // camera keeps moving, so the culling can be inspected from outside it.
@@ -235,7 +248,12 @@ int main(int argc, char** argv) {
         if (input.pressed(GLFW_KEY_ESCAPE)) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
-        if (input.pressed(GLFW_KEY_H)) headlightOn = !headlightOn;
+        if (input.pressed(GLFW_KEY_H)) {
+            // Refuses to come on with no energy left, which is the whole point
+            // of it costing any.
+            cur.combat.player.headlightOn =
+                !cur.combat.player.headlightOn && cur.combat.player.energy > 0.0f;
+        }
         if (input.pressed(GLFW_KEY_F1)) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
@@ -259,6 +277,30 @@ int main(int argc, char** argv) {
             cur.ship.body.radius = flight.shipRadius;
             dvk::sim::resolveCollision(level, cur.ship.body, collision,
                                        static_cast<float>(kSimStep), &contacts);
+
+            dvk::sim::FireControls fire;
+            // Only the first sim step of a frame sees the button edges, for
+            // the same reason it is the only one that sees the mouse motion.
+            if (!consumedMouse) {
+                fire.primary = input.mouseDown(GLFW_MOUSE_BUTTON_LEFT);
+                fire.secondary = input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
+                fire.flare = input.pressed(GLFW_KEY_F);
+                for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
+                    if (input.pressed(GLFW_KEY_1 + w)) fire.selectWeapon = w;
+                }
+                if (opts.autofire >= 0) {
+                    if (opts.autofire >= dvk::sim::WeaponCount) {
+                        fire.flare = true;
+                    } else {
+                        fire.selectWeapon = opts.autofire;
+                        fire.primary = opts.autofire <= dvk::sim::WeaponVulcan;
+                        fire.secondary = opts.autofire >= dvk::sim::WeaponConcussion;
+                    }
+                }
+            }
+            dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
+                                 fire, static_cast<float>(kSimStep));
+            dvk::sim::checkPlayerDeath(level, cur.combat, cur.ship.body, cur.ship.orientation);
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
@@ -268,15 +310,75 @@ int main(int argc, char** argv) {
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
         rs.camera = camera;
 
-        // The headlight moves with the ship, so its segment set is rebuilt
-        // every frame. The flood fill reuses its scratch buffers, so this does
-        // not allocate in the frame loop.
+        // Every light that is not baked into the level, rebuilt each frame.
+        // The vector keeps its capacity and each Light keeps its segment list's
+        // capacity, so after the first few frames this allocates nothing.
+        //
+        // The headlight is always index 0: the renderer uses that to know which
+        // light the ship must never shadow.
         const glm::mat3 shipBasis = glm::mat3_cast(rs.shipOrientation);
         const glm::vec3 shipForward = shipBasis * glm::vec3(0.0f, 0.0f, -1.0f);
-        headlight.position = rs.shipPos + shipForward * kHeadlightForward;
-        headlight.direction = shipForward;
-        headlight.segment = rs.shipSegment;
-        if (headlightOn) dvk::rebuildLightSegments(level, headlight, flood);
+
+        size_t dynamicUsed = 0;
+        const auto nextLight = [&]() -> dvk::Light& {
+            if (dynamicUsed == dynamicLights.size()) dynamicLights.emplace_back();
+            return dynamicLights[dynamicUsed++];
+        };
+
+        {
+            dvk::Light& hl = nextLight();
+            hl.type = dvk::LightType::Spot;
+            hl.radius = kHeadlightRadius;
+            hl.coneDegrees = kHeadlightCone;
+            hl.color = glm::vec3(1.0f, 0.97f, 0.9f);
+            hl.intensity = cur.combat.player.headlightOn ? 3.2f : 0.0f;
+            hl.castsShadows = cur.combat.player.headlightOn;
+            hl.position = rs.shipPos + shipForward * kHeadlightForward;
+            hl.direction = shipForward;
+            hl.segment = rs.shipSegment;
+            hl.segments.clear();
+            if (cur.combat.player.headlightOn) dvk::rebuildLightSegments(level, hl, flood);
+        }
+
+        // Every bolt in flight is a moving light. A laser going down a corridor
+        // sweeping shadows off everything in it is the single most cinematic
+        // thing the technique buys, and it costs one flood fill per bolt over a
+        // radius small enough that the fill stops almost immediately.
+        const auto addPointLight = [&](const glm::vec3& position, int segment,
+                                       const glm::vec3& color, float radius, float intensity) {
+            if (radius <= 0.0f || intensity <= 0.0f) return;
+            dvk::Light& l = nextLight();
+            l.type = dvk::LightType::Point;
+            l.position = position;
+            l.segment = segment;
+            l.color = color;
+            l.intensity = intensity;
+            l.radius = radius;
+            l.castsShadows = true;
+            l.segments.clear();
+            dvk::rebuildLightSegments(level, l, flood);
+        };
+
+        for (const dvk::sim::Projectile& p : cur.combat.projectiles.items) {
+            if (!p.alive) continue;
+            addPointLight(p.position, p.segment, p.color, p.lightRadius, p.lightIntensity);
+        }
+        for (const dvk::sim::Flare& f : cur.combat.flares.items) {
+            if (!f.alive) continue;
+            // Fades over the last few seconds rather than snapping out.
+            const float remaining = f.lifetime - f.age;
+            const float fade = std::clamp(remaining / weapons.flareFade, 0.0f, 1.0f);
+            addPointLight(f.position, f.segment, weapons.flareColor, weapons.flareRadius,
+                          weapons.flareIntensity * fade);
+        }
+        for (const dvk::sim::Effect& e : cur.combat.effects.items) {
+            if (!e.alive || e.lightIntensity <= 0.0f) continue;
+            const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
+            addPointLight(e.position, e.segment, e.color, e.lightRadius,
+                          e.lightIntensity * std::max(0.0f, 1.0f - k));
+        }
+
+        dynamicLights.resize(dynamicUsed);
 
         // A ray straight out of the nose, for the debug overlay and as a live
         // check that the query everything from M5 on depends on agrees with
@@ -290,12 +392,15 @@ int main(int argc, char** argv) {
         if (!freezeVisible) {
             walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos);
         }
-        renderer.drawScene(rs, level, walk, headlightOn ? &headlight : nullptr);
+        renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget);
         renderer.resolve();
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+        // --no-ui still runs a frame, so ImGui's internal state stays
+        // consistent; it just does not open any window.
+        if (!opts.noUi) {
         ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(330, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("descent-vk")) {
@@ -325,6 +430,20 @@ int main(int argc, char** argv) {
                         camera == dvk::CameraMode::Chase ? "chase" : "first person");
             ImGui::Text("mouse captured: %s  (Escape toggles)",
                         input.mouseCaptured() ? "yes" : "no");
+            ImGui::Separator();
+            const dvk::sim::PlayerState& pl = cur.combat.player;
+            ImGui::Text("shields %5.1f   energy %5.1f", pl.shields, pl.energy);
+            ImGui::Text("weapon: %s%s", dvk::sim::kWeaponNames[static_cast<size_t>(pl.weapon)],
+                        pl.weapon == dvk::sim::WeaponLaser ? "" : "");
+            if (pl.weapon == dvk::sim::WeaponLaser) {
+                ImGui::SameLine();
+                ImGui::Text("level %d", pl.laserLevel);
+            }
+            ImGui::Text("vulcan %d   concussion %d   homing %d   flares %d", pl.vulcanAmmo,
+                        pl.concussionAmmo, pl.homingAmmo, pl.flares);
+            ImGui::Text("%d bolts, %d flares burning, %d effects, %d deaths",
+                        cur.combat.projectiles.count(), cur.combat.flares.count(),
+                        cur.combat.effects.count(), pl.deaths);
             ImGui::Separator();
             ImGui::Text("contacts %d in %d iterations", contacts.count, contacts.iterations);
             if (noseRay.hit) {
@@ -394,27 +513,84 @@ int main(int argc, char** argv) {
             ImGui::Checkbox("volumes as wireframe", &renderer.drawVolumeWireframe);
             ImGui::Checkbox("stencil visualiser", &renderer.showStencil);
             ImGui::SameLine();
-            ImGui::Checkbox("headlight (H)", &headlightOn);
+            ImGui::Checkbox("headlight (H)", &cur.combat.player.headlightOn);
 
             ImGui::Text("%d casters, %d silhouette edges, %d volume triangles",
                         st.shadowCasters, st.silhouetteEdges, st.volumeTriangles);
+            ImGui::Text("shadow budget: %d of %d used, %d lights lit without casting",
+                        st.shadowLights, st.shadowBudget, st.budgetDenied);
+            ImGui::SliderInt("budget", &weapons.shadowBudget, 1, 32);
+            ImGui::Text("%d billboards", st.billboards);
 
             ImGui::Separator();
             ImGui::TextDisabled("per light: edges / volume triangles / segments");
             ImGui::BeginChild("per light", ImVec2(0, 150), true);
             const auto& ls = renderer.lightStats();
             for (size_t i = 0; i < ls.size(); ++i) {
-                const bool isHeadlight = i >= level.lights.size();
-                dvk::Light& l = isHeadlight ? headlight : level.lights[i];
+                const bool isStatic = i < level.lights.size();
+                const char* label = isStatic ? "light" : (i == level.lights.size() ? "headlight"
+                                                                                  : "dynamic");
                 ImGui::PushID(static_cast<int>(i));
-                ImGui::Checkbox("##casts", &l.castsShadows);
+                if (isStatic) {
+                    ImGui::Checkbox("##casts", &level.lights[i].castsShadows);
+                } else {
+                    ImGui::TextDisabled("  ");
+                }
                 ImGui::SameLine();
-                ImGui::Text("%-9s %4d edges  %5d tris  %2d segs",
-                            isHeadlight ? "headlight" : "light", ls[i].silhouetteEdges,
+                ImGui::Text("%-9s %4d edges  %5d tris  %2d segs", label, ls[i].silhouetteEdges,
                             ls[i].volumeTriangles, ls[i].segments);
                 ImGui::PopID();
             }
             ImGui::EndChild();
+        }
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(420, 300), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("weapons")) {
+            ImGui::TextDisabled("1-4 select, left mouse fires, right mouse launches, F throws a flare");
+            for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
+                dvk::sim::WeaponDef& def = weapons.weapons[static_cast<size_t>(w)];
+                ImGui::PushID(w);
+                if (ImGui::CollapsingHeader(dvk::sim::kWeaponNames[static_cast<size_t>(w)])) {
+                    ImGui::SliderFloat("damage", &def.damage, 0.0f, 80.0f, "%.1f");
+                    ImGui::SliderFloat("speed", &def.speed, 5.0f, 400.0f, "%.0f u/s");
+                    ImGui::SliderFloat("fire interval", &def.fireInterval, 0.02f, 2.0f, "%.3f s");
+                    ImGui::SliderFloat("energy cost", &def.energyCost, 0.0f, 8.0f, "%.2f");
+                    ImGui::SliderFloat("spread", &def.spread, 0.0f, 0.15f, "%.4f rad");
+                    ImGui::ColorEdit3("colour", &def.color.r);
+                    ImGui::SliderFloat("light radius", &def.lightRadius, 0.0f, 60.0f, "%.1f");
+                    ImGui::SliderFloat("light intensity", &def.lightIntensity, 0.0f, 8.0f, "%.2f");
+                    if (def.splashRadius > 0.0f || w >= dvk::sim::WeaponConcussion) {
+                        ImGui::SliderFloat("splash radius", &def.splashRadius, 0.0f, 30.0f, "%.1f");
+                        ImGui::SliderFloat("splash damage", &def.splashDamage, 0.0f, 60.0f, "%.1f");
+                    }
+                    if (w == dvk::sim::WeaponHoming) {
+                        ImGui::SliderFloat("turn rate", &def.turnRate, 0.0f, 8.0f, "%.2f rad/s");
+                        ImGui::SliderFloat("seek cone", &def.seekCone, 0.0f, 1.6f, "%.2f rad");
+                        ImGui::SliderFloat("seek range", &def.seekRange, 0.0f, 300.0f, "%.0f");
+                    }
+                }
+                ImGui::PopID();
+            }
+            ImGui::Separator();
+            ImGui::SliderInt("laser level", &cur.combat.player.laserLevel, 1,
+                             dvk::sim::kLaserLevels);
+            ImGui::SliderFloat("flare radius", &weapons.flareRadius, 2.0f, 80.0f, "%.1f");
+            ImGui::SliderFloat("flare lifetime", &weapons.flareLifetime, 2.0f, 90.0f, "%.0f s");
+            ImGui::SliderFloat("headlight drain", &weapons.headlightDrain, 0.0f, 10.0f, "%.2f /s");
+            if (ImGui::Button("Save weapons")) {
+                dvk::sim::saveWeaponConfig(kWeaponConfigPath, weapons);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Refill")) {
+                cur.combat.player.shields = 100.0f;
+                cur.combat.player.energy = 100.0f;
+                cur.combat.player.vulcanAmmo = 2000;
+                cur.combat.player.concussionAmmo = 8;
+                cur.combat.player.homingAmmo = 6;
+                cur.combat.player.flares = 12;
+            }
         }
         ImGui::End();
 
@@ -481,6 +657,7 @@ int main(int argc, char** argv) {
             }
         }
         ImGui::End();
+        }
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 

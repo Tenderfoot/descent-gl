@@ -6,6 +6,7 @@ namespace dvk {
 
 void Input::beginFrame() {
     prev_ = cur_;
+    buttonPrev_ = buttonCur_;
 }
 
 bool Input::down(int key) const {
@@ -16,6 +17,22 @@ bool Input::pressed(int key) const {
     if (key < 0 || key >= kMaxKeys) return false;
     const auto k = static_cast<size_t>(key);
     return cur_[k] && !prev_[k];
+}
+
+bool Input::mouseDown(int button) const {
+    return button >= 0 && button < kMaxButtons && buttonCur_[static_cast<size_t>(button)];
+}
+
+bool Input::mousePressed(int button) const {
+    if (button < 0 || button >= kMaxButtons) return false;
+    const auto b = static_cast<size_t>(button);
+    return buttonCur_[b] && !buttonPrev_[b];
+}
+
+void Input::onMouseButton(int button, int action) {
+    if (button < 0 || button >= kMaxButtons) return;
+    if (action == GLFW_PRESS) buttonCur_[static_cast<size_t>(button)] = true;
+    if (action == GLFW_RELEASE) buttonCur_[static_cast<size_t>(button)] = false;
 }
 
 glm::vec2 Input::consumeMouseDelta() {

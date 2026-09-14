@@ -42,6 +42,7 @@ private:
     static void onFramebufferSize(GLFWwindow* w, int width, int height);
     static void onKey(GLFWwindow* w, int key, int scancode, int action, int mods);
     static void onCursor(GLFWwindow* w, double x, double y);
+    static void onMouseButton(GLFWwindow* w, int button, int action, int mods);
 
     GLFWwindow* win_ = nullptr;
     Input* input_ = nullptr;
