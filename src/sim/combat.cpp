@@ -20,6 +20,9 @@ namespace {
 // harder to reproduce from a bug report; this is a counter the sim owns.
 uint32_t g_spreadCounter = 0;
 
+// See the muzzle flash comment in fire(): short, but not one step.
+constexpr float kMuzzleFlashTime = 0.05f;
+
 float nextUnit() {
     g_spreadCounter = g_spreadCounter * 1664525u + 1013904223u;
     return static_cast<float>((g_spreadCounter >> 8) & 0xFFFFFFu) / 16777215.0f;
@@ -35,6 +38,8 @@ glm::vec3 spreadDirection(const glm::vec3& forward, const glm::vec3& right, cons
     return glm::normalize(forward + right * (std::cos(a) * r) + up * (std::sin(a) * r));
 }
 
+}   // anonymous namespace
+
 void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
                  const glm::vec3& color, float size, float lifetime, float lightRadius,
                  float lightIntensity) {
@@ -49,6 +54,8 @@ void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
     e.lightRadius = lightRadius;
     e.lightIntensity = lightIntensity;
 }
+
+namespace {
 
 // Applies damage to everything within `radius` of `centre`, falling off
 // linearly - robots, destructible scenery, and the player. Splash that does not
@@ -83,6 +90,7 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
         const float d = glm::length(player->position - centre);
         if (d <= radius) {
             state.player.shields -= damage * (1.0f - d / radius);
+            state.player.hurtTimer = kHurtFlashTime;
             ++hits;
         }
     }
@@ -167,6 +175,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
     for (float& c : player.cooldown) c = std::max(0.0f, c - dt);
     player.flareCooldown = std::max(0.0f, player.flareCooldown - dt);
+    player.hurtTimer = std::max(0.0f, player.hurtTimer - dt);
+    player.recoilTimer = std::max(0.0f, player.recoilTimer - dt);
 
     // --- resources -------------------------------------------------------
     if (player.headlightOn) {
@@ -224,6 +234,22 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             player.nextWingRight = !player.nextWingRight;
         } else {
             origin += forward * 1.5f;
+        }
+
+        // The muzzle flash. Scaled from the weapon's own bolt light rather than
+        // from a constant, so a vulcan pop is small and a missile launch throws
+        // real light down the corridor - and so a weapon retuned in
+        // weapons.json brings its flash with it.
+        //
+        // Short rather than literally one frame: at 120 Hz a single step is 8
+        // ms, which at any real frame rate is as likely to be missed entirely
+        // as seen. This is long enough to land on a frame and still be gone
+        // before it reads as a light source.
+        spawnEffect(state, origin, ship.segment, color, def.radius * 2.5f, kMuzzleFlashTime,
+                    def.lightRadius * 1.5f, def.lightIntensity * 2.5f);
+
+        if (weaponId == WeaponConcussion || weaponId == WeaponHoming) {
+            player.recoilTimer = kRecoilTime;
         }
 
         Projectile& p = state.projectiles.items[static_cast<size_t>(slot)];
@@ -406,6 +432,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
         if (hitPlayer && (!wall.hit || glm::length(playerPoint - from) <= wall.distance)) {
             state.player.shields -= p.damage;
+            state.player.hurtTimer = kHurtFlashTime;
             spawnEffect(state, playerPoint, p.segment, p.color, 1.4f, 0.18f, 8.0f, 2.0f);
             killProjectile(level, state, robots, &ship, p, playerPoint, p.segment);
             continue;

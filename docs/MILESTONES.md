@@ -663,7 +663,8 @@ Worth recording, because all three were the tests and not the code:
 
 - ~~**The raycast diagonal case above**~~ — fixed; it was the test's oracle, not
   the collision code.
-- `ARCHITECTURE.md` sections for doors, the HUD and the game flow.
+- ~~`ARCHITECTURE.md` sections for doors, the HUD and the game flow.~~ — done;
+  doors landed with the door fixes, the game loop and the HUD after that.
 - Playtesting `mine01` end to end, which needs the real machine: whether the
   key routing is legible, whether 45 seconds is the right countdown, and
   whether 16 robots is too many or too few.
@@ -766,9 +767,147 @@ and drawn per occluder with the model matrix the prepass used.
 
 ---
 
-## M8 — Polish and performance ⬜
+## M8 — Polish and performance 🟡 In progress
 
-Not started.
+Landing in pieces. The automap is done; muzzle flash and hit feedback,
+performance instrumentation, asset validation and the README follow.
+
+### The automap ✅
+
+`Tab` draws the segment graph as lines from an orbit camera the mouse drives,
+showing only what the player has earned the right to see. The simulation keeps
+running behind it.
+
+Discovery is recorded in `GameState` and nothing reads it back, so a level plays
+out identically whether the map is opened or not.
+
+| Check | Result |
+| --- | --- |
+| Only the start segment is known at the start | ✅ `visitedCount == 1`, and it is `level.start.segment` |
+| Every other segment stays unknown | ✅ 33 of 34 on `mine01` |
+| Visiting N segments marks exactly N | ✅ walked 6, `visitedCount == 6` |
+| A key in an unvisited room is not on the map | ✅ not `seen` until the room is entered |
+| The reactor is not on the map from the start | ✅ needs a real line of sight |
+| Sighting the reactor records its position | ✅ within 1.0 u of the reactor, at 20.0 48.0 70.0 |
+| The map draws the whole graph | ✅ `--reveal` screenshot, 34 segments, three keys and the reactor marked |
+| The map draws only the start room at the start | ✅ `--automap` screenshot: one room, frontier portals faint |
+| The simulation keeps running while it is open | ✅ 92 sim steps over 40 frames with the map up |
+| Debug run, GL errors fatal | ✅ no GL error or fatal lines |
+| Loop, world, weapons, robots, collision, flight on both levels | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test` | ✅ completes, 0 frames skipped while minimized |
+
+Two notes on what these numbers are worth. The step rates in the container are
+software-rendering numbers and the full-size ones are bounded by the loop's
+0.25 s frame clamp, not by the simulation — 119.4/120 at 640x360 is the real
+check. And the reveal screenshot proves the map *renders* the graph; the loop
+test, not the screenshot, is what proves it only reveals what was found.
+
+### Feel: muzzle flash, hit flinch, missile kick ✅
+
+Three effects that exist to be felt. Each lands on `RenderState` or `HudData`
+and never on the body, and each test asserts that.
+
+| Check | Result |
+| --- | --- |
+| Every weapon throws a flash carrying a light | ✅ 4 of 4 |
+| The flash is brighter than the bolt it launched | ✅ laser 6.5 vs 2.6, vulcan 3.8 vs 1.5, concussion and homing 7.5 vs 3.0 |
+| The flash is out again within 0.2 s | ✅ (counted near the ship — by then the bolt's impact flash is lit too, at the wall) |
+| Robot fire flashes as well | ✅ caught on the step a gunner fires |
+| Being hit sets the flinch | ✅ through the real damage path, a missile's own splash off the floor |
+| The flinch does not move the ship | ✅ position and velocity unchanged |
+| The flinch fades | ✅ zero after 0.45 s |
+| A missile kicks, a gun does not | ✅ laser leaves `recoilTimer` at zero |
+| The kick does not push the ship | ✅ velocity unchanged |
+| The tint draws with the HUD hidden | ✅ screenshot under `--no-ui` after robots landed a hit |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test`, Debug, GL errors fatal | ✅ completes, no GL error or fatal lines |
+| Step rate, 640x360, 500 frames | **120.0 / 120** |
+
+What these numbers do **not** cover: whether the flash actually reads as
+firing-to-see in a dark corridor. That is an aesthetic judgement at a real frame
+rate, and software rendering at ~13 fps cannot make it. The same goes for the
+final tint smoothing — the screenshot that caught a hit was of the earlier
+four-band version; going to eight bands changed only the band count and the
+per-band alpha, and I did not land another hit frame to re-capture it. Both want
+the dev machine.
+
+### Performance instrumentation ✅ (measurement), ⬜ (the target itself)
+
+GPU timestamp queries per pass, and an allocation counter, both reported in an
+ImGui panel and on a line at exit so a headless run can see them.
+
+| Check | Result |
+| --- | --- |
+| Timestamp queries resolve | ✅ read back two frames late, no pipeline stall |
+| Per-pass breakdown, `mine01`, 640x360 | prepass **3.67 ms**, stencil **22.11**, lighting **3.03**, unlit **0.05**, total **28.87 ms** over 16 lights |
+| Most expensive light identified | ✅ light 4 at **4.53 ms** |
+| Automap view timed | ✅ **1.64 ms** unlit, everything else zero — the map is ~18x cheaper than the scene |
+| Sim step allocations, steady state | ✅ **0** on 269 of 270 frames |
+| Draw path allocations, steady state | ✅ **0** on 269 of 270 frames |
+| Negative control: one `std::vector<int>(4)` per sim step | ✅ caught — "SOME on 89 of 90 frames (worst 17)", draw path still clean |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test` | ✅ completes, no GL error or fatal lines |
+| Step rate, 640x360, 300 frames | **119.9 / 120** |
+
+The three allocations that are not zero were each traced, and none is per-frame:
+the death message being formatted by `log::info` inside `stepGame`; the render
+target's log line on the frame a resize rebuilds it; and a per-frame container
+reaching a new high-water mark, which happens once and not again — the signature
+of capacity growth rather than churn. I did not chase which container.
+
+**The 200 fps at 1440p target is not measured and cannot be here.** These numbers
+come from zink over lavapipe at 640x360 — software rasterization, where a
+fill-heavy stencil pass is pathologically slow. Stencil taking 77% of the frame
+is a property of the software rasterizer, not a prediction about the 4070 Ti, and
+anyone reading it as one will optimize the wrong thing. The instrument is what is
+verified here; the numbers are not a benchmark.
+
+Also deliberately not done: the per-light volume triangle **cap** M8's plan
+suggested. A truncated volume is an open volume, and depth-fail against an open
+volume is exactly the bug the shadow-closure work fixed. `worstVolumeTriangles`
+reports the number instead, so a cap can be sized from evidence if evidence ever
+appears. The cheap half of that suggestion was already in place: a light whose
+segment set misses the visible set does no silhouette work at all.
+
+Tracy is the agreed follow-up for the deep profiling, added on the dev machine
+where it can be confirmed working.
+
+### Asset validation and the README ✅
+
+Every shipped model and level through the M2 and M3 validators at startup and
+behind `--validate-assets`, one line each.
+
+| Check | Result |
+| --- | --- |
+| All shipped assets validate | ✅ **0 failures** — 6 models and 2 levels |
+| Level surfaces are closed genus-0 | ✅ `V - E + F = 2` on both `mine01` and `test01` |
+| Negative control: a face deleted from `pillar.obj` | ✅ caught — "3 open edge(s)", first at (1.700 9.000 0.000) |
+| Debug refuses to continue past it | ✅ `[FATAL] aborting` |
+| Release reports and skips it | ✅ "skipping ... because this is a Release build", exit code **1** |
+| Restored asset | ✅ exit code **0** |
+| Runs at startup, before a window exists | ✅ `--resize-test` logs `asset validation: 0 failure(s)` |
+| All tests, both levels, both configs | ✅ PASS (loop SKIPPED on `test01`) |
+
+One deliberate departure from the plan: a failing **level** is fatal in Release
+too, not skipped. Skipping a model costs a pillar; skipping a level leaves
+nothing to play, so stopping and saying why is the better outcome. Models behave
+as the plan asks.
+
+`README.md` covers what the project is, the three permanent bets, both build
+paths, the controls, how to verify it, and credits — Descent for the mine and
+the flight model, Doom 3 for the shadow volume implementation and depth-fail,
+F.E.A.R. for the argument that hard shadows with no ambient term are worth
+committing to. The screenshots are a placeholder: software rendering at ~13 fps
+cannot show the technique at a frame rate that flatters it, so those want the
+dev machine.
+
+### Housekeeping done on the way
+
+`src/game/bindings.h` now holds the discrete keys too — F1, F3, H, F, Tab,
+Escape and the weapon-select base. They had been GLFW constants spelled out in
+`main.cpp`, which made CLAUDE.md's "nothing else in the project names a GLFW key
+code for gameplay" false as written. There is now no `GLFW_KEY_` anywhere in
+`main.cpp`.
 
 ---
 
@@ -878,3 +1017,38 @@ the `ARCHITECTURE.md` work for doors, the HUD and the game flow, and playing
 `mine01` end to end on the dev machine — key routing, the 45-second countdown,
 and whether 16 robots is the right number. None of that can be settled in the
 container.
+
+---
+
+## M7 documentation — the game loop and the HUD
+
+The last of M7's paperwork. `docs/ARCHITECTURE.md` gains two sections, written
+against the code rather than from the milestone prompt:
+
+- **The game loop** — `GameState` as trivially copyable data inside `SimState`,
+  the four phases and the one direction through them, the reactor as a robot
+  with an `isReactor` flag rather than a special object type, the shake as a
+  `RenderState` offset read from wall-clock so it never moves the ship or banks
+  motion across a stall, and why a locked door does not twitch.
+- **The HUD** — `HudData` as a flat struct the game layer fills, so `src/render`
+  stays free of simulation types; the 37-glyph 5x7 font generated into an atlas
+  at startup instead of adding a font dependency; and the two state changes
+  (culling and depth test) that silently draw nothing when left on.
+
+Doors were already documented when they were fixed, so that part of the list was
+already closed.
+
+### Verified
+
+Docs only — no source change, so nothing to re-measure. Checked that every claim
+in the new text matches the code, which caught two of my own: `GameState` is not
+pointer-free (`endReason` points at string literals), and the shake reads
+`clock.seconds()` rather than the simulation's elapsed time. Both corrected
+before commit.
+
+### What is left in M7
+
+Playing `mine01` end to end on the dev machine: whether the key routing reads,
+whether 45 seconds is the right countdown, and whether 16 robots is too many or
+too few. That is a judgement call at a keyboard, not something the container can
+answer.

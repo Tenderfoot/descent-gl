@@ -471,6 +471,98 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
                   rig.level.pickups.size());
     }
 
+    // --- what the automap is allowed to know ---------------------------------
+    //
+    // The map is only worth having if it shows what the player found rather than
+    // what the level contains, so each of these checks the negative before the
+    // positive: nothing is on the map until the thing that reveals it happens.
+    // The sighting query itself is handed the shut-door set, so it inherits the
+    // door blocking the loop test already proves for robot line of sight above.
+    {
+        rig.reset();
+        rig.run(2);
+
+        const int visitedAtStart = rig.game.visitedCount;
+        ok &= expect(visitedAtStart == 1, "only the starting segment is visited at the start");
+        ok &= expect(rig.game.visited[static_cast<size_t>(rig.level.start.segment)],
+                     "the starting segment is the one marked visited");
+
+        int unvisited = 0;
+        for (int si = 0; si < rig.level.segmentCount(); ++si) {
+            if (!rig.game.visited[static_cast<size_t>(si)]) ++unvisited;
+        }
+        ok &= expect(unvisited == rig.level.segmentCount() - 1,
+                     "every other segment is still unknown");
+
+        // Walking the graph marks exactly the rooms walked through.
+        int walked = 0;
+        for (int si = 0; si < rig.level.segmentCount() && walked < 6; ++si) {
+            rig.teleport(rig.level.segments[static_cast<size_t>(si)].center, si);
+            rig.run(2);
+            ++walked;
+        }
+        ok &= expect(rig.game.visitedCount == walked,
+                     "visiting N segments marks exactly N of them");
+        log::info("automap: {} of {} segments visited after walking {}", rig.game.visitedCount,
+                  rig.level.segmentCount(), walked);
+    }
+
+    // A key is on the map once the player has been in the room with it, and not
+    // before.
+    {
+        rig.reset();
+        int keyIndex = -1;
+        for (size_t pi = 0; pi < rig.level.pickups.size(); ++pi) {
+            if (rig.level.pickups[pi].kind >= PickupKind::KeyBlue) {
+                keyIndex = static_cast<int>(pi);
+                break;
+            }
+        }
+        if (keyIndex >= 0) {
+            const size_t ki = static_cast<size_t>(keyIndex);
+            rig.run(2);
+            ok &= expect(!rig.game.seen[ki], "a key in an unvisited room is not on the map");
+
+            // Into the room, but stopped short of the key itself.
+            const Pickup& key = rig.level.pickups[ki];
+            rig.teleport(rig.level.segments[static_cast<size_t>(key.segment)].center, key.segment);
+            rig.run(2);
+            ok &= expect(rig.game.seen[ki], "entering the room puts the key on the map");
+            log::info("automap: key {} seen={} collected={}", keyIndex, rig.game.seen[ki],
+                      rig.game.collected[ki]);
+        } else {
+            log::info("automap: no keys on this level, key visibility not checked");
+        }
+    }
+
+    // The reactor is marked only once it has actually been looked at.
+    {
+        rig.reset();
+        int reactorIndex = -1;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
+            if (rig.robotCfg.types[static_cast<size_t>(r.type)].isReactor) reactorIndex = i;
+        }
+        if (reactorIndex >= 0) {
+            const sim::Robot& reactor = rig.robots.robots[static_cast<size_t>(reactorIndex)];
+            rig.run(2);
+            ok &= expect(!rig.game.reactorSeen, "the reactor is not on the map from the start");
+
+            // Standing in its room is line of sight to it.
+            const glm::vec3 reactorAt = reactor.body.position;
+            rig.teleport(reactorAt + glm::vec3(0.0f, 0.0f, 6.0f), reactor.body.segment);
+            rig.run(2);
+            ok &= expect(rig.game.reactorSeen, "standing in front of the reactor sights it");
+            ok &= expect(glm::length(rig.game.reactorPosition - reactorAt) < 1.0f,
+                         "the sighted position is the reactor's");
+            log::info("automap: reactor sighted at {:.1f} {:.1f} {:.1f}",
+                      rig.game.reactorPosition.x, rig.game.reactorPosition.y,
+                      rig.game.reactorPosition.z);
+        } else {
+            log::info("automap: no reactor on this level, sighting not checked");
+        }
+    }
+
     log::info("loop test: {}", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

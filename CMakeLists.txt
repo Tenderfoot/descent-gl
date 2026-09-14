@@ -24,9 +24,11 @@ endif()
 add_executable(descent
     src/main.cpp
     src/core/input.cpp
+    src/core/alloc_count.cpp
     src/core/log.cpp
     src/core/options.cpp
     src/core/window.cpp
+    src/game/asset_check.cpp
     src/game/collision_test.cpp
     src/game/level.cpp
     src/game/visibility.cpp
@@ -37,6 +39,7 @@ add_executable(descent
     src/render/debug.cpp
     src/render/billboards.cpp
     src/render/debug_lines.cpp
+    src/render/gpu_timer.cpp
     src/render/hud.cpp
     src/render/level_mesh.cpp
     src/render/mesh.cpp

@@ -13,6 +13,8 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace dvk::gl {
 
@@ -370,8 +372,32 @@ void Renderer::buildDoors(const RenderState& rs, const Level& level) {
 }
 
 void Renderer::buildHud(const HudData& hud) {
+    // Four bands per edge with falling alpha, because Hud::rect is a flat
+    // colour and this is cheaper and more predictable than a gradient shader
+    // for something on screen for a third of a second.
+    const auto damageTint = [&]() {
+        if (hud.damageFlash <= 0.0f) return;
+        const float w = static_cast<float>(target_.width());
+        const float h = static_cast<float>(target_.height());
+        const float depth = h * 0.16f;
+        // Eight rather than four: at four the "gradient" reads as four
+        // rectangles, which looks like a bug rather than a flinch.
+        constexpr int kBands = 8;
+        for (int b = 0; b < kBands; ++b) {
+            const float t = static_cast<float>(b) / kBands;
+            const float band = depth * (1.0f - t);
+            const glm::vec4 red(0.9f, 0.12f, 0.1f,
+                                hud.damageFlash * 0.055f * (1.0f - t * 0.5f));
+            hud_.rect(0.0f, 0.0f, w, band, red);
+            hud_.rect(0.0f, h - band, w, band, red);
+            hud_.rect(0.0f, 0.0f, band, h, red);
+            hud_.rect(w - band, 0.0f, band, h, red);
+        }
+    };
+
     if (!hud.show) {
         hud_.begin(target_.width(), target_.height());
+        damageTint();
         hud_.upload();
         return;
     }
@@ -382,6 +408,7 @@ void Renderer::buildHud(const HudData& hud) {
     // window size instead of shrinking to nothing at 4K.
     const float s = std::max(1.5f, h / 260.0f);
     hud_.begin(target_.width(), target_.height());
+    damageTint();
 
     const glm::vec4 white(1.0f, 1.0f, 1.0f, 0.92f);
     const glm::vec4 dim(0.75f, 0.8f, 0.9f, 0.8f);
@@ -590,6 +617,7 @@ void Renderer::beginFrame(int fbWidth, int fbHeight) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     stats_ = Stats{};
+    timers_.beginFrame();
 }
 
 glm::mat4 Renderer::buildView(const RenderState& rs) const {
@@ -723,6 +751,10 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
         const ShadowVolumes::Range range = volumes_.endLight();
         ls.silhouetteEdges = volumes_.silhouetteEdges() - before;
         ls.volumeTriangles = range.count / 3;
+        if (ls.volumeTriangles > stats_.worstVolumeTriangles) {
+            stats_.worstVolumeTriangles = ls.volumeTriangles;
+            stats_.worstVolumeLight = static_cast<int>(li);
+        }
         ranges_.push_back(range);
         lightStats_.push_back(ls);
     }
@@ -856,7 +888,10 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
 
         const ShadowVolumes::Range range =
             li < ranges_.size() ? ranges_[li] : ShadowVolumes::Range{};
+        const int timed = static_cast<int>(li);
+        timers_.stencilBegin(timed);
         stencilPass(range);
+        timers_.stencilEnd(timed);
 
         if (showStencil) {
             visualiseStencil();
@@ -865,6 +900,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
 
         // Shade only the fragments the prepass decided are visible, and only
         // where the stencil balance came out zero.
+        timers_.lightBegin(timed);
         glDepthMask(GL_FALSE);
         glDepthFunc(GL_EQUAL);
         glEnable(GL_BLEND);
@@ -954,6 +990,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             wallShader_->setMat4("uModel", shipModelMatrix(rs));
             ship_->draw();
         }
+        timers_.lightEnd(timed);
     }
 
     glDisable(GL_BLEND);
@@ -1064,14 +1101,149 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     buildBillboards(rs);
     buildHud(hud);
     buildShadowVolumes(rs, walk);
+    timers_.passBegin(GpuTimers::Prepass);
     depthPrepass(rs, walk);
+    timers_.passEnd(GpuTimers::Prepass);
     lightPasses(rs, walk);
+    timers_.passBegin(GpuTimers::Unlit);
     unlitPass(rs, level, walk);
+    timers_.passEnd(GpuTimers::Unlit);
+}
+
+void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
+    mapLines_.clear();
+
+    // Colours chosen so the map reads at a glance: the room you are in is warm
+    // and everything else is cold, which is the one question a player opens the
+    // map to answer.
+    constexpr glm::vec3 kWall(0.30f, 0.45f, 0.62f);
+    constexpr glm::vec3 kHere(0.95f, 0.70f, 0.25f);
+    constexpr glm::vec3 kFrontier(0.16f, 0.26f, 0.38f);
+
+    const int n = std::min(map.segmentCount, level.segmentCount());
+    for (int si = 0; si < n; ++si) {
+        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        const Segment& seg = level.segments[static_cast<size_t>(si)];
+        const bool here = si == map.shipSegment;
+
+        for (int side = 0; side < SideCount; ++side) {
+            const SideData& sd = seg.sides[static_cast<size_t>(side)];
+
+            // A wall is drawn as its outline; a portal is drawn as nothing at
+            // all, so a corridor reads as a gap rather than a line to bump into.
+            // The exception is a portal into somewhere unvisited: a faint
+            // outline there marks the way on without giving away what is beyond.
+            glm::vec3 color = kWall;
+            if (sd.isPortal()) {
+                const int nb = sd.neighbour;
+                const bool known = nb >= 0 && nb < AutomapData::kMaxSegments &&
+                                   map.visited[static_cast<size_t>(nb)];
+                if (known) continue;
+                color = kFrontier;
+            } else if (here) {
+                color = kHere;
+            }
+
+            const std::array<int, 4>& corners = kSideVertices[static_cast<size_t>(side)];
+            for (int e = 0; e < 4; ++e) {
+                const glm::vec3& a =
+                    level.vertices[static_cast<size_t>(seg.verts[static_cast<size_t>(corners[e])])];
+                const glm::vec3& b =
+                    level.vertices[static_cast<size_t>(
+                        seg.verts[static_cast<size_t>(corners[(e + 1) % 4])])];
+                mapLines_.line(a, b, color);
+            }
+        }
+    }
+
+    // The ship: a cross for where, and a stalk for which way it is pointing.
+    mapLines_.cross(map.shipPosition, 1.6f, glm::vec3(1.0f, 1.0f, 1.0f));
+    mapLines_.line(map.shipPosition, map.shipPosition + map.shipForward * 4.0f,
+                   glm::vec3(1.0f, 1.0f, 1.0f));
+
+    for (int mi = 0; mi < map.markerCount && mi < AutomapData::kMaxMarkers; ++mi) {
+        const AutomapData::Marker& marker = map.markers[static_cast<size_t>(mi)];
+        mapLines_.cross(marker.position, marker.size, marker.color);
+        if (marker.hollow) continue;
+        // A collected or destroyed marker gets a box around its cross, so the
+        // two states are distinguishable without colour, which is already
+        // carrying the key's identity.
+        const float h = marker.size * 0.7f;
+        const glm::vec3 c = marker.position;
+        const glm::vec3 x(h, 0.0f, 0.0f), y(0.0f, h, 0.0f);
+        mapLines_.line(c - x - y, c + x - y, marker.color);
+        mapLines_.line(c + x - y, c + x + y, marker.color);
+        mapLines_.line(c + x + y, c - x + y, marker.color);
+        mapLines_.line(c - x + y, c - x - y, marker.color);
+    }
+
+    mapLines_.upload();
+}
+
+void Renderer::drawAutomap(const AutomapData& map, const Level& level, const HudData& hud) {
+    buildAutomapLines(map, level);
+    buildHud(hud);
+
+    // Frame the visited part of the mine rather than the whole level, so the
+    // map stays legible early on instead of showing one lit room in the corner
+    // of an empty box.
+    glm::vec3 lo(std::numeric_limits<float>::max());
+    glm::vec3 hi(std::numeric_limits<float>::lowest());
+    const int n = std::min(map.segmentCount, level.segmentCount());
+    for (int si = 0; si < n; ++si) {
+        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        const Segment& seg = level.segments[static_cast<size_t>(si)];
+        for (int v = 0; v < 8; ++v) {
+            const glm::vec3& p = level.vertices[static_cast<size_t>(seg.verts[static_cast<size_t>(v)])];
+            lo = glm::min(lo, p);
+            hi = glm::max(hi, p);
+        }
+    }
+    if (lo.x > hi.x) {   // nothing visited yet, which should not happen
+        lo = hi = map.shipPosition;
+    }
+
+    const glm::vec3 focus = (lo + hi) * 0.5f;
+    const float radius = std::max(glm::length(hi - lo) * 0.5f, 4.0f);
+    const float distance = radius * 1.7f / std::max(map.zoom, 0.2f);
+
+    const float cp = std::cos(map.pitch);
+    const glm::vec3 eye = focus + glm::vec3(std::cos(map.yaw) * cp, std::sin(map.pitch),
+                                            std::sin(map.yaw) * cp) * distance;
+
+    const float aspect = target_.height() > 0
+                             ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
+                             : 1.0f;
+
+    CameraBlock cam;
+    cam.view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
+    // The project's own reversed-Z projection, not a second convention: the
+    // depth test is still GL_GEQUAL and the clear is still 0.
+    cam.proj = infiniteReversedZ(kFovY, aspect, kZNear);
+    glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
+
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_GEQUAL);
+
+    // Timed as the unlit pass, which is what it is: lines, no lighting, no
+    // stencil. Without this the timing panel reads as "no results" in map view.
+    timers_.passBegin(GpuTimers::Unlit);
+    if (!mapLines_.empty()) {
+        debugLineShader_->bind();
+        mapLines_.draw();
+    }
+    timers_.passEnd(GpuTimers::Unlit);
+
 }
 
 void Renderer::resolve() {
     target_.resolveToDefault();
     hudPass();
+    // After the last GL work of the frame, so the ring advances once per frame
+    // whichever view was drawn.
+    timers_.endFrame();
 }
 
 } // namespace dvk::gl

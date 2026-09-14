@@ -763,6 +763,199 @@ changes segment.
 
 ---
 
+## The game loop (M7)
+
+`src/sim/gameflow.h`. Find the reactor, destroy it, get out before the mine
+does. One `stepGame` runs doors, pickups and the win/lose flow inside the fixed
+step, in that order, and it is the only place `GamePhase` changes.
+
+`GameState` holds the whole of it: the phase, the countdown, elapsed time, the
+shake, the robot tally, which pickups are gone, which keys are held, and the
+`DoorField`. It lives inside `SimState`, which is **copied every step**, so it is
+fixed-capacity arrays and scalars throughout — trivially copyable, with nothing
+that owns memory. The one pointer in it is `endReason`, and that points into
+string literals rather than at anything it has to free.
+
+### Four phases, and one direction through them
+
+`Playing → Countdown → Won`, or either of the first two → `Lost`. `stepGame`
+returns immediately in `Won` and `Lost`, so an end screen is a frozen
+simulation rather than a separate mode with its own loop. The phase never runs
+backwards; restarting rebuilds the state from the level instead of unwinding it.
+
+The reactor is not a special object type. It is a **robot whose definition sets
+`isReactor`**, which means it already has health, line of sight, a weapon and a
+shadow-casting mesh, and the flow only has to ask whether any live robot has
+that flag. Destroying it starts the countdown, unlocks the exit, and leaves
+every other robot fighting.
+
+The three endings are `escaped`, `the mine went up with you still in it`, and
+`shields gone`.
+
+### The countdown is felt before it is read
+
+`shake` ramps as `fraction * fraction` over the countdown, fraction being how
+much of it has gone. `main.cpp` turns that into two things: a camera offset whose
+three axes each sum sines at unrelated frequencies, so it never settles into a
+visible rhythm, and `staticLightScale`, a flicker that only ever **dips** —
+the lights are failing, not sparkling.
+
+Both read `clock.seconds()` directly rather than integrating per frame, and both
+land on `RenderState` rather than on the ship. So the shake looks the same at 30
+fps as at 300, cannot bank motion across a stall, and never moves the ship's
+actual position — it is a view of the mine coming apart, not a force on the
+player. A player who never looks at the timer still knows how long is left.
+
+### Keys open one door each
+
+A door names a key colour; `hasKey` gates it. A locked door does not
+acknowledge the player at all without the key — it does not begin to open and
+then stop, because a door that twitches reads as broken rather than locked. The
+loop test holds **every wrong key** against every door, not just the right one,
+which is what catches a mask or index slip that a single positive test would
+pass.
+
+Pickups are a touch test against `player.radius + 2.4` with a `collected` flag,
+so a pickup cannot be taken twice and the level file stays immutable. Keys
+persist until the level ends; everything else applies its effect to
+`CombatState::player` on contact.
+
+---
+
+## The HUD
+
+`src/render/hud.h`. Screen-space quads and text, built by the game layer into a
+`HudData` struct and drawn after the MSAA resolve, on the default framebuffer,
+alongside ImGui. It is axis-aligned and gains nothing from multisampling, so
+resolving first costs nothing and keeps the HUD out of the shadow and lighting
+passes entirely.
+
+`HudData` is a **flat struct of values the game layer fills in** — bars, weapon
+name, ammo, keys, countdown, phase, message. The renderer never reaches into
+`GameState` or `CombatState` to draw the HUD, which is what keeps `src/render`
+free of simulation types.
+
+### The font is generated, not shipped
+
+Text needs digits, a colon and capitals: 37 glyphs. Those are a 5x7 bitmap per
+glyph in a table in `hud.cpp`, blitted into one RGBA8 atlas at startup with a
+pixel of padding per cell so linear filtering cannot bleed neighbours together.
+No font library, no shipped atlas, and the dependency allowlist stays where
+CLAUDE.md puts it.
+
+### Two state changes that produce nothing, silently
+
+Both were found by an empty HUD and no error anywhere, and both are commented at
+the call site because neither fails loudly:
+
+- **Culling must be off.** The shader flips y to put the HUD's origin at the
+  top-left, which is how a HUD is naturally laid out — and which reverses the
+  winding of every quad. With culling on, the entire HUD is culled.
+- **Depth test must be off**, since the HUD is drawn after the resolve with no
+  depth buffer attached that would pass.
+
+ImGui is debug-only from this milestone and starts hidden; F3 toggles it,
+`--debug-ui` starts with it open, and `--no-ui` keeps it shut so a screenshot
+shows the game.
+
+---
+
+## The automap (M8)
+
+`Tab`. The segment graph drawn as lines, in the same reversed-Z projection the
+scene uses, from an orbit camera the mouse drives. The simulation is untouched
+while it is open: the ship keeps flying, robots keep hunting, the countdown keeps
+running. Opening the map is not a pause, and reading it while something is
+shooting at you is the cost of looking.
+
+It reuses `DebugLines` rather than introducing a mesh path, because that is
+exactly what it needs — a per-frame line list that keeps its capacity and stops
+allocating after the first few frames. `mapLines_` is a second instance, kept
+apart from the scene's `debugLines_` so `--debug-lines` and the map cannot
+overwrite each other.
+
+### What it draws, and what it refuses to
+
+A wall side is drawn as its outline. A portal to a **visited** segment is drawn
+as nothing at all, so a corridor reads as a gap rather than as a line to bump
+into. A portal to an **unvisited** one gets a faint outline: a frontier marker
+that says there is a way on without saying what is through it.
+
+`GameState` records the knowledge, and the rules are deliberately mean:
+
+- **`visited`** is segments the ship has actually been inside — not segments it
+  has *seen* down a corridor, which would hand the player the layout of a room
+  they glanced into.
+- **`seen`** marks a pickup whose segment has been visited, so a key noticed and
+  left behind can be flown back to.
+- **`reactorSeen`** needs a real line of sight, tested with the same `raycast`
+  the robots use and against the doors as they stand that step, so a reactor
+  behind a shut door is not revealed through it. It runs only until it succeeds
+  once — a handful of rays per level, not per step.
+
+None of it feeds back into the simulation. A level plays out identically whether
+the map is ever opened or not, which is what makes it safe for `stepGame` to
+write and for the renderer to read.
+
+### Framing
+
+The orbit camera frames the **visited** bounding box rather than the level's, so
+the map stays legible early on instead of showing one lit room in the corner of
+an empty box. It grows as the player explores.
+
+`--reveal` draws every segment and every marker as though found. It is a
+rendering check for the map itself — the same family as `--wireframe-volumes`
+and `--stencil-view` — and it touches only what the renderer is handed, never
+`GameState`.
+
+---
+
+## Feel: flashes, flinches and kicks (M8)
+
+Three effects that exist to be felt rather than read. All three share one rule:
+**they land on `RenderState` and `HudData`, never on the body.** A camera effect
+that moves the ship is a physics bug wearing a costume, and the tests assert the
+ship's position and velocity are untouched by each of them.
+
+### Muzzle flash
+
+Firing spawns a short `Effect` at the fire point, carrying a light. It is scaled
+from the weapon's **own** bolt light rather than from a constant — radius x1.5,
+intensity x2.5 — so a vulcan pop is small, a missile launch throws real light
+down the corridor, and a weapon retuned in `weapons.json` brings its flash with
+it.
+
+It lasts 0.05 s rather than literally one frame. At 120 Hz a single step is 8 ms,
+which at any real frame rate is as likely to be missed entirely as seen; 0.05 s
+is long enough to land on a frame and still be gone before it reads as a lamp
+bolted to the nose of the ship.
+
+Robots flash too, from the same `spawnEffect` — which is why that function is
+public in `combat.h` rather than file-local. In a black corridor a robot's muzzle
+flash is usually what tells the player where it is, before the bolt arrives and
+before the eyes are close enough to see.
+
+### The hit flinch
+
+`PlayerState::hurtTimer` is set wherever shields come off — both the direct hit
+and the splash path — and decays in `stepCombat`. The renderer turns it into
+bands of red at the screen edges, drawn **even when the HUD is hidden**: it is
+damage feedback rather than a readout, and a screenshot taken with `--no-ui`
+should still show the player being shot at.
+
+Eight bands of falling alpha rather than a gradient shader, because `Hud::rect`
+is a flat colour and this is on screen for under half a second. At four bands it
+reads as four rectangles, which looks like a bug rather than a flinch.
+
+### The missile kick
+
+`recoilTimer` is set only by concussion and homing, and pushes the **eye**
+backwards along the ship's forward axis, squared so it snaps and then eases. A
+gun does not kick; the test asserts the laser leaves `recoilTimer` at zero, which
+is what stops the effect creeping onto every trigger pull.
+
+---
+
 ## Robots
 
 `src/sim/robots.h`. Three types from `assets/config/robots.json`, placed in the
@@ -817,6 +1010,102 @@ reason they exist.
 They are billboards rather than mesh faces because the meshes carry no material
 split, and a glow reads better at distance than a lit polygon would. A
 deviation from the plan's "emissive eye geometry", and worth knowing about.
+
+---
+
+## Measurement (M8)
+
+Two instruments, because M8 says to measure rather than reason, and because the
+two questions have different shapes: "where does the frame go" is an
+investigation, and "did anything allocate" is an invariant.
+
+### GPU timing
+
+`src/render/gpu_timer.h`. Every timed region is a pair of `glQueryCounter`
+calls, read back **two frames later**. Reading them in the frame they were
+issued stalls the pipeline waiting for the GPU, which makes the thing being
+measured slower than it is — the classic way to profile a renderer into a shape
+that does not exist. Three sets of queries rotate; a frame whose results are not
+ready yet is skipped rather than waited on, and the last good numbers stay on
+screen.
+
+Timed: the depth prepass, the unlit pass, and — separately — the stencil pass
+and the lighting pass of each light, up to sixteen. The automap counts as the
+unlit pass, which is what it is.
+
+The numbers appear in the `gpu timings` ImGui panel and on a line at exit, so a
+headless run reports them the way everything else in this project is reported
+rather than only existing behind a panel nobody can open without a display.
+
+### Allocation counting
+
+`src/core/alloc_count.h`. Global `operator new` is replaced with one that
+increments a counter. That is a big hammer for a small question and it is the
+only one that answers it honestly: it sees allocations from anywhere, including
+inside the standard library and inside a container that grew when nobody
+expected it to. A counter threaded through the project's own allocations would
+only ever find the ones already known about.
+
+`main` brackets the sim-step loop and the `beginFrame`-to-`resolve` span and
+reports both at exit. The first thirty frames are exempt, because pools and
+vectors reserve on their way to steady state and counting that warm-up would
+report a leak that is really a start-up cost.
+
+What it found, which is the point of having it: the steady state really is zero
+on both paths, and the exceptions are all **events** rather than churn — the
+death message being formatted inside `stepGame`, the render target's log line
+when a resize rebuilds it, a per-frame container reaching a new high-water mark.
+None of those happen every frame, which is what the invariant actually claims.
+
+### What is deliberately not capped
+
+M8's plan suggested capping per-light volume triangle counts. That is not done,
+and `Stats::worstVolumeTriangles` reports the number instead.
+
+A truncated shadow volume is an **open** volume, and depth-fail counting against
+an open volume is exactly the bug the shadow-closure work fixed: the earlier
+segment-subset optimization left holes in emitted volumes and produced black
+polygons behind receivers. Capping would reintroduce that class of failure to
+buy performance nobody has yet shown is needed. The stat says how big the
+problem would be and which light has it, so a cap can be sized from evidence if
+evidence ever appears.
+
+The cheap part of that suggestion was already in place: `buildShadowVolumes`
+skips a light entirely when no segment in its set is visible, before any
+silhouette work, and `gatherLights` orders the shadow budget by the same test.
+
+---
+
+## Asset validation at startup
+
+`src/game/asset_check.h`. Every `.obj` under `assets/models` and every `.json`
+under `assets/levels` goes through the M2 and M3 validators on every run, one
+report line each, before a window exists.
+
+Both validators already ran at load — but only for the assets a given run
+happens to touch. Play `mine01` and nothing ever looks at `test01`; a model no
+level places is never loaded at all. Walking the directories instead means a
+broken asset is found on the next run rather than on the run that first needs
+it, and before anything is on screen.
+
+Closure is asked through `checkClosure`, which reports rather than aborts, and
+which deliberately uses the same weld and adjacency rules as `buildOccluder` — a
+report using a different rule could pass an asset the loader then aborts on,
+which is worse than no report.
+
+### What "skip it in Release" does and does not mean
+
+M8 asks for a failing asset to be fatal in Debug and skipped with a warning in
+Release. That is what a failing **model** does: the game is better off missing a
+pillar than refusing to start.
+
+A failing **level** is fatal in both, which is a deliberate departure. Skipping
+it leaves nothing to play, so "continue without it" is not a better outcome than
+stopping and saying why. This is the same rule the level loader already had.
+
+The level report also prints the surface's Euler characteristic. `V - E + F = 2`
+is a closed genus-0 surface, which is the property the mine's own shadow volume
+depends on; both shipped levels report 2.
 
 ---
 

@@ -68,6 +68,9 @@ milestone rather than describing what the code should do:
 | `--screenshot PATH` | Write the final frame to PATH as PNG before exiting. Implies `--frames 60` if no count is given. |
 | `--resize-test` | Drive a scripted 9-second sequence of window resizes, an iconify and a restore, then exit. Keeps vsync on so the window manager can deliver the events. |
 | `--chase` | Start in the chase camera, so a screenshot can show the ship without a keypress. |
+| `--automap` | Start with the automap open, so a screenshot can show it without flying the level first. |
+| `--validate-assets` | Run every shipped model and level through the M2 and M3 validators, print one line each, and exit non-zero on any failure. Needs no window and no GL. Also runs at every startup. |
+| `--reveal` | Draw the automap as if every segment had been visited and every key and the reactor had been found. A rendering check for the map, in the same family as `--wireframe-volumes`; it changes nothing in the simulation, which still records only the rooms actually flown through. Implies `--automap`. |
 | `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
 | `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
 | `--segment N` | Start in segment N's centre rather than at the player start, so a screenshot can be taken anywhere in the mine without flying there. |
@@ -83,6 +86,10 @@ milestone rather than describing what the code should do:
 | `--debug-lines` | Start with wall normals, contact points and the nose raycast drawn. Also ImGui toggles. |
 | `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
 | `--stencil-view` | Start in the stencil visualiser, which tints whatever the stencil marks as shadowed. Also an ImGui toggle. |
+
+Every run also ends with the last frame's GPU cost per pass and a report of how
+many heap allocations the sim step and the draw path made after a 30-frame
+warm-up. Both should read `none`; a number there is a finding, not noise.
 
 Every run ends with a line reporting frames, simulation steps, and the achieved
 step rate against the 120 Hz target. That rate is the check that the fixed
@@ -101,6 +108,7 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 | Arrow keys | Pitch and yaw without the mouse |
 | F1 | Toggle chase camera |
 | F3 | Toggle the ImGui debug panels |
+| Tab | Toggle the automap (mouse orbits it; the simulation keeps running) |
 | 1 / 2 / 3 / 4 | Select laser, vulcan, concussion, homing |
 | Left mouse | Fire the selected gun |
 | Right mouse | Launch a missile |

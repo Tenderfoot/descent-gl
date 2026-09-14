@@ -53,6 +53,42 @@ inline int keyFor(Action a) {
     return kBindings[static_cast<size_t>(a)].key;
 }
 
+// The same rule for the keys that fire once on press rather than being held.
+// These used to be GLFW constants spelled out at their use sites in main.cpp,
+// which made CLAUDE.md's "nothing else in the project names a GLFW key code for
+// gameplay" false the moment anyone looked.
+enum class Toggle {
+    Chase,
+    DebugUi,
+    Headlight,
+    Flare,
+    Automap,
+    Capture,
+    Count,
+};
+
+struct ToggleBinding {
+    Toggle toggle;
+    int key;
+    const char* label;
+};
+
+inline constexpr std::array<ToggleBinding, static_cast<size_t>(Toggle::Count)> kToggles{{
+    {Toggle::Chase, GLFW_KEY_F1, "F1"},
+    {Toggle::DebugUi, GLFW_KEY_F3, "F3"},
+    {Toggle::Headlight, GLFW_KEY_H, "H"},
+    {Toggle::Flare, GLFW_KEY_F, "F"},
+    {Toggle::Automap, GLFW_KEY_TAB, "Tab"},
+    {Toggle::Capture, GLFW_KEY_ESCAPE, "Escape"},
+}};
+
+inline int keyFor(Toggle t) {
+    return kToggles[static_cast<size_t>(t)].key;
+}
+
+// Weapon selection is 1..4 in order, so it is a base rather than a table.
+inline constexpr int kWeaponSelectBase = GLFW_KEY_1;
+
 // Samples the bindings into the device-independent control struct the
 // simulation consumes. Mouse motion is only applied while the cursor is
 // captured, so alt-tabbing away does not spin the ship.

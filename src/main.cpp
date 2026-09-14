@@ -3,6 +3,7 @@
 #include "core/options.h"
 #include "core/time.h"
 #include "core/window.h"
+#include "game/asset_check.h"
 #include "game/bindings.h"
 #include "game/level.h"
 #include "game/state.h"
@@ -14,6 +15,7 @@
 #include "game/world_test.h"
 #include "render/debug.h"
 #include "render/gl.h"
+#include "core/alloc_count.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "sim/collision.h"
@@ -97,6 +99,11 @@ int main(int argc, char** argv) {
     if (opts.flightTest) {
         return dvk::sim::runFlightTest(kFlightConfigPath);
     }
+    // Every shipped asset through the validators, then out. Needs no window and
+    // no GL, so it runs anywhere the tests do.
+    if (opts.validateAssets) {
+        return dvk::validateAssets() == 0 ? 0 : 1;
+    }
     if (opts.worldTest) {
         return dvk::runWorldTest(levelPath);
     }
@@ -112,6 +119,11 @@ int main(int argc, char** argv) {
     if (opts.loopTest) {
         return dvk::runLoopTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
     }
+
+    // Every shipped asset, every run, before a window exists. A broken asset
+    // then fails before anything is on screen rather than at the moment the
+    // level that places it is first loaded.
+    dvk::validateAssets();
 
     dvk::Window::Desc desc;
     desc.width = opts.width;
@@ -175,6 +187,8 @@ int main(int argc, char** argv) {
     // F3 brings the debug panels back. Off by default, because from M7 the HUD
     // is what the player reads and the panels are for tuning.
     bool showDebugUi = !opts.noUi && opts.debugUi;
+    dvk::gl::AutomapData automap;
+    automap.open = opts.automap;
 
     dvk::PortalWalk walk;
     dvk::LightFlood flood;
@@ -225,6 +239,16 @@ int main(int argc, char** argv) {
     long long totalSteps = 0;
     int frame = 0;
     double frameMs = 0.0;
+    // Allocation instrumentation. The first frames are exempt: pools and
+    // vectors reserve on their way to steady state, and counting that warm-up
+    // would report a leak that is really a start-up cost.
+    constexpr int kAllocWarmupFrames = 30;
+    uint64_t worstSimAllocs = 0;
+    uint64_t worstDrawAllocs = 0;
+    int simAllocFrames = 0;
+    int drawAllocFrames = 0;
+    int firstSimAllocFrame = -1;
+    int firstDrawAllocFrame = -1;
     double loopEnd = 0.0;   // set on the final frame, before any screenshot write
     bool scriptFired[std::size(kResizeScript)] = {};
     int minimizedFrames = 0;
@@ -280,7 +304,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (input.pressed(GLFW_KEY_ESCAPE)) {
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Capture))) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
         // Any key restarts from an end screen. Checked before the toggles
@@ -292,20 +316,34 @@ int main(int argc, char** argv) {
                 prev = cur;
                 accumulator = 0.0;
             }
-        } else if (input.pressed(GLFW_KEY_F3)) {
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
             showDebugUi = !showDebugUi;
-        } else if (input.pressed(GLFW_KEY_H)) {
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
             // Refuses to come on with no energy left, which is the whole point
             // of it costing any.
             cur.combat.player.headlightOn =
                 !cur.combat.player.headlightOn && cur.combat.player.energy > 0.0f;
         }
-        if (input.pressed(GLFW_KEY_F1)) {
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Chase))) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
         }
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
+            automap.open = !automap.open;
+        }
 
-        const glm::vec2 mouseDelta = input.consumeMouseDelta();
+        dvk::alloc::Scope simAllocs;
+        glm::vec2 mouseDelta = input.consumeMouseDelta();
+        // With the map open the mouse orbits it instead of steering. The
+        // simulation is untouched either way: the ship keeps flying, robots keep
+        // hunting, and the countdown keeps running - opening the map is not a
+        // pause, and reading it while something is shooting at you is the cost
+        // of looking.
+        if (automap.open) {
+            automap.yaw += mouseDelta.x * 0.005f;
+            automap.pitch = std::clamp(automap.pitch - mouseDelta.y * 0.005f, -1.45f, 1.45f);
+            mouseDelta = glm::vec2(0.0f);
+        }
         bool consumedMouse = false;
         while (accumulator >= kSimStep) {
             prev = cur;
@@ -335,9 +373,9 @@ int main(int argc, char** argv) {
             if (!consumedMouse) {
                 fire.primary = input.mouseDown(GLFW_MOUSE_BUTTON_LEFT);
                 fire.secondary = input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
-                fire.flare = input.pressed(GLFW_KEY_F);
+                fire.flare = input.pressed(dvk::keyFor(dvk::Toggle::Flare));
                 for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
-                    if (input.pressed(GLFW_KEY_1 + w)) fire.selectWeapon = w;
+                    if (input.pressed(dvk::kWeaponSelectBase + w)) fire.selectWeapon = w;
                 }
                 if (opts.autofire >= 0) {
                     if (opts.autofire >= dvk::sim::WeaponCount) {
@@ -361,6 +399,16 @@ int main(int argc, char** argv) {
             accumulator -= kSimStep;
             ++totalSteps;
         }
+        // CLAUDE.md says the sim step does not allocate. M8 says to instrument
+        // that rather than believe it. The first few frames are exempt: pools
+        // and vectors reserve on their way to steady state, and counting those
+        // would report a leak that is really a warm-up.
+        const uint64_t simAllocCount = simAllocs.count();
+        if (frame > kAllocWarmupFrames) {
+            worstSimAllocs = std::max(worstSimAllocs, simAllocCount);
+            simAllocFrames += simAllocCount > 0 ? 1 : 0;
+            if (simAllocCount > 0 && firstSimAllocFrame < 0) firstSimAllocFrame = frame;
+        }
 
         const auto alpha = static_cast<float>(accumulator / kSimStep);
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
@@ -369,6 +417,17 @@ int main(int argc, char** argv) {
         // The mine coming apart. Driven from wall-clock rather than the sim, so
         // the shake is smooth at any frame rate and never accumulates into the
         // ship's actual position.
+        // A missile leaving the tube shoves the view back, and only the view:
+        // the ship's own motion is the simulation's business and a camera
+        // effect must not reach into it. Squared so it snaps and then eases,
+        // which reads as a shove rather than a wobble.
+        if (cur.combat.player.recoilTimer > 0.0f) {
+            const float k = cur.combat.player.recoilTimer / dvk::sim::kRecoilTime;
+            const glm::vec3 back =
+                glm::mat3_cast(rs.shipOrientation) * glm::vec3(0.0f, 0.0f, 1.0f);
+            rs.shakeOffset += back * (0.55f * k * k);
+        }
+
         if (cur.game.shake > 0.0f) {
             const auto t = static_cast<float>(clock.seconds());
             const float amp = cur.game.shake * 0.9f;
@@ -489,6 +548,7 @@ int main(int argc, char** argv) {
             dvk::sim::raycast(level, rs.shipPos, shipForward, 300.0f, rs.shipSegment);
 
         const glm::ivec2 fb = window.framebufferSize();
+        dvk::alloc::Scope drawAllocs;
         renderer.beginFrame(fb.x, fb.y);
         renderer.buildDebugLines(level, rs, contacts, noseRay);
         if (!freezeVisible) {
@@ -518,10 +578,84 @@ int main(int argc, char** argv) {
         hud.message = cur.game.endReason;
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
+        hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         hud.robotsTotal = cur.game.robotsAtStart;
 
-        renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+        if (automap.open) {
+            automap.segmentCount = level.segmentCount();
+            automap.visitedCount =
+                opts.reveal ? level.segmentCount() : cur.game.visitedCount;
+            for (int si = 0; si < automap.segmentCount &&
+                             si < dvk::gl::AutomapData::kMaxSegments; ++si) {
+                automap.visited[static_cast<size_t>(si)] =
+                    opts.reveal || cur.game.visited[static_cast<size_t>(si)];
+            }
+            automap.shipPosition = rs.shipPos;
+            automap.shipForward = shipForward;
+            automap.shipSegment = rs.shipSegment;
+
+            automap.markerCount = 0;
+            const auto addMarker = [&](const glm::vec3& p, const glm::vec3& color, float size,
+                                       bool hollow) {
+                if (automap.markerCount >= dvk::gl::AutomapData::kMaxMarkers) return;
+                dvk::gl::AutomapData::Marker& m =
+                    automap.markers[static_cast<size_t>(automap.markerCount++)];
+                m.position = p;
+                m.color = color;
+                m.size = size;
+                m.hollow = hollow;
+            };
+
+            // Keys the player has laid eyes on, whether or not they picked them
+            // up. Anything else on the map would be telling them where to go.
+            for (int pi = 0; pi < rs.pickupCount; ++pi) {
+                const dvk::Pickup& pickup = level.pickups[static_cast<size_t>(pi)];
+                if (pickup.kind < dvk::PickupKind::KeyBlue) continue;
+                if (!opts.reveal && !cur.game.seen[static_cast<size_t>(pi)]) continue;
+                const bool collected = cur.game.collected[static_cast<size_t>(pi)];
+                glm::vec3 color(1.0f);
+                switch (pickup.kind) {
+                    case dvk::PickupKind::KeyBlue: color = glm::vec3(0.35f, 0.55f, 1.0f); break;
+                    case dvk::PickupKind::KeyYellow: color = glm::vec3(1.0f, 0.9f, 0.3f); break;
+                    case dvk::PickupKind::KeyRed: color = glm::vec3(1.0f, 0.35f, 0.3f); break;
+                    default: break;
+                }
+                addMarker(pickup.position, color, 1.8f, !collected);
+            }
+
+            if (cur.game.reactorSeen || opts.reveal) {
+                // Green once it is gone, so a glance says whether the job is
+                // done and the map is now an escape route.
+                const glm::vec3 color = cur.game.reactorAlive ? glm::vec3(1.0f, 0.45f, 0.2f)
+                                                              : glm::vec3(0.4f, 1.0f, 0.5f);
+                glm::vec3 at = cur.game.reactorPosition;
+                if (opts.reveal && !cur.game.reactorSeen) {
+                    for (int ri = 0; ri < cur.robots.count; ++ri) {
+                        const dvk::sim::Robot& r = cur.robots.robots[static_cast<size_t>(ri)];
+                        if (robotConfig.types[static_cast<size_t>(r.type)].isReactor) {
+                            at = r.body.position;
+                        }
+                    }
+                }
+                addMarker(at, color, 3.0f, false);
+            }
+            if (cur.game.exitOpen && level.exitTrigger.present) {
+                addMarker(level.exitTrigger.position, glm::vec3(0.5f, 1.0f, 0.7f), 3.0f, false);
+            }
+
+            renderer.drawAutomap(automap, level, hud);
+        } else {
+            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+        }
         renderer.resolve();
+        // The same question for the draw path: everything from beginFrame to
+        // resolve, which is where per-frame geometry is built and submitted.
+        const uint64_t drawAllocCount = drawAllocs.count();
+        if (frame > kAllocWarmupFrames) {
+            worstDrawAllocs = std::max(worstDrawAllocs, drawAllocCount);
+            drawAllocFrames += drawAllocCount > 0 ? 1 : 0;
+            if (drawAllocCount > 0 && firstDrawAllocFrame < 0) firstDrawAllocFrame = frame;
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
@@ -591,6 +725,52 @@ int main(int argc, char** argv) {
 
         ImGui::SetNextWindowPos(ImVec2(12, 210), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(390, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("gpu timings")) {
+            const dvk::gl::GpuTimers& gt = renderer.timers();
+            const dvk::gl::Renderer::Stats& st = renderer.stats();
+            if (!gt.valid()) {
+                ImGui::TextUnformatted("waiting for the first results...");
+                ImGui::TextUnformatted("(read back two frames late, so nothing stalls)");
+            } else {
+                const float perLight = gt.stencilTotal() + gt.lightingTotal();
+                const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + perLight +
+                                    gt.pass(dvk::gl::GpuTimers::Unlit);
+                ImGui::Text("depth prepass %6.3f ms", gt.pass(dvk::gl::GpuTimers::Prepass));
+                ImGui::Text("stencil       %6.3f ms   (all lights)", gt.stencilTotal());
+                ImGui::Text("lighting      %6.3f ms   (all lights)", gt.lightingTotal());
+                ImGui::Text("unlit         %6.3f ms", gt.pass(dvk::gl::GpuTimers::Unlit));
+                ImGui::Separator();
+                ImGui::Text("gpu total     %6.3f ms", total);
+                if (gt.worstLight() >= 0) {
+                    ImGui::Text("most expensive light: %d at %.3f ms", gt.worstLight(),
+                                gt.worstLightMs());
+                }
+                ImGui::Separator();
+                ImGui::BeginChild("per light gpu", ImVec2(0, 150), true);
+                for (int li = 0; li < gt.lightCount(); ++li) {
+                    ImGui::Text("%2d  stencil %6.3f   light %6.3f", li, gt.stencil(li),
+                                gt.lighting(li));
+                }
+                ImGui::EndChild();
+            }
+            ImGui::Separator();
+            ImGui::Text("shadow casters %d   volume tris %d", st.shadowCasters,
+                        st.volumeTriangles);
+            // Reported, not enforced: truncating a volume would reopen the
+            // open-volume bug the shadow-closure work fixed.
+            ImGui::Text("heaviest volume: light %d, %d triangles", st.worstVolumeLight,
+                        st.worstVolumeTriangles);
+            ImGui::Separator();
+            const int measured = std::max(0, frame - kAllocWarmupFrames);
+            ImGui::Text("heap allocations after a %d-frame warm-up:", kAllocWarmupFrames);
+            ImGui::Text("  sim step:  %llu on %d of %d frames",
+                        static_cast<unsigned long long>(worstSimAllocs), simAllocFrames, measured);
+            ImGui::Text("  draw path: %llu on %d of %d frames",
+                        static_cast<unsigned long long>(worstDrawAllocs), drawAllocFrames,
+                        measured);
+        }
+        ImGui::End();
+
         if (ImGui::Begin("flight tuning")) {
             ImGui::TextDisabled("linear");
             ImGui::SliderFloat("forward thrust", &flight.forwardThrust, 0.0f, 200.0f, "%.1f");
@@ -857,6 +1037,38 @@ int main(int argc, char** argv) {
     if (opts.resizeTest) {
         dvk::log::info("resize-test: {} frames ({:.2f}s) skipped while minimized, excluded above",
                        minimizedFrames, minimizedSeconds);
+    }
+
+    // The last frame's GPU cost, so a headless run reports it the way every
+    // other number in this project is reported rather than only existing behind
+    // a panel nobody can open without a display.
+    {
+        const dvk::gl::GpuTimers& gt = renderer.timers();
+        if (gt.valid()) {
+            const float total = gt.pass(dvk::gl::GpuTimers::Prepass) + gt.stencilTotal() +
+                                gt.lightingTotal() + gt.pass(dvk::gl::GpuTimers::Unlit);
+            dvk::log::info(
+                "gpu (last frame): prepass {:.3f} ms, stencil {:.3f}, lighting {:.3f}, unlit "
+                "{:.3f}, total {:.3f} ms over {} light(s); worst light {} at {:.3f} ms",
+                gt.pass(dvk::gl::GpuTimers::Prepass), gt.stencilTotal(), gt.lightingTotal(),
+                gt.pass(dvk::gl::GpuTimers::Unlit), total, gt.lightCount(), gt.worstLight(),
+                gt.worstLightMs());
+        } else {
+            dvk::log::info("gpu: no timestamp results resolved (too few frames, or unsupported)");
+        }
+    }
+
+    // Measured, not asserted. A non-zero number here is a real finding: it means
+    // something in the sim step or the draw path reached the heap on a frame
+    // after warm-up, which CLAUDE.md says does not happen.
+    const int measured = std::max(0, frame - kAllocWarmupFrames);
+    if (measured > 0) {
+        dvk::log::info(
+            "allocations after a {}-frame warm-up: sim step {} on {} of {} frames (worst {}, "
+            "first at frame {}), draw path {} on {} of {} (worst {}, first at frame {})",
+            kAllocWarmupFrames, simAllocFrames == 0 ? "none" : "SOME", simAllocFrames, measured,
+            worstSimAllocs, firstSimAllocFrame, drawAllocFrames == 0 ? "none" : "SOME",
+            drawAllocFrames, measured, worstDrawAllocs, firstDrawAllocFrame);
     }
     return 0;
 }

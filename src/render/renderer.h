@@ -3,6 +3,7 @@
 #include "render/gl.h"
 #include "render/billboards.h"
 #include "render/debug_lines.h"
+#include "render/gpu_timer.h"
 #include "render/hud.h"
 #include "render/level_mesh.h"
 #include "render/mesh.h"
@@ -13,6 +14,7 @@
 #include "render/texture_array.h"
 
 #include <glm/mat4x4.hpp>
+#include <array>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -70,6 +72,46 @@ struct HudData {
     float elapsed = 0.0f;
     int robotsDestroyed = 0;
     int robotsTotal = 0;
+
+    // 1 the instant the hull is hit, 0 once the flinch has faded. Drawn even
+    // when `show` is false: it is damage feedback rather than a readout, and a
+    // screenshot taken with the HUD hidden should still show the player being
+    // shot at.
+    float damageFlash = 0.0f;
+};
+
+// The automap, gathered by the game layer for the same reason `HudData` is: the
+// renderer draws what it is handed and never reaches into `GameState`.
+//
+// Everything here is by value. The map is drawn from the segment graph the
+// renderer already has, so all the game layer has to supply is which parts of it
+// the player has earned the right to see.
+struct AutomapData {
+    static constexpr int kMaxSegments = 128;
+    static constexpr int kMaxMarkers = 16;
+
+    struct Marker {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        bool hollow = false;   // seen but not yet collected
+    };
+
+    bool open = false;
+    float yaw = 0.6f;
+    float pitch = 0.5f;
+    float zoom = 1.0f;
+
+    int segmentCount = 0;
+    int visitedCount = 0;
+    std::array<bool, kMaxSegments> visited{};
+
+    glm::vec3 shipPosition{0.0f};
+    glm::vec3 shipForward{0.0f, 0.0f, -1.0f};
+    int shipSegment = 0;
+
+    std::array<Marker, kMaxMarkers> markers{};
+    int markerCount = 0;
 };
 
 class Renderer {
@@ -86,6 +128,10 @@ public:
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
                    const std::vector<Light>& dynamicLights, int shadowBudget,
                    const HudData& hud);
+
+    // Draws the automap instead of the mine. The simulation is still running
+    // behind it - this replaces the view, not the frame.
+    void drawAutomap(const AutomapData& map, const Level& level, const HudData& hud);
 
     // Rebuilds the debug line list for this frame. Call before drawScene.
     // Everything here is a toggle because the mine is dark and these lines are
@@ -112,8 +158,18 @@ public:
         int shadowLights = 0;      // how many of it were used
         int budgetDenied = 0;      // lights that lit but did not cast
         int billboards = 0;
+        // The heaviest single light's volume, and which light it was. M8's plan
+        // suggested capping this per light; that is deliberately not done. A
+        // truncated volume is an OPEN volume, and depth-fail counting against an
+        // open volume is exactly the bug the shadow-closure work fixed - the
+        // segment-subset optimization that left holes behind receivers. So the
+        // cap is a number to look at, not a limit to enforce: if extraction ever
+        // shows up in a profile, this says how big the problem is and where.
+        int worstVolumeTriangles = 0;
+        int worstVolumeLight = -1;
     };
     const Stats& stats() const { return stats_; }
+    const GpuTimers& timers() const { return timers_; }
 
     // What each light contributed, for the per-light debug readout.
     struct LightStats {
@@ -176,6 +232,7 @@ private:
     void buildDoors(const RenderState& rs, const Level& level);
     void buildHud(const HudData& hud);
     void hudPass();
+    void buildAutomapLines(const AutomapData& map, const Level& level);
 
     void stencilPass(ShadowVolumes::Range range);
     void visualiseStencil();
@@ -237,6 +294,8 @@ private:
     Billboards billboards_;
     std::unique_ptr<Shader> billboardShader_;
     Hud hud_;
+    GpuTimers timers_;
+    DebugLines mapLines_;   // separate from debugLines_, which the scene owns
     std::unique_ptr<Shader> hudShader_;
 
     // Two sliding halves per door, plus one occluder each so a shut door casts
