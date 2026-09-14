@@ -90,6 +90,7 @@ struct Options {
     int autofire = -1;
     bool noUi = false;
     bool debugUi = false;
+    bool startMenu = false;
     int width = 1600;
     int height = 900;
 

@@ -4,7 +4,7 @@
 
 namespace dvk {
 
-void LevelSession::start(const Level& level, const sim::RobotConfig& robots, int startSegment) {
+void LevelSession::load(const Level& level, const sim::RobotConfig& robots, int startSegment) {
     initial_ = SimState{};
     initial_.ship.body.position = level.start.position;
     initial_.ship.body.segment = level.start.segment;
@@ -16,6 +16,13 @@ void LevelSession::start(const Level& level, const sim::RobotConfig& robots, int
     sim::initObjects(level, robots, initial_.combat.objects);
     sim::spawnRobots(level, robots, initial_.robots);
     sim::initGame(level, initial_.robots, initial_.game);
+    current_ = initial_;
+    previous_ = initial_;
+    active_ = false;
+    mode_ = AppMode::MainMenu;
+}
+
+void LevelSession::start() {
     active_ = true;
     restart();
 }

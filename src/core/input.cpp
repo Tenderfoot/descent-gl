@@ -67,6 +67,7 @@ void Input::onKey(int key, int action) {
 }
 
 void Input::onCursor(double x, double y) {
+    cursorPosition_ = {static_cast<float>(x), static_cast<float>(y)};
     if (!captured_) {
         haveLastCursor_ = false;
         return;

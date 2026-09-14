@@ -1096,6 +1096,27 @@ ImGui is debug-only from this milestone and starts hidden; F3 toggles it,
 `--debug-ui` starts with it open, and `--no-ui` keeps it shut so a screenshot
 shows the game.
 
+### Player-facing menus
+
+`src/game/menu.h` owns menu state, navigation and layout without depending on
+OpenGL. It produces a `MenuView` containing fixed-capacity button data and
+framebuffer-space rectangles. Keyboard and pointer input both resolve to the
+same `MenuAction`, so clicking a button and confirming a focused button cannot
+drift into separate behavior.
+
+The renderer consumes that view through the existing HUD batch. Menus are
+therefore screen-space text and rectangles drawn after the MSAA resolve, with
+no new shader, texture or dependency. The same rectangles drive pointer hit
+testing and rendering. Cursor coordinates are scaled from GLFW window space to
+framebuffer space so high-DPI windows do not move the clickable area away from
+the visible button.
+
+A normal launch prepares the level as a frozen background and opens the main
+menu. Command-line runs still begin in play so screenshots, resize runs and the
+existing harness retain their behavior; `--start-menu` selects the menu for a
+visual check. Pause and run summary use the same menu model, while ImGui remains
+debug-only.
+
 ---
 
 ## The automap (M8)

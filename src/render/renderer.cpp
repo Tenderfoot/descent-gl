@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/menu.h"
 #include "game/state.h"
 #include "game/visibility.h"
 #include "sim/collision.h"
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace dvk::gl {
@@ -398,7 +400,6 @@ void Renderer::buildHud(const HudData& hud) {
     if (!hud.show) {
         hud_.begin(target_.width(), target_.height());
         damageTint();
-        hud_.upload();
         return;
     }
 
@@ -502,7 +503,62 @@ void Renderer::buildHud(const HudData& hud) {
         hud_.text(again, cx - hud_.textWidth(again, s) * 0.5f, cy + big * 4.0f, s, dim);
     }
 
-    hud_.upload();
+}
+
+void Renderer::buildMenu(const MenuView& menu) {
+    if (menu.screen == MenuScreen::Hidden) return;
+
+    const float width = static_cast<float>(target_.width());
+    const float height = static_cast<float>(target_.height());
+    const float scale = std::max(1.5f, height / 260.0f);
+    const glm::vec4 white(0.92f, 0.96f, 1.0f, 1.0f);
+    const glm::vec4 dim(0.58f, 0.66f, 0.75f, 0.95f);
+    const glm::vec4 accent(0.35f, 1.0f, 0.62f, 0.95f);
+
+    hud_.rect(0.0f, 0.0f, width, height, glm::vec4(0.0f, 0.015f, 0.025f, 0.78f));
+
+    const float panelWidth = std::clamp(width * 0.48f, 360.0f, 680.0f);
+    const float panelLeft = (width - panelWidth) * 0.5f;
+    const float panelTop = height * 0.12f;
+    const float panelHeight = height * 0.78f;
+    hud_.rect(panelLeft, panelTop, panelWidth, panelHeight,
+              glm::vec4(0.025f, 0.045f, 0.06f, 0.96f));
+    hud_.rect(panelLeft, panelTop, panelWidth, std::max(2.0f, scale * 0.8f), accent);
+
+    const float titleScale = scale * 2.4f;
+    const float titleWidth = hud_.textWidth(menu.title, titleScale);
+    hud_.text(menu.title, (width - titleWidth) * 0.5f, height * 0.20f, titleScale, white);
+    const float subtitleScale = scale * 0.75f;
+    const float subtitleWidth = hud_.textWidth(menu.subtitle, subtitleScale);
+    hud_.text(menu.subtitle, (width - subtitleWidth) * 0.5f, height * 0.30f, subtitleScale, dim);
+
+    if (menu.screen == MenuScreen::Summary) {
+        const float reasonWidth = hud_.textWidth(menu.reason, scale);
+        hud_.text(menu.reason, (width - reasonWidth) * 0.5f, height * 0.39f, scale, dim);
+        char stats[96];
+        std::snprintf(stats, sizeof(stats), "time %ds   robots %d/%d", menu.elapsedSeconds,
+                      menu.robotsDestroyed, menu.robotsTotal);
+        const float statsWidth = hud_.textWidth(stats, scale);
+        hud_.text(stats, (width - statsWidth) * 0.5f, height * 0.45f, scale, white);
+    }
+
+    for (int i = 0; i < menu.buttonCount; ++i) {
+        const MenuButtonView& button = menu.buttons[static_cast<size_t>(i)];
+        const glm::vec4 fill = button.selected ? glm::vec4(0.08f, 0.28f, 0.20f, 0.98f)
+                                               : glm::vec4(0.04f, 0.08f, 0.11f, 0.96f);
+        const glm::vec4 text = button.selected ? accent : white;
+        hud_.rect(button.bounds.x, button.bounds.y, button.bounds.width, button.bounds.height,
+                  fill);
+        if (button.selected) {
+            hud_.rect(button.bounds.x, button.bounds.y, std::max(3.0f, scale),
+                      button.bounds.height, accent);
+        }
+        const float labelScale = scale * 0.9f;
+        const float labelWidth = hud_.textWidth(button.label, labelScale);
+        const float labelX = button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
+        const float labelY = button.bounds.y + (button.bounds.height - 7.0f * labelScale) * 0.5f;
+        hud_.text(button.label, labelX, labelY, labelScale, text);
+    }
 }
 
 void Renderer::hudPass() {
@@ -1086,7 +1142,7 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
 
 void Renderer::drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
                          const std::vector<Light>& dynamicLights, int shadowBudget,
-                         const HudData& hud) {
+                         const HudData& hud, const MenuView& menu) {
     const float aspect = target_.height() > 0
                              ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
                              : 1.0f;
@@ -1101,6 +1157,8 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     buildDoors(rs, level);
     buildBillboards(rs);
     buildHud(hud);
+    buildMenu(menu);
+    hud_.upload();
     buildShadowVolumes(rs, walk);
     timers_.passBegin(GpuTimers::Prepass);
     depthPrepass(rs, walk);
@@ -1183,9 +1241,12 @@ void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
     mapLines_.upload();
 }
 
-void Renderer::drawAutomap(const AutomapData& map, const Level& level, const HudData& hud) {
+void Renderer::drawAutomap(const AutomapData& map, const Level& level, const HudData& hud,
+                           const MenuView& menu) {
     buildAutomapLines(map, level);
     buildHud(hud);
+    buildMenu(menu);
+    hud_.upload();
 
     // Frame the visited part of the mine rather than the whole level, so the
     // map stays legible early on instead of showing one lit room in the corner

@@ -4,7 +4,7 @@
 
 #include <glm/vec2.hpp>
 #include <glm/vec4.hpp>
-#include <string>
+#include <string_view>
 #include <vector>
 
 namespace dvk::gl {
@@ -31,8 +31,8 @@ public:
     void rect(float x, float y, float w, float h, const glm::vec4& color);
     // A bar with its own frame, `fill` in 0..1.
     void bar(float x, float y, float w, float h, float fill, const glm::vec4& color);
-    void text(const std::string& s, float x, float y, float scale, const glm::vec4& color);
-    float textWidth(const std::string& s, float scale) const;
+    void text(std::string_view text, float x, float y, float scale, const glm::vec4& color);
+    float textWidth(std::string_view text, float scale) const;
 
     void upload();
     void draw() const;

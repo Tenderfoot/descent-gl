@@ -194,9 +194,18 @@ int main(int argc, char** argv) {
     const dvk::sim::FlightConfig flightDefaults;
 
     dvk::LevelSession session;
-    session.start(level, robotConfig, opts.startSegment);
+    session.load(level, robotConfig, opts.startSegment);
     dvk::SimState& prev = session.previous();
     dvk::SimState& cur = session.current();
+    dvk::PlayerMenu menu;
+
+    const bool commandLineRun = argc > 1 && !opts.startMenu;
+    if (commandLineRun) {
+        session.start();
+        menu.hide();
+    } else {
+        menu.showMain();
+    }
 
     dvk::sim::ContactLog contacts;
 
@@ -279,7 +288,9 @@ int main(int argc, char** argv) {
     double minimizedSeconds = 0.0;
     double suspendedSeconds = 0.0;
 
-    if (opts.frames < 0 && !opts.resizeTest) input.setMouseCaptured(window.handle(), true);
+    if (session.advancesSimulation() && opts.frames < 0 && !opts.resizeTest) {
+        input.setMouseCaptured(window.handle(), true);
+    }
 
     while (!window.shouldClose()) {
         const bool simulationWasAdvancing = session.advancesSimulation();
@@ -337,25 +348,64 @@ int main(int argc, char** argv) {
         if (input.pressed(dvk::keyFor(dvk::Toggle::Pause))) {
             if (session.mode() == dvk::AppMode::Playing) {
                 session.pause();
+                menu.showPause();
                 automap.open = false;
                 input.setMouseCaptured(window.handle(), false);
             } else if (session.mode() == dvk::AppMode::Paused) {
                 session.resume();
+                menu.hide();
                 input.setMouseCaptured(window.handle(), true);
             }
             accumulator = 0.0;
             prev = cur;
         }
-        if (session.mode() == dvk::AppMode::RunSummary) {
-            if (input.anyKeyPressed() || input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+
+        const glm::ivec2 menuFramebuffer = window.framebufferSize();
+        const glm::ivec2 menuWindow = window.windowSize();
+        const glm::vec2 pointerScale(
+            static_cast<float>(menuFramebuffer.x) / static_cast<float>(std::max(menuWindow.x, 1)),
+            static_cast<float>(menuFramebuffer.y) / static_cast<float>(std::max(menuWindow.y, 1)));
+        const dvk::MenuAction menuAction = menu.update(
+            dvk::readMenuInput(input, input.cursorPosition() * pointerScale), menuFramebuffer.x,
+            menuFramebuffer.y);
+        switch (menuAction) {
+            case dvk::MenuAction::Start:
+                session.start();
+                menu.hide();
+                lightDoorSignature = -1;
+                input.setMouseCaptured(window.handle(), true);
+                accumulator = 0.0;
+                break;
+            case dvk::MenuAction::Resume:
+                session.resume();
+                menu.hide();
+                input.setMouseCaptured(window.handle(), true);
+                accumulator = 0.0;
+                prev = cur;
+                break;
+            case dvk::MenuAction::Restart:
                 session.restart();
+                menu.hide();
                 contacts.clear();
                 automap.open = false;
                 lightDoorSignature = -1;
                 input.setMouseCaptured(window.handle(), true);
                 accumulator = 0.0;
-            }
-        } else if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
+                break;
+            case dvk::MenuAction::MainMenu:
+                session.leave();
+                menu.showMain();
+                contacts.clear();
+                automap.open = false;
+                input.setMouseCaptured(window.handle(), false);
+                accumulator = 0.0;
+                prev = cur;
+                break;
+            case dvk::MenuAction::Quit: window.requestClose(); break;
+            case dvk::MenuAction::None: break;
+        }
+
+        if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
             showDebugUi = !showDebugUi;
         } else if (session.mode() == dvk::AppMode::Playing &&
                    input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
@@ -452,6 +502,9 @@ int main(int argc, char** argv) {
             if (cur.game.phase == dvk::sim::GamePhase::Won ||
                 cur.game.phase == dvk::sim::GamePhase::Lost) {
                 session.finish();
+                menu.showSummary(cur.game.phase == dvk::sim::GamePhase::Won, cur.game.endReason,
+                                 cur.game.elapsed, cur.game.robotsDestroyed,
+                                 cur.game.robotsAtStart);
                 input.setMouseCaptured(window.handle(), false);
                 accumulator = 0.0;
             }
@@ -654,7 +707,8 @@ int main(int argc, char** argv) {
         }
 
         dvk::gl::HudData hud;
-        hud.show = !opts.noUi;
+        hud.show = !opts.noUi && session.active() &&
+                   session.mode() != dvk::AppMode::RunSummary;
         hud.shields = cur.combat.player.shields;
         hud.energy = cur.combat.player.energy;
         hud.weaponName = dvk::sim::kWeaponNames[static_cast<size_t>(cur.combat.player.weapon)];
@@ -677,6 +731,9 @@ int main(int argc, char** argv) {
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         hud.robotsTotal = cur.game.robotsAtStart;
+
+        dvk::MenuView menuView = menu.view(fb.x, fb.y);
+        if (opts.noUi) menuView.screen = dvk::MenuScreen::Hidden;
 
         if (automap.open) {
             automap.segmentCount = level.segmentCount();
@@ -740,9 +797,10 @@ int main(int argc, char** argv) {
                 addMarker(level.exitTrigger.position, glm::vec3(0.5f, 1.0f, 0.7f), 3.0f, false);
             }
 
-            renderer.drawAutomap(automap, level, hud);
+            renderer.drawAutomap(automap, level, hud, menuView);
         } else {
-            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud,
+                               menuView);
         }
         renderer.resolve();
         // The same question for the draw path: everything from beginFrame to

@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/menu.h"
 #include "game/session.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
@@ -115,7 +116,9 @@ bool verifyLevelSession(const Level& level, const sim::RobotConfig& robots) {
     ok &= expect(session.mode() == AppMode::MainMenu, "a session starts at the main menu");
     ok &= expect(!session.active(), "a session starts without an active level");
 
-    session.start(level, robots);
+    session.load(level, robots);
+    ok &= expect(session.mode() == AppMode::MainMenu, "loading keeps the session at the menu");
+    session.start();
     const glm::vec3 initialPosition = session.current().ship.body.position;
     const int initialRobots = session.current().robots.count;
     const int initialObjects = session.current().combat.objects.count;
@@ -149,6 +152,40 @@ bool verifyLevelSession(const Level& level, const sim::RobotConfig& robots) {
     return ok;
 }
 
+bool verifyPlayerMenu() {
+    bool ok = true;
+    PlayerMenu menu;
+    menu.showMain();
+    MenuView view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::Main, "the main menu is visible");
+    ok &= expect(view.buttonCount == 2, "the main menu has play and quit");
+
+    MenuInput keyboard;
+    keyboard.next = true;
+    keyboard.confirm = true;
+    ok &= expect(menu.update(keyboard, 1600, 900) == MenuAction::Quit,
+                 "keyboard navigation selects a menu action");
+
+    menu.showPause();
+    view = menu.view(1600, 900);
+    const MenuRect resume = view.buttons[0].bounds;
+    MenuInput pointer;
+    pointer.pointer = {resume.x + resume.width * 0.5f, resume.y + resume.height * 0.5f};
+    pointer.pointerPressed = true;
+    ok &= expect(menu.update(pointer, 1600, 900) == MenuAction::Resume,
+                 "pointer input activates a menu action");
+
+    menu.showSummary(true, "escaped", 42.9f, 12, 16);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::Summary && view.won,
+                 "a completed run opens the victory summary");
+    ok &= expect(view.elapsedSeconds == 42 && view.robotsDestroyed == 12 &&
+                     view.robotsTotal == 16,
+                 "the run summary carries the result statistics");
+    log::info("player menu: {}", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 } // namespace
 
 int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char* robotConfigPath) {
@@ -158,6 +195,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
     bool ok = true;
     ok &= verifyLevelSession(rig.level, rig.robotCfg);
+    ok &= verifyPlayerMenu();
 
     // Only a campaign level has a loop to test. test01 is a renderer and
     // physics fixture with no doors, no exit and no reactor, and running the

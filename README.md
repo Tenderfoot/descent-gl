@@ -79,6 +79,9 @@ performance measurement.**
 
 ## Controls
 
+A normal launch opens the main menu. Command-line verification runs continue
+to enter the selected level directly.
+
 | Input | Action |
 | --- | --- |
 | Mouse | Pitch and yaw (only while captured) |

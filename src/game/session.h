@@ -19,7 +19,8 @@ enum class AppMode {
 
 class LevelSession {
 public:
-    void start(const Level& level, const sim::RobotConfig& robots, int startSegment = -1);
+    void load(const Level& level, const sim::RobotConfig& robots, int startSegment = -1);
+    void start();
     void restart();
     void pause();
     void resume();

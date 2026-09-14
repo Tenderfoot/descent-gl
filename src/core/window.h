@@ -32,6 +32,7 @@ public:
     void swap();
 
     glm::ivec2 framebufferSize() const { return fbSize_; }
+    glm::ivec2 windowSize() const;
     bool minimized() const { return fbSize_.x == 0 || fbSize_.y == 0; }
     bool consumeResized();   // true once after any size change
 

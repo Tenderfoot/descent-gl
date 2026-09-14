@@ -55,6 +55,12 @@ void Window::requestClose() { glfwSetWindowShouldClose(win_, GLFW_TRUE); }
 void Window::poll() { glfwPollEvents(); }
 void Window::swap() { glfwSwapBuffers(win_); }
 
+glm::ivec2 Window::windowSize() const {
+    glm::ivec2 size;
+    glfwGetWindowSize(win_, &size.x, &size.y);
+    return size;
+}
+
 bool Window::consumeResized() {
     const bool r = resized_;
     resized_ = false;

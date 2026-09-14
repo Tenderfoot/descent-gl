@@ -157,7 +157,12 @@ void Hud::rect(float x, float y, float w, float h, const glm::vec4& color) {
     const Vertex b{{x + w, y}, none, color};
     const Vertex c{{x + w, y + h}, none, color};
     const Vertex d{{x, y + h}, none, color};
-    vertices_.insert(vertices_.end(), {a, b, c, a, c, d});
+    vertices_.push_back(a);
+    vertices_.push_back(b);
+    vertices_.push_back(c);
+    vertices_.push_back(a);
+    vertices_.push_back(c);
+    vertices_.push_back(d);
 }
 
 void Hud::bar(float x, float y, float w, float h, float fill, const glm::vec4& color) {
@@ -189,20 +194,25 @@ void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color) {
     const Vertex v1v{{x + w, y}, {u1, v0}, color};
     const Vertex v2v{{x + w, y + h}, {u1, v1}, color};
     const Vertex v3v{{x, y + h}, {u0, v1}, color};
-    vertices_.insert(vertices_.end(), {v0v, v1v, v2v, v0v, v2v, v3v});
+    vertices_.push_back(v0v);
+    vertices_.push_back(v1v);
+    vertices_.push_back(v2v);
+    vertices_.push_back(v0v);
+    vertices_.push_back(v2v);
+    vertices_.push_back(v3v);
 }
 
-void Hud::text(const std::string& s, float x, float y, float scale, const glm::vec4& color) {
+void Hud::text(std::string_view text, float x, float y, float scale, const glm::vec4& color) {
     float cursor = x;
-    for (char c : s) {
+    for (char c : text) {
         const char upper = c >= 'a' && c <= 'z' ? static_cast<char>(c - 32) : c;
         glyph(upper, cursor, y, scale, color);
         cursor += static_cast<float>(kGlyphW + 1) * scale;
     }
 }
 
-float Hud::textWidth(const std::string& s, float scale) const {
-    return static_cast<float>(s.size() * (kGlyphW + 1)) * scale;
+float Hud::textWidth(std::string_view text, float scale) const {
+    return static_cast<float>(text.size() * (kGlyphW + 1)) * scale;
 }
 
 void Hud::upload() {
