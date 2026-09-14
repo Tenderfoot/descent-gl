@@ -183,6 +183,56 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
         ok &= expect(reaches, "the same light reached through once the door opened");
         log::info("light through a door: {} segments shut, {} open", shutCount,
                   probe.segments.size());
+
+        // A door that has only just cracked open is already see-through -
+        // sight and light go through the gap - while it still stops a body.
+        // The portal walk and the flood consult the same `opaque` flag, so the
+        // flood stands in for both here.
+        rig.reset();
+        rig.game.doors[0].openness = 0.05f;
+        rig.run(1);
+        const bool seeThrough = !rig.game.doorField.isOpaque(door.segment, door.side);
+        const bool stillBlocks = rig.game.doorField.isBlocked(door.segment, door.side);
+        rebuildLightSegments(rig.level, probe, flood, &rig.game.doorField);
+        const bool litThroughGap = std::find(probe.segments.begin(), probe.segments.end(),
+                                             door.neighbour) != probe.segments.end();
+        ok &= expect(seeThrough, "a door that has started opening is see-through");
+        ok &= expect(stillBlocks, "a door that has started opening still blocks a body");
+        ok &= expect(litThroughGap, "light reaches through a door that has started opening");
+        log::info("cracked door at {:.2f}: see-through {}, passable {}, lit through {}",
+                  rig.game.doors[0].openness, seeThrough ? "yes" : "NO",
+                  stillBlocks ? "no" : "YES", litThroughGap ? "yes" : "NO");
+
+        // And once the level's own lights are rebuilt against the field, a
+        // level light behind a shut door stays out of the room in front.
+        rig.reset();
+        LightFlood levelFlood;
+        rebuildAllLightSegments(rig.level, levelFlood, &rig.game.doorField);
+        int crossings = 0;
+        for (const Light& l : rig.level.lights) {
+            const bool inFront = std::find(l.segments.begin(), l.segments.end(),
+                                           door.segment) != l.segments.end();
+            const bool inBack = std::find(l.segments.begin(), l.segments.end(),
+                                          door.neighbour) != l.segments.end();
+            // Both sides at once is only possible through the shut door or
+            // around a loop; mine01's doors have no loop around them.
+            if (inFront && inBack) ++crossings;
+        }
+        ok &= expect(crossings == 0, "no level light reaches both sides of a shut door");
+        // For scale: the same count with no door state at all, which is what
+        // the level lights carried from load until now.
+        int blindCrossings = 0;
+        rebuildAllLightSegments(rig.level, levelFlood, nullptr);
+        for (const Light& l : rig.level.lights) {
+            const bool inFront = std::find(l.segments.begin(), l.segments.end(),
+                                           door.segment) != l.segments.end();
+            const bool inBack = std::find(l.segments.begin(), l.segments.end(),
+                                          door.neighbour) != l.segments.end();
+            if (inFront && inBack) ++blindCrossings;
+        }
+        log::info("level lights vs shut door 0: {} of {} reach both sides with doors, {} "
+                  "without",
+                  crossings, rig.level.lights.size(), blindCrossings);
     }
 
     // --- a shut door stops bolts, sight lines and robots ----------------------

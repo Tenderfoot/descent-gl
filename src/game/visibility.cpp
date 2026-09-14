@@ -71,7 +71,7 @@ void PortalWalk::visit(const Level& level, int segment, const Rect& window, int 
     for (int side = 0; side < SideCount; ++side) {
         const SideData& sd = seg.sides[static_cast<size_t>(side)];
         if (!sd.isPortal()) continue;
-        if (doors_ && doors_->isBlocked(segment, side)) continue;
+        if (doors_ && doors_->isOpaque(segment, side)) continue;
 
         const std::array<glm::vec3, 4> corners = level.sideCorners(segment, side);
 

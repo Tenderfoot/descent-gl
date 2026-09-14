@@ -596,19 +596,30 @@ afterwards. `--weapons-test` fires a bolt at 2000 units/s — 16.7 units per
 
 ### The shadow budget
 
-At most `shadowBudget` lights (default 8) **cast** per frame. Every light still
-*lights*; the budget only decides which also cast, because casting is what
-costs: a silhouette extraction and a stencil pass per light per frame. Under
-sustained vulcan fire there can be thirty bolts in the air, and thirty stencil
-passes is not a frame.
+At most `shadowBudget` lights (default 16) **cast** per frame. Every light
+still *lights*; the budget only decides which also cast, because casting is
+what costs: a silhouette extraction and a stencil pass per light per frame.
+Under sustained vulcan fire there can be thirty bolts in the air, and thirty
+stencil passes is not a frame.
 
-Priority is deliberate:
+A light that lights without casting shines straight through every robot,
+pillar and wall inside its segment set, so **whichever lights lose the budget
+leak**. The order decides who leaks:
 
-1. The level's own lights, but only those the portal walk says are visible — an
-   off-screen light casting into nothing is the cheapest thing to give up.
-2. The headlight.
-3. Everything dynamic, **nearest to the camera first**. A bolt across the room
-   contributes a shadow nobody can resolve.
+1. The headlight. It is the light the player looks along, and the one whose
+   shadows move with every turn. It used to be claimed after the level lights,
+   so in any room with eight visible level lights it got no slot and lit
+   through everything — which read as light leaks, and was why a budget of 32
+   always looked better than 8.
+2. The level's own lights the portal walk can see, **nearest to the camera
+   first**. An off-screen light casting into nothing is the cheapest thing to
+   give up, and a distant one is the next cheapest.
+3. Everything dynamic, nearest first. A bolt across the room contributes a
+   shadow nobody can resolve.
+
+The default moved from 8 to 16 with the reorder. Since the whole closed mine is
+extruded for every casting light, the right number is a measurement for M8 on
+the real GPU; the slider goes to 32.
 
 The overlay reports slots used and how many lights lit without casting, so the
 cap can be watched rather than assumed.
@@ -659,13 +670,33 @@ their four vertices, so the mine's wall surface stays closed and the shadow
 occluder still validates.
 
 Two views of the same state exist, both derived from `GameState::doors` every
-step, and both using the same `kPassableAt` threshold:
+step:
 
-- **`DoorField`** — a byte per segment side, consulted by the portal walk and
-  the light flood fill. Answers "can anything get through this side".
+- **`DoorField`** — two bytes per segment side. `blocked` is what a body
+  cannot get through, set while openness is below `kPassableAt` (0.75).
+  `opaque` is what nothing can be seen or lit through, set only while the
+  door is **fully shut**. The portal walk and the light flood consult
+  `opaque`, so the room behind a door comes into view the moment it cracks
+  open; until then the walk stops and the room is not drawn at all.
 - **`SolidDoors`** — the world-space triangles of every shut door, built by
-  `buildSolidDoors` and handed to `resolveCollision`, `raycast` and
-  `sweepSphere`. Answers "where is the surface a body or bolt stops at".
+  `buildSolidDoors` with the `blocked` threshold and handed to
+  `resolveCollision`, `raycast` and `sweepSphere`. Answers "where is the
+  surface a body or bolt stops at".
+
+The level's own lights get their segment sets at load with no door state.
+`main.cpp` rebuilds them all against the `DoorField` at start and again
+whenever the number of opaque sides changes, and the headlight's per-frame
+rebuild takes the field too. Before that, three of `mine01`'s fourteen lights
+reached both sides of door 0 and lit the far room through the doorway, held
+back only by the slab's shadow volume — which is where the fizzing artifacts
+on one side of a doorway came from.
+
+The door slab halves are oversized by a quarter unit at the frame and at the
+top and bottom, so their outer faces sit inside the rock rather than exactly
+in the plane of the adjacent wall; coplanar faces from two meshes z-fight in
+the prepass and then disagree in every light pass. The halves are always drawn
+and always cast: fully open they are buried in the wall, and while opening
+they are the only thing occluding the doorway.
 
 `main.cpp` builds `SolidDoors` once per step and passes the same pointer to the
 ship's collision, `stepCombat` and `stepRobots`. **Nothing geometric runs

@@ -190,6 +190,12 @@ int main(int argc, char** argv) {
     // alike, so none of them can disagree about whether a door is shut.
     dvk::sim::SolidDoors solidDoors;
 
+    // The level's own lights had their segment sets computed at load with no
+    // doors. They are recomputed against the door state now, and again every
+    // time a door changes between see-through and shut, so a light beside a
+    // shut door stops at it the way a bolt light does.
+    int lightDoorSignature = -1;
+
     // A fresh start, kept so any key can restart from an end screen without
     // reloading the level.
     const dvk::SimState initialState = cur;
@@ -426,7 +432,14 @@ int main(int argc, char** argv) {
             hl.direction = shipForward;
             hl.segment = rs.shipSegment;
             hl.segments.clear();
-            if (cur.combat.player.headlightOn) dvk::rebuildLightSegments(level, hl, flood);
+            if (cur.combat.player.headlightOn) {
+                dvk::rebuildLightSegments(level, hl, flood, &cur.game.doorField);
+            }
+        }
+
+        if (cur.game.doorField.opaqueCount() != lightDoorSignature) {
+            lightDoorSignature = cur.game.doorField.opaqueCount();
+            dvk::rebuildAllLightSegments(level, flood, &cur.game.doorField);
         }
 
         // Every bolt in flight is a moving light. A laser going down a corridor
@@ -755,7 +768,7 @@ int main(int argc, char** argv) {
                 added.position = rs.shipPos;
                 added.segment = rs.shipSegment;
                 added.radius = 30.0f;
-                dvk::rebuildLightSegments(level, added);
+                dvk::rebuildLightSegments(level, added, flood, &cur.game.doorField);
                 level.lights.push_back(added);
                 lightEditorSelection = static_cast<int>(level.lights.size()) - 1;
             }
@@ -799,7 +812,7 @@ int main(int argc, char** argv) {
 
                 if (reach) {
                     l.segment = dvk::findSegment(level, l.position, l.segment);
-                    dvk::rebuildLightSegments(level, l);
+                    dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
                 }
                 if (ImGui::Button("Remove")) {
                     level.lights.erase(level.lights.begin() + lightEditorSelection);

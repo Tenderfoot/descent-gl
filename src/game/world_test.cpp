@@ -95,15 +95,15 @@ bool testPortalRevisit() {
     portal(2, SideFront, 3, -0.9f, 0.9f);
     portal(3, SideFront, 4, 0.2f, 0.9f);
     sim::DoorField doors;
-    doors.blocked[2 * SideCount + SideFront] = 1;
+    doors.opaque[2 * SideCount + SideFront] = 1;
     PortalWalk walk;
     const glm::mat4 projection(1.0f);
     walk.build(fixture, 0, projection, glm::vec3(0), &doors);
     const bool shut = !walk.isVisible(4);
-    doors.blocked[2 * SideCount + SideFront] = 0;
+    doors.opaque[2 * SideCount + SideFront] = 0;
     walk.build(fixture, 0, projection, glm::vec3(0), &doors);
     const bool opened = walk.isVisible(4);
-    doors.blocked[2 * SideCount + SideFront] = 1;
+    doors.opaque[2 * SideCount + SideFront] = 1;
     walk.build(fixture, 0, projection, glm::vec3(0), &doors);
     const bool closedAgain = !walk.isVisible(4);
     log::info("portal revisit: shut {}, opened {}, closed again {}", shut, opened, closedAgain);

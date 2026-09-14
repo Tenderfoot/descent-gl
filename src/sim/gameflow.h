@@ -13,18 +13,33 @@ struct RobotState;
 struct RobotConfig;
 struct SolidDoors;
 
-// Which side of a segment is currently shut. One array, consulted by the portal
-// walk, the light flood fill and collision alike, so those three can never
-// disagree about whether a door is in the way - which is exactly the
-// disagreement that produces light shining through a closed door.
+// Which side of a segment is currently shut, in the two senses a door has.
+//
+// `blocked` is what a body cannot get through: a door counts as passable a
+// little before it is fully open. `opaque` is what nothing can be seen or lit
+// through: only a door that is FULLY shut. The moment a door starts to open
+// the room behind it comes into view through the gap, while the slab still
+// stops the ship for most of its travel. Both arrays are written together
+// from the same door state, so the portal walk, the light flood and collision
+// can never disagree about the same door.
 inline constexpr int kMaxFlowSegments = 128;
 
 struct DoorField {
     std::array<uint8_t, kMaxFlowSegments * SideCount> blocked{};
+    std::array<uint8_t, kMaxFlowSegments * SideCount> opaque{};
 
     bool isBlocked(int segment, int side) const {
         const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
         return i < blocked.size() && blocked[i] != 0;
+    }
+    bool isOpaque(int segment, int side) const {
+        const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
+        return i < opaque.size() && opaque[i] != 0;
+    }
+    int opaqueCount() const {
+        int n = 0;
+        for (uint8_t v : opaque) n += v;
+        return n;
     }
 };
 

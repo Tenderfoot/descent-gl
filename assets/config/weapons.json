@@ -45,7 +45,7 @@
       "damage": 23.0
     }
   ],
-  "shadowBudget": 8,
+  "shadowBudget": 16,
   "weapons": {
     "concussion": {
       "ammoCost": 1,

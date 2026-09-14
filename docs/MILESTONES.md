@@ -692,6 +692,43 @@ Three gameplay bugs reported from play on the dev machine, all in `src/sim`:
 
 ---
 
+## Fixes after M7 — lights and doors
+
+Reported from play: the room behind a door only appeared once the door was
+fully open; one side of a doorway fizzed with shadow artifacts while the other
+was clean; and a shadow budget of 32 always looked better than the default 8.
+
+- **Doors are see-through as soon as they crack open.** `DoorField` now
+  carries `blocked` (a body, below 0.75 open) and `opaque` (sight and light,
+  fully shut only), and the portal walk and light flood consult `opaque`.
+- **Level lights and the headlight respect doors.** Level light sets were
+  computed once at load with no door state and never rebuilt; the headlight's
+  per-frame rebuild also omitted the field. Only bolt lights used it. They are
+  now rebuilt against the field at start and whenever a door's opaque state
+  changes. On `mine01`, **3 of 14** level lights reached both sides of door 0
+  door-blind; **0** do now.
+- **The headlight claims a shadow slot first.** It was claimed after every
+  visible level light, so with eight of those on screen it cast nothing and
+  lit through walls and robots. Level lights are now taken nearest first, and
+  the default budget is 16.
+- **Door slabs are oversized by 0.25 units into the frame** so no face is
+  exactly coplanar with the adjacent wall, and they are drawn and cast at
+  every openness rather than vanishing at 0.75.
+
+### Verified (Linux container, software GL)
+
+| Check | Result |
+| --- | --- |
+| A door at 0.04 open | ✅ see-through, still blocks a body, light reaches through |
+| Level lights vs shut door 0 | ✅ **0 of 14** reach both sides (3 door-blind) |
+| Portal walk fixture (world test) | ✅ opens and closes on the `opaque` flag |
+| World, loop, weapons, robots tests on `mine01` | ✅ PASS |
+| World test on `test01` | ✅ PASS |
+| Headless render from both sides of door 0 | ✅ no GL error or fatal lines, 111 steps/s at 640×360 |
+| Shadow budget order and the 16 default | ⚠️ not measurable here; needs the dev machine's overlay and frame rate |
+
+---
+
 ## M8 — Polish and performance ⬜
 
 Not started.

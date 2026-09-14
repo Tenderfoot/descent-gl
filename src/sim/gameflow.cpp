@@ -18,12 +18,14 @@ namespace {
 // through one does not feel like squeezing past it.
 constexpr float kPassableAt = 0.75f;
 
-void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked) {
+void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked,
+                bool opaque) {
     const Door& door = level.doors[doorIndex];
     const auto mark = [&](int segment, int side) {
         const size_t i = static_cast<size_t>(segment) * SideCount + static_cast<size_t>(side);
         if (i < state.doorField.blocked.size()) {
             state.doorField.blocked[i] = blocked ? 1u : 0u;
+            state.doorField.opaque[i] = opaque ? 1u : 0u;
         }
     };
     mark(door.segment, door.side);
@@ -73,7 +75,7 @@ void initGame(const Level& level, const RobotState& robots, GameState& out) {
     out.robotsAtStart = robots.aliveCount();
     out.reactorAlive = false;
     for (size_t i = 0; i < level.doors.size() && i < kMaxDoors; ++i) {
-        setBlocked(out, level, i, true);
+        setBlocked(out, level, i, true, true);
     }
 }
 
@@ -117,7 +119,9 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         ds.openness = std::clamp(ds.openness + (ds.wantOpen ? rate : -rate), 0.0f, 1.0f);
         if (ds.openness > 0.0f) ds.everOpened = true;
 
-        setBlocked(state, level, di, ds.openness < kPassableAt);
+        // Passable a little before fully open; see-through as soon as it has
+        // cracked open at all.
+        setBlocked(state, level, di, ds.openness < kPassableAt, ds.openness <= 0.0f);
     }
 
     // --- pickups ---------------------------------------------------------
