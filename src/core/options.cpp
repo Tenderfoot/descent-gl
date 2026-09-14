@@ -40,6 +40,10 @@ Options Options::parse(int argc, char** argv) {
             o.robotsTest = true;
         } else if (a == "--loop-test") {
             o.loopTest = true;
+        } else if (a == "--light-test") {
+            o.lightTest = true;
+        } else if (a == "--headlight") {
+            o.headlight = true;
         } else if (a == "--sound-test") {
             o.soundTest = true;
         } else if (a == "--no-sound") {

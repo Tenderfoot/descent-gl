@@ -440,6 +440,66 @@ unreadable. Radius-relative falloff gives one knob that means what it looks
 like it means: radius sets both reach and shape, intensity stays a small
 readable number (2–4 in `test01`).
 
+### Asking how much light is on a point
+
+The falloff above is the GPU's answer, and it only ever exists as pixels. The
+same question about a **point in the air** — "is the player standing somewhere
+lit?" — is answered on the CPU by `src/sim/lighting.h`, with no GL, no window
+and no allocation, so the simulation and the headless tests can both ask it.
+
+`lightFalloff` is the falloff above transcribed into C++, and it is now the
+only CPU copy: `--world-test`'s brightness report calls it rather than carrying
+its own. `--light-test` checks it against a third transcription taken straight
+from the text of `wall.frag`, because two copies of a formula in two languages
+is exactly the pair that drifts.
+
+A query is a point, a segment, and optionally a body radius:
+
+```cpp
+sim::IlluminationQuery q;
+q.point = shipPosition;
+q.segment = shipSegment;
+q.bodyRadius = body.radius;      // 0 asks about the point alone
+
+sim::Illumination lit;
+sim::addIllumination(lit, q, level, level.lights, &doors);
+sim::addIllumination(lit, q, level, dynamicLights, &doors);
+if (lit.dark()) { /* nobody can see you */ }
+```
+
+Per light it is a segment-set test, then the falloff and the spot cone, then
+one `sim::raycast` from the point to the light. The segment set does the real
+culling and it is exact, not conservative: the falloff reaches zero at the
+radius and the set is flood-filled to that same radius through open portals, so
+a light whose set excludes the segment contributes exactly nothing.
+
+Lights are added one list at a time because the level's lights and the frame's
+dynamic ones — the headlight, every bolt in flight, every burning flare — live
+in different places and neither is a copy of the other.
+
+With a body radius the query samples seven points, the centre and one radius
+out along each axis, and reports `litFraction()` alongside the value. A single
+point flips the instant a shadow edge crosses it; a body straddling that edge
+is the case the fraction exists to describe.
+
+**Two deliberate disagreements with the screen**, both of which make this the
+stricter answer:
+
+1. **Only the mine occludes.** The renderer also casts shadows from robots,
+   props, door slabs and the ship. This traces wall triangles and door faces
+   and nothing else, so a robot standing in a beam darkens the picture but not
+   this number. Closing that gap would mean reaching into the occluder meshes,
+   which live behind `render/gl.h` and are therefore off-limits to `sim`.
+2. **The shadow budget does not apply.** A light past the renderer's cap still
+   lights but stops casting, so on screen it shines through walls; here it
+   never does. That is the point: a mechanic built on this does not change
+   with frame rate.
+
+`--light-test` cross-checks the segment-walk ray against brute-force
+ray/triangle over every wall triangle in the level — a genuinely different
+method, no portals and no graph — and requires the two verdicts to agree on
+every point-light pair.
+
 ---
 
 ## Reversed-Z with an infinite far plane
@@ -727,6 +787,24 @@ is supposed to be free of.
 A shadow-casting spotlight on the ship, toggled with **H**. Its segment set is
 rebuilt every frame through `LightFlood`, whose scratch buffers are reused so
 the draw path does not allocate.
+
+**It starts off.** The mine opening in darkness, with H the first thing the
+player reaches for, is the introduction a game with no ambient term deserves;
+starting lit gives that away before the level has said anything. Because a
+frame-limited run therefore has no way to show the headlight without a
+keypress, `--headlight` turns it on for a screenshot — the same gap `--chase`
+and `--automap` fill. The flag sets it on the session's **initial** state, not
+the live one: `start()` and every restart copy that over the current state, so
+anything set only on `current()` lasts until the run begins and no longer.
+
+**Wide and soft rather than narrow and hot**: a 60° cone at intensity 2.0,
+over a radius of 62. The earlier 34° at 3.2 put a hot spot on one wall with
+nothing either side of it, which read as a torch rather than as a ship's lamp
+and left the player sweeping the beam to find a corridor. Trading on-axis
+intensity for solid angle — ×0.625 and ×3.07 respectively — lights the shape
+of the corridor instead of a circle on its wall, and leaves the level's own
+lamps as the brightest things in the mine, which is what makes flying towards
+one feel like progress.
 
 **The ship is never an occluder for its own headlight.** A lamp bolted to the
 hull would spend every frame shadowing the hull it is bolted to, and the view

@@ -4,6 +4,7 @@
 #include "game/level.h"
 #include "game/visibility.h"
 #include "sim/gameflow.h"
+#include "sim/lighting.h"
 #include "render/camera.h"
 #include "render/model.h"
 #include "render/shadow.h"
@@ -25,10 +26,6 @@ constexpr float kFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr float kAspect = 16.0f / 9.0f;
 
-// Below this, a segment centre is dark enough that the player cannot make out
-// the walls without a light of their own. Picked by eye against the rendered
-// frames, and it only ever gates the level-design check below.
-constexpr float kDarkThreshold = 0.25f;
 
 // The six axis directions, so "what can be seen from here" does not depend on
 // an arbitrary choice of facing.
@@ -173,23 +170,19 @@ int runWorldTest(const char* levelPath) {
         for (size_t li = 0; li < level.lights.size(); ++li) {
             const Light& l = level.lights[li];
             if (std::find(l.segments.begin(), l.segments.end(), si) == l.segments.end()) continue;
-            const float dist = glm::length(l.position - p);
-            if (dist > l.radius) continue;
-            const float t = dist / l.radius;
-            const float window = std::clamp(1.0f - t * t * t * t, 0.0f, 1.0f);
-            const float value = window * window / (1.0f + 12.0f * t * t) * l.intensity;
+            const float value = sim::lightContribution(l, p);
             if (value > best) {
                 best = value;
                 from = static_cast<int>(li);
             }
         }
-        const bool isDark = best < kDarkThreshold;
+        const bool isDark = best < sim::kDarkThreshold;
         if (isDark) ++dark;
         log::info("  segment {:2}: {:.3f}{}{}", si, best,
                   from >= 0 ? std::format("  from light {}", from) : std::string("  unreached"),
                   isDark ? "   <- dark" : "");
     }
-    log::info("  {} of {} segments are below {:.2f} and read as dark", dark, n, kDarkThreshold);
+    log::info("  {} of {} segments are below {:.2f} and read as dark", dark, n, sim::kDarkThreshold);
 
     // A mine with no dark stretches is not this game. If every segment is
     // comfortably lit, the level is wrong even though nothing crashed.

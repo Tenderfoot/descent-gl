@@ -79,6 +79,8 @@ milestone rather than describing what the code should do:
 | `--collision-test` | Fly the ship into every wall from all 26 face, edge and corner directions at max speed and check it never escapes; cross-check the ray and sweep queries against an independent method; walk every portal both ways. Exits non-zero on any failure. Needs no window and no GL. |
 | `--weapons-test` | Fire every weapon at walls and at targets and check what happened: rate of fire, energy and ammo, wall impacts, a 2000 u/s no-tunnelling case, target destruction, splash, flares, headlight drain and death reset. Needs no window and no GL. |
 | `--loop-test` | Play the level's win and lose conditions through: keys against doors, a shut door against light, the reactor, the countdown, the exit and every pickup. Reports SKIPPED on a level with no doors or exit. Needs no window and no GL. |
+| `--light-test` | Run the CPU illumination query headlessly: the falloff against the shader's own formula, the spot cone, the segment walk against brute-force ray/triangle over every wall, and whether the level has both lit and dark places to stand. Needs no window and no GL. |
+| `--headlight` | Start with the headlight on. It is off by default, so a screenshot cannot otherwise show it without a keypress. |
 | `--level PATH` | Load a level other than the default `mine01`. |
 | `--debug-ui` | Start with the ImGui debug panels open. They are off by default from M7; F3 toggles them at runtime. |
 | `--robots-test` | Drive the robot state machine through idle, alert, chase, attack, retreat and death; check pathing crosses portals, that robot fire hurts, that deaths drop, and that no robot leaves the mine. Needs no window and no GL. |
@@ -128,7 +130,7 @@ level directly unless `--start-menu` is present.
 | Left mouse | Fire the selected gun |
 | Right mouse | Launch a missile |
 | F | Throw a flare |
-| H | Toggle the headlight |
+| H | Toggle the headlight (off at the start) |
 | M | Mute |
 | Escape | Pause / resume |
 
@@ -186,7 +188,8 @@ runtime.
    bounded by the clamp. Compare against the same run on `main` rather than
    against 120.
 4. Run every headless test: `--validate-assets --flight-test --world-test
-   --collision-test --weapons-test --robots-test --loop-test --sound-test`.
+   --collision-test --weapons-test --robots-test --loop-test --sound-test
+   --light-test`.
 5. Update `docs/ARCHITECTURE.md` with whatever the milestone introduced.
 6. Add the milestone to `docs/MILESTONES.md` with what was actually verified,
    including real numbers.

@@ -1456,3 +1456,50 @@ the screenshot harness.
 | Main menu at 640×360 | ✅ visually verified |
 | Release menu allocations after warm-up | ✅ none on 0 of 60 frames |
 | Loop and menu lifecycle regression | ✅ PASS |
+
+---
+
+## Light on the player ✅
+
+A CPU answer to "how much light is falling on this point", in `src/sim/lighting.h`:
+no GL, no window, no allocation, so the simulation and the headless tests can
+both ask it. Per light it is a segment-set test, then the shader's falloff and
+the spot cone, then one `sim::raycast` to the light. With a body radius it
+samples seven points and reports the lit fraction as well as the value, so the
+answer does not flip the instant a shadow edge crosses a single point.
+
+`lightFalloff` is now the only CPU copy of the falloff — `--world-test`'s
+brightness report calls it instead of carrying its own — and `--light-test`
+checks it against a third transcription taken from the text of `wall.frag`.
+
+The query is stricter than the picture in two known ways, both documented in
+`ARCHITECTURE.md`: only the mine occludes (not robots, props, door slabs or the
+ship), and the renderer's shadow budget does not apply, so nothing here shines
+through a wall the way an over-budget light does on screen.
+
+The headlight is retuned and now starts **off**: 60° at intensity 2.0, where it
+was 34° at 3.2. `--headlight` turns it on so a screenshot can still show it.
+
+| Check | Result |
+| --- | --- |
+| CPU falloff vs `wall.frag`, 200 samples | ✅ worst difference 0.000000000 |
+| Falloff monotonic, zero at and beyond radius | ✅ |
+| Spot cone: axis, inside, outside, behind | ✅ 0.567 / 0.535 / 0.000 / 0.000 |
+| Segment walk vs brute force over 244 wall triangles | ✅ 414 pairs, 8 blocked, 0 disagreements |
+| Occlusion is not a no-op | ✅ 7 of 306 probes lose light; biggest drop 0.249 |
+| `mine01` has somewhere dark and somewhere lit | ✅ 13 dark, 21 lit of 34 at threshold 0.25 |
+| Lit fraction agrees with value about darkness | ✅ 7 samples per body query |
+| Query allocates nothing | ✅ 34 000 queries, 0 allocations |
+| `--world-test` brightness after the refactor | ✅ all 34 values unchanged, verified against an independent reimplementation |
+| Headlight retune | ✅ on-axis ×0.625, cone solid angle ×3.07 |
+| Headlight off at start, `--headlight` restores it | ✅ verified by screenshot at segment 18 |
+| Debug and Release builds | ✅ both clean, no warnings |
+| Debug and Release headless suites | ✅ all nine pass in both configurations |
+| Debug and Release rendered runs | ✅ 120 frames, clean exit, no `[ERROR]`/`[FATAL]` |
+| Step rate | ✅ 119.8 (Debug) / 120.0 (Release) against 120 |
+
+One caveat recorded honestly: the rendered runs occasionally report a single
+draw-path allocation after warm-up. It is **pre-existing** — `main` at the same
+150 frames shows the same thing at frames 57, 59 and 134 — and it is unrelated
+to this change, which adds nothing inside the measured `beginFrame`→`resolve`
+region.
