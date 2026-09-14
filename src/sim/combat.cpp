@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/collision.h"
+#include "sim/robots.h"
 #include "sim/ship.h"
 
 #include <glm/geometric.hpp>
@@ -49,12 +50,15 @@ void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
     e.lightIntensity = lightIntensity;
 }
 
-// Applies damage to every live object within `radius` of `centre`, falling off
-// linearly. Returns how many were hit.
-int applySplash(const Level& level, CombatState& state, const glm::vec3& centre, float radius,
-                float damage) {
+// Applies damage to everything within `radius` of `centre`, falling off
+// linearly - robots, destructible scenery, and the player. Splash that does not
+// hurt the person who fired it is a missile you can safely shoot at your own
+// feet, which is not the weapon this is meant to be.
+int applySplash(const Level& level, CombatState& state, RobotState* robots, Body* player,
+                const glm::vec3& centre, float radius, float damage) {
     if (radius <= 0.0f || damage <= 0.0f) return 0;
     int hits = 0;
+
     for (int i = 0; i < state.objects.count; ++i) {
         if (!state.objects.alive[static_cast<size_t>(i)]) continue;
         const LevelObject& obj = level.objects[static_cast<size_t>(i)];
@@ -62,6 +66,25 @@ int applySplash(const Level& level, CombatState& state, const glm::vec3& centre,
         if (d > radius) continue;
         state.objects.health[static_cast<size_t>(i)] -= damage * (1.0f - d / radius);
         ++hits;
+    }
+
+    if (robots) {
+        for (int i = 0; i < robots->count; ++i) {
+            Robot& robot = robots->robots[static_cast<size_t>(i)];
+            if (!robot.alive) continue;
+            const float d = glm::length(robot.body.position - centre);
+            if (d > radius) continue;
+            robot.health -= damage * (1.0f - d / radius);
+            ++hits;
+        }
+    }
+
+    if (player) {
+        const float d = glm::length(player->position - centre);
+        if (d <= radius) {
+            state.player.shields -= damage * (1.0f - d / radius);
+            ++hits;
+        }
     }
     return hits;
 }
@@ -94,8 +117,8 @@ int hitObject(const Level& level, const CombatState& state, const glm::vec3& fro
     return best;
 }
 
-void killProjectile(const Level& level, CombatState& state, Projectile& p, const glm::vec3& at,
-                    int segment) {
+void killProjectile(const Level& level, CombatState& state, RobotState* robots, Body* player,
+                    Projectile& p, const glm::vec3& at, int segment) {
     p.alive = false;
 
     if (p.kind == ProjectileKind::Flare) {
@@ -111,7 +134,7 @@ void killProjectile(const Level& level, CombatState& state, Projectile& p, const
 
     const bool explosive = p.splashRadius > 0.0f;
     if (explosive) {
-        applySplash(level, state, at, p.splashRadius, p.splashDamage);
+        applySplash(level, state, robots, player, at, p.splashRadius, p.splashDamage);
         spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f, 0.45f,
                     p.splashRadius * 1.6f, 7.0f);
     } else {
@@ -131,9 +154,9 @@ void initObjects(const Level& level, ObjectHealth& out) {
     }
 }
 
-void stepCombat(const Level& level, CombatState& state, const Body& ship,
+void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
-                const FireControls& controls, float dt) {
+                const FireControls& controls, float dt, RobotState* robots) {
     PlayerState& player = state.player;
 
     if (controls.selectWeapon >= 0 && controls.selectWeapon < WeaponCount) {
@@ -272,7 +295,7 @@ void stepCombat(const Level& level, CombatState& state, const Body& ship,
         p.age += dt;
         if (p.age >= p.lifetime) {
             // A flare that never landed still becomes a light where it ran out.
-            killProjectile(level, state, p, p.position, p.segment);
+            killProjectile(level, state, robots, &ship, p, p.position, p.segment);
             continue;
         }
 
@@ -302,15 +325,74 @@ void stepCombat(const Level& level, CombatState& state, const Body& ship,
         if (distance <= 0.0f) continue;
         const glm::vec3 dir = step / distance;
 
-        // Objects first, then walls: a shot that would pass through a drone on
-        // its way to the wall behind it should stop at the drone.
+        // Targets first, then walls: a shot that would pass through a robot on
+        // its way to the wall behind it should stop at the robot.
         glm::vec3 objectPoint(0.0f);
         const int object =
             p.kind == ProjectileKind::Flare
                 ? -1
                 : hitObject(level, state, from, from + step, p.radius, &objectPoint);
 
+        // A robot's own fire never hits a robot, and the player's never hits
+        // the player. Friendly fire between robots would turn a corridor of
+        // them into a brawl the player watches.
+        int robotHit = -1;
+        glm::vec3 robotPoint(0.0f);
+        if (robots && p.owner < 0 && p.kind != ProjectileKind::Flare) {
+            float best = 2.0f;
+            const glm::vec3 seg = step;
+            const float segLenSq = glm::dot(seg, seg);
+            for (int i = 0; i < robots->count && segLenSq > 0.0f; ++i) {
+                const Robot& robot = robots->robots[static_cast<size_t>(i)];
+                if (!robot.alive) continue;
+                const float t =
+                    std::clamp(glm::dot(robot.body.position - from, seg) / segLenSq, 0.0f, 1.0f);
+                const glm::vec3 closest = from + seg * t;
+                if (glm::length(closest - robot.body.position) <= robot.body.radius + p.radius &&
+                    t < best) {
+                    best = t;
+                    robotHit = i;
+                    robotPoint = closest;
+                }
+            }
+        }
+
+        bool hitPlayer = false;
+        glm::vec3 playerPoint(0.0f);
+        if (p.owner >= 0 && p.kind != ProjectileKind::Flare) {
+            const glm::vec3 seg = step;
+            const float segLenSq = glm::dot(seg, seg);
+            if (segLenSq > 0.0f) {
+                const float t =
+                    std::clamp(glm::dot(ship.position - from, seg) / segLenSq, 0.0f, 1.0f);
+                const glm::vec3 closest = from + seg * t;
+                if (glm::length(closest - ship.position) <= ship.radius + p.radius) {
+                    hitPlayer = true;
+                    playerPoint = closest;
+                }
+            }
+        }
+
         const RayHit wall = sweepSphere(level, from, dir, p.radius, distance, p.segment);
+
+        if (hitPlayer && (!wall.hit || glm::length(playerPoint - from) <= wall.distance)) {
+            state.player.shields -= p.damage;
+            spawnEffect(state, playerPoint, p.segment, p.color, 1.4f, 0.18f, 8.0f, 2.0f);
+            killProjectile(level, state, robots, &ship, p, playerPoint, p.segment);
+            continue;
+        }
+
+        if (robotHit >= 0 && (!wall.hit || glm::length(robotPoint - from) <= wall.distance)) {
+            robots->robots[static_cast<size_t>(robotHit)].health -= p.damage;
+            // A hit is also a noise: it wakes the thing you just shot even if
+            // it had not seen you.
+            robots->robots[static_cast<size_t>(robotHit)].awareness = 1.0f;
+            robots->robots[static_cast<size_t>(robotHit)].lastKnown = ship.position;
+            robots->robots[static_cast<size_t>(robotHit)].hasLastKnown = true;
+            spawnEffect(state, robotPoint, p.segment, p.color, 1.7f, 0.22f, 11.0f, 2.8f);
+            killProjectile(level, state, robots, &ship, p, robotPoint, p.segment);
+            continue;
+        }
 
         const bool hitObjectFirst =
             object >= 0 && (!wall.hit || glm::length(objectPoint - from) <= wall.distance);
@@ -318,7 +400,7 @@ void stepCombat(const Level& level, CombatState& state, const Body& ship,
         if (hitObjectFirst) {
             state.objects.health[static_cast<size_t>(object)] -= p.damage;
             spawnEffect(state, objectPoint, p.segment, p.color, 1.6f, 0.2f, 10.0f, 2.6f);
-            killProjectile(level, state, p, objectPoint, p.segment);
+            killProjectile(level, state, robots, &ship, p, objectPoint, p.segment);
             continue;
         }
         if (wall.hit) {
@@ -326,7 +408,8 @@ void stepCombat(const Level& level, CombatState& state, const Body& ship,
             // any resulting flare sit in front of the wall rather than inside
             // it, where the light would be occluded by the wall it is lighting.
             const glm::vec3 at = from + dir * std::max(0.0f, wall.distance - p.radius * 0.5f);
-            killProjectile(level, state, p, at, wall.segment >= 0 ? wall.segment : p.segment);
+            killProjectile(level, state, robots, &ship, p, at,
+                           wall.segment >= 0 ? wall.segment : p.segment);
             continue;
         }
 

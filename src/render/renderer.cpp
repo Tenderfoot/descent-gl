@@ -5,6 +5,7 @@
 #include "game/state.h"
 #include "game/visibility.h"
 #include "sim/collision.h"
+#include "sim/robots.h"
 #include "render/camera.h"
 #include "render/procedural.h"
 
@@ -26,7 +27,8 @@ constexpr float kChaseLookAhead = 6.0f;
 
 } // namespace
 
-Renderer::Renderer(const Level& level) {
+Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
+    : robotConfig_(&robots) {
     log::info("GL {} | {} | {}", reinterpret_cast<const char*>(glGetString(GL_VERSION)),
               reinterpret_cast<const char*>(glGetString(GL_RENDERER)),
               reinterpret_cast<const char*>(glGetString(GL_VENDOR)));
@@ -96,7 +98,8 @@ Renderer::Renderer(const Level& level) {
         mineOccluder_.reset(&mineMesh_, glm::mat4(1.0f));
     }
 
-    loadProps(level);
+    loadRobotMeshes(robots);
+    loadProps(level, robots);
 
     segmentMask_.assign(level.segments.size(), 0);
     lit_.reserve(level.segments.size());
@@ -110,8 +113,33 @@ Renderer::Renderer(const Level& level) {
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, cameraUbo_);
 }
 
-void Renderer::loadProps(const Level& level) {
+void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
+    robotTypes_.reserve(robots.types.size());
+    for (const sim::RobotDef& def : robots.types) {
+        const std::string path = "assets/models/" + def.model + ".obj";
+        if (propModels_.find(def.model) == propModels_.end()) {
+            ModelData model = loadObj(path);
+            OccluderMesh occluder = buildOccluder(model.positions, model.triangles, {}, path);
+            propMeshes_.emplace(def.model, toMesh(model));
+            propOccluders_.emplace(def.model, std::move(occluder));
+            propModels_.emplace(def.model, std::move(model));
+        }
+        RobotType type;
+        type.mesh = &propMeshes_.at(def.model);
+        type.occluder = &propOccluders_.at(def.model);
+        type.textureLayer = WallPanel;
+        robotTypes_.push_back(type);
+    }
+
+    robotOccluders_.resize(sim::kMaxRobots);
+    robotOccluderType_.assign(sim::kMaxRobots, -1);
+}
+
+void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
     for (const LevelObject& obj : level.objects) {
+        // An object whose type names a robot definition is not scenery: the
+        // simulation owns it and it is drawn from the robot list instead.
+        if (sim::objectIsRobot(robots, obj.type)) continue;
         if (propModels_.find(obj.type) == propModels_.end()) {
             const std::string path = "assets/models/" + obj.type + ".obj";
             ModelData model = loadObj(path);
@@ -207,6 +235,27 @@ void Renderer::gatherLights(const Level& level, const std::vector<Light>& dynami
     }
 }
 
+// Robots move, so their occluders are re-transformed every frame. The meshes
+// are tens of triangles, so this is cheaper than any scheme for avoiding it.
+void Renderer::updateRobotOccluders(const RenderState& rs) {
+    for (int i = 0; i < rs.robotCount; ++i) {
+        const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
+        const auto slot = static_cast<size_t>(view.slot);
+        if (slot >= robotOccluders_.size()) continue;
+        if (view.type < 0 || view.type >= static_cast<int>(robotTypes_.size())) continue;
+
+        const glm::mat4 model = glm::translate(glm::mat4(1.0f), view.position) *
+                                glm::mat4_cast(view.orientation);
+        if (robotOccluderType_[slot] != view.type) {
+            robotOccluders_[slot].reset(robotTypes_[static_cast<size_t>(view.type)].occluder,
+                                        model);
+            robotOccluderType_[slot] = view.type;
+        } else {
+            robotOccluders_[slot].setTransform(model);
+        }
+    }
+}
+
 void Renderer::buildBillboards(const RenderState& rs) {
     billboards_.clear();
 
@@ -223,6 +272,23 @@ void Renderer::buildBillboards(const RenderState& rs) {
     for (int i = 0; i < rs.flashCount; ++i) {
         const RenderState::Flash& f = rs.flashes[static_cast<size_t>(i)];
         billboards_.add(f.position, right, up, f.size, f.color * f.fade);
+    }
+
+    // Robot eyes. Emissive, so they read in total darkness - which matters
+    // more than it sounds in a mine with no ambient light, because the eyes
+    // are usually the first thing the player sees of a robot.
+    if (robotConfig_) {
+        for (int i = 0; i < rs.robotCount; ++i) {
+            const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
+            if (view.type < 0 || view.type >= static_cast<int>(robotConfig_->types.size())) {
+                continue;
+            }
+            const sim::RobotDef& def = robotConfig_->types[static_cast<size_t>(view.type)];
+            const glm::mat3 basis = glm::mat3_cast(view.orientation);
+            for (const glm::vec3& eye : def.eyes) {
+                billboards_.add(view.position + basis * eye, right, up, def.eyeSize, def.eyeColor);
+            }
+        }
     }
 
     billboards_.upload();
@@ -361,6 +427,21 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                 ++stats_.shadowCasters;
             }
 
+            for (int i = 0; i < rs.robotCount; ++i) {
+                const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
+                const auto slot = static_cast<size_t>(view.slot);
+                if (slot >= robotOccluders_.size() || !robotOccluders_[slot].mesh()) continue;
+                const int segment = view.slot < static_cast<int>(rs.robotSegments.size())
+                                        ? rs.robotSegments[static_cast<size_t>(view.slot)]
+                                        : -1;
+                if (segment >= 0 && !std::binary_search(light.segments.begin(),
+                                                        light.segments.end(), segment)) {
+                    continue;
+                }
+                volumes_.add(robotOccluders_[slot], light.position, nullptr);
+                ++stats_.shadowCasters;
+            }
+
             // The ship casts only when it is actually on screen, which is the
             // chase camera. In first person the camera sits INSIDE the hull, so
             // its shadow volume begins at the eye and blacks out most of the
@@ -416,6 +497,14 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         if (pi < static_cast<size_t>(rs.objectCount) && !rs.objectAlive[pi]) continue;
         depthShader_->setMat4("uModel", prop.model);
         prop.mesh->draw();
+    }
+
+    for (int i = 0; i < rs.robotCount; ++i) {
+        const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
+        if (view.type < 0 || view.type >= static_cast<int>(robotTypes_.size())) continue;
+        depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
+                                            glm::mat4_cast(view.orientation));
+        robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
     }
 
     if (rs.camera == CameraMode::Chase) {
@@ -556,6 +645,23 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             prop.mesh->draw();
         }
 
+        for (int i = 0; i < rs.robotCount; ++i) {
+            const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
+            if (view.type < 0 || view.type >= static_cast<int>(robotTypes_.size())) continue;
+            const int segment = view.slot < static_cast<int>(rs.robotSegments.size())
+                                    ? rs.robotSegments[static_cast<size_t>(view.slot)]
+                                    : -1;
+            if (segment >= 0 && !std::binary_search(light.segments.begin(), light.segments.end(),
+                                                    segment)) {
+                continue;
+            }
+            wallShader_->setInt("uLayerOverride",
+                                robotTypes_[static_cast<size_t>(view.type)].textureLayer);
+            wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
+                                                glm::mat4_cast(view.orientation));
+            robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
+        }
+
         // The ship is lit by the same pass. It carries no texture-layer
         // attribute, so the override selects its tile from the same array.
         if (rs.camera == CameraMode::Chase && walk.isVisible(rs.shipSegment) &&
@@ -665,6 +771,7 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
 
     gatherLights(level, dynamicLights, eyePos(rs), walk, shadowBudget);
+    updateRobotOccluders(rs);
     buildBillboards(rs);
     buildShadowVolumes(rs, walk);
     depthPrepass(rs, walk);

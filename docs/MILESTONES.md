@@ -490,6 +490,75 @@ as in every milestone so far.
 
 ---
 
-## M6 — Robots ⬜
+## M6 — Robots ✅
+
+Three robot types with a five-state machine, segment-graph pathing, emissive
+eyes, death debris and a drop table.
+
+### Verified
+
+`--robots-test` drives the state machine with no window and no GL:
+
+| Check | Result |
+| --- | --- |
+| Three types, closed meshes | ✅ drone 12v/20t, gunner 28v/48t, brute 40v/72t — all closed, all under 120 |
+| A robot that cannot see the player idles | ✅ **7 of 8** idle two seconds after spawn |
+| Being shot wakes it | ✅ a sleeping robot went **idle → chase**, awareness 0.84 |
+| Paths through portals | ✅ started in segment 2, reached 9 segments, **8 portals crossed** |
+| Shoots, and hits hurt | ✅ shields 100 → 92 in **0.51 s** at 14 units in the open |
+| Retreats when hurt | ✅ **12 of 12** trials |
+| Dies, with debris and drops | ✅ 12/12 died, **4 debris chunks**, **9 of 12** kills dropped something |
+| Robots never leave the mine | ✅ 8 robots chasing for 15 s, **0 escapes** |
+| Per-robot state readout | ✅ mode, previous mode, health, segment, portal distance, awareness |
+| Robot shadows | ✅ 43 casters / 543 silhouette edges / 2934 volume triangles with the room occupied |
+| Debug / Release build clean | ✅ no warnings |
+| All five headless tests | ✅ world, collision, weapons, robots, flight — PASS in both configs |
+| `--resize-test` | ✅ completes |
+| Step rate, 640×360 with robots active | **120.0 / 120** |
+
+### Two test bugs, no AI bugs
+
+The first run failed twice, and both were the test:
+
+1. "Being hit wakes a robot" picked the first drone — which could already see
+   the player down the corridor and was awake before it was shot. Fixed by
+   picking a robot that is demonstrably asleep.
+2. "A gunner's fire hurts the player" parked the player 12 units from the robot
+   along +Z, which put it **outside the mine**. The robot genuinely could not
+   see it, so it never attacked. Fixed by placing both relative to the
+   segment's own centre.
+
+Third milestone running where the first failure was in the harness rather than
+in the code under test.
+
+### Design notes
+
+- **One BFS serves every robot.** A distance field from the player's segment,
+  rebuilt only when the player changes segment; each robot walks downhill.
+- **Awareness, not line of sight**, drives the state machine — seeing sets it
+  to 1, losing sight decays it over three seconds, and being hit sets it too.
+- Robots are `Body`s, so containment is the M4 collision code and not a second
+  implementation of it.
+- Eyes are emissive billboards rather than mesh faces. A deviation from the
+  plan's "emissive eye geometry"; a glow reads better at distance and the
+  meshes carry no material split.
+
+### A build bug worth recording
+
+Assets were copied next to the executable by a `POST_BUILD` step, which only
+fires when the executable **relinks**. Editing `test01.json` and rebuilding left
+the old copy in place, so the game loaded 6 objects from a file that contained
+10 — the source on disk was right and the running program disagreed. It is now
+an always-run target.
+
+### Not verified here
+
+Feel — whether the robots are *fun* to fight, whether retreat reads as cunning
+or as cowardice, and whether the brute is too spongy. Those want the real
+machine. Iconify/restore and performance as ever.
+
+---
+
+## M7 — The loop ⬜
 
 Not started.

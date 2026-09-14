@@ -30,6 +30,7 @@ add_executable(descent
     src/game/collision_test.cpp
     src/game/level.cpp
     src/game/visibility.cpp
+    src/game/robots_test.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
@@ -50,6 +51,7 @@ add_executable(descent
     src/sim/combat.cpp
     src/sim/flight.cpp
     src/sim/flight_test.cpp
+    src/sim/robots.cpp
     src/sim/ship.cpp
     src/sim/weapons.cpp
 )
@@ -79,10 +81,18 @@ endif()
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT descent)
 set_target_properties(descent PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY "$<TARGET_FILE_DIR:descent>")
 
-# Shaders and assets are loaded at runtime relative to the executable, so
-# copy them next to it after every build.
-add_custom_command(TARGET descent POST_BUILD
+# Shaders and assets are loaded at runtime relative to the executable, so they
+# are copied next to it.
+#
+# A separate always-run target rather than a POST_BUILD step on `descent`:
+# POST_BUILD only fires when the executable relinks, so editing a level or a
+# shader and rebuilding would leave the old copy in place and the change would
+# appear not to have happened. That is an unusually annoying bug to chase,
+# because the source on disk is right and the running program disagrees.
+add_custom_target(descent_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/shaders" "$<TARGET_FILE_DIR:descent>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets"  "$<TARGET_FILE_DIR:descent>/assets"
     COMMENT "Copying shaders/ and assets/ next to the executable"
+    VERBATIM
 )
+add_dependencies(descent_assets descent)

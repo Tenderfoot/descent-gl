@@ -33,6 +33,9 @@ namespace dvk {
 //                       toggle): tints whatever the stencil marks as shadowed
 //   --weapons-test      fire every weapon at walls and at targets and check
 //                       what happened, then exit. Needs no window and no GL.
+//   --robots-test       drive the robot state machine through idle, alert,
+//                       chase, attack, retreat and death, and check they never
+//                       leave the mine. Needs no window and no GL.
 //   --no-ui             hide the ImGui panels, so a screenshot shows the game
 //                       rather than the debug windows
 //   --autofire W        hold the trigger for weapon W (0 laser, 1 vulcan,
@@ -54,6 +57,7 @@ struct Options {
     bool worldTest = false;
     bool collisionTest = false;
     bool weaponsTest = false;
+    bool robotsTest = false;
     int startSegment = -1;
     bool wireframeVolumes = false;
     bool stencilView = false;

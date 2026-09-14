@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/combat.h"
+#include "sim/robots.h"
 #include "sim/weapons.h"
 
 #include <glm/geometric.hpp>
@@ -20,22 +21,34 @@ constexpr float kStep = 1.0f / 120.0f;
 struct Rig {
     Level level;
     sim::WeaponConfig cfg;
+    sim::RobotConfig robotCfg;
     sim::CombatState state;
+    sim::RobotState robots;
     sim::Body ship;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
 
     void reset() {
         state = sim::CombatState{};
         sim::initObjects(level, state.objects);
+        sim::spawnRobots(level, robotCfg, robots);
         ship = sim::Body{};
         ship.position = level.start.position;
         ship.segment = level.start.segment;
         orientation = level.start.orientation;
     }
 
+    // The controls used by run(int), so the target tests can re-aim between
+    // steps without rebuilding them.
+    sim::FireControls held;
+
+    void run(int steps) { run(steps, held); }
+
     void run(int steps, const sim::FireControls& controls) {
         for (int i = 0; i < steps; ++i) {
-            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep);
+            // Robots are stepped too, so a target shot at here behaves the
+            // way it does in the game rather than sitting still for the test.
+            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep, &robots);
+            sim::stepRobots(level, robotCfg, cfg, robots, state, ship, kStep);
         }
     }
 
@@ -54,10 +67,12 @@ bool expect(bool condition, const char* what) {
 
 } // namespace
 
-int runWeaponsTest(const char* levelPath, const char* weaponConfigPath) {
+int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
+                   const char* robotConfigPath) {
     Rig rig;
     rig.level = loadLevel(levelPath);
     rig.cfg = sim::loadWeaponConfig(weaponConfigPath);
+    rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
     bool ok = true;
 
     // --- every weapon fires, costs what it should, and respects its rate ----
@@ -157,45 +172,47 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath) {
     }
 
     // --- targets take damage and die ----------------------------------------
+    //
+    // The targets are robots from M6 on. They are stepped normally, so this is
+    // also a check that a robot being shot at reacts rather than standing
+    // still: it will retreat once it is hurt enough, which is why the loop
+    // re-aims every step.
     {
         rig.reset();
         rig.state.player.headlightOn = false;
+        ok &= expect(rig.robots.count > 0, "the level has robots to shoot");
 
-        int target = -1;
-        for (int i = 0; i < rig.state.objects.count; ++i) {
-            if (rig.level.objects[static_cast<size_t>(i)].health > 0.0f) {
-                target = i;
-                break;
-            }
-        }
-        ok &= expect(target >= 0, "the level has at least one destructible target");
+        if (rig.robots.count > 0) {
+            const int slot = 0;
+            sim::Robot& robot = rig.robots.robots[static_cast<size_t>(slot)];
+            const sim::RobotDef& def = rig.robotCfg.types[static_cast<size_t>(robot.type)];
 
-        if (target >= 0) {
-            const LevelObject& obj = rig.level.objects[static_cast<size_t>(target)];
-            // Stand off from the target and shoot it, rather than flying there.
-            rig.ship.position = obj.position + glm::vec3(0.0f, 0.0f, 14.0f);
-            rig.ship.segment = findSegment(rig.level, rig.ship.position, obj.segment);
-            rig.aimAt(obj.position);
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(robot.body.segment)].center;
+            robot.body.position = centre + glm::vec3(0.0f, 0.0f, -6.0f);
+            rig.ship.position = centre + glm::vec3(0.0f, 0.0f, 7.0f);
+            rig.ship.segment = robot.body.segment;
 
-            const float health = obj.health;
+            const float health = robot.health;
             const float damage = rig.cfg.laserDamage[0];
-            const int expectedShots = static_cast<int>(std::ceil(health / damage));
 
-            sim::FireControls controls;
-            controls.selectWeapon = sim::WeaponLaser;
-            controls.primary = true;
+            rig.held = sim::FireControls{};
+            rig.held.selectWeapon = sim::WeaponLaser;
+            rig.held.primary = true;
 
             int steps = 0;
-            while (rig.state.objects.alive[static_cast<size_t>(target)] && steps < 1200) {
-                rig.run(1, controls);
+            while (rig.robots.robots[static_cast<size_t>(slot)].alive && steps < 2400) {
+                rig.aimAt(rig.robots.robots[static_cast<size_t>(slot)].body.position);
+                rig.run(1);
                 ++steps;
             }
+            rig.held = sim::FireControls{};
 
-            const bool destroyed = !rig.state.objects.alive[static_cast<size_t>(target)];
-            ok &= expect(destroyed, "the target was destroyed by sustained laser fire");
-            log::info("target {}: {:.0f} health, {:.0f} damage per shot, {} shots needed, "
-                      "destroyed after {:.2f}s",
-                      target, health, damage, expectedShots, static_cast<float>(steps) * kStep);
+            const bool destroyed = !rig.robots.robots[static_cast<size_t>(slot)].alive;
+            ok &= expect(destroyed, "the robot was destroyed by sustained laser fire");
+            log::info("target: {} with {:.0f} health, {:.0f} damage per shot, destroyed after "
+                      "{:.2f}s",
+                      def.name, health, damage, static_cast<float>(steps) * kStep);
         }
     }
 
@@ -203,31 +220,32 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath) {
     {
         rig.reset();
         rig.state.player.headlightOn = false;
-        int target = -1;
-        for (int i = 0; i < rig.state.objects.count; ++i) {
-            if (rig.level.objects[static_cast<size_t>(i)].health > 0.0f) {
-                target = i;
-                break;
-            }
-        }
-        if (target >= 0) {
-            const LevelObject& obj = rig.level.objects[static_cast<size_t>(target)];
-            rig.ship.position = obj.position + glm::vec3(0.0f, 0.0f, 16.0f);
-            rig.ship.segment = findSegment(rig.level, rig.ship.position, obj.segment);
-            // Deliberately aimed past the target, so only the splash can reach.
-            rig.aimAt(obj.position + glm::vec3(6.0f, 0.0f, 0.0f));
+        if (rig.robots.count > 0) {
+            const int slot = 0;
+            sim::Robot& robot = rig.robots.robots[static_cast<size_t>(slot)];
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(robot.body.segment)].center;
+            robot.body.position = centre + glm::vec3(0.0f, 0.0f, -6.0f);
+            rig.ship.position = centre + glm::vec3(0.0f, 0.0f, 8.0f);
+            rig.ship.segment = robot.body.segment;
 
-            sim::FireControls controls;
-            controls.selectWeapon = sim::WeaponConcussion;
-            controls.secondary = true;
-            rig.run(1, controls);
-            controls.secondary = false;
-            rig.run(240, controls);
+            const float before = robot.health;
+            // Deliberately aimed past it, so only the splash can reach.
+            rig.aimAt(robot.body.position + glm::vec3(5.0f, 0.0f, -6.0f));
 
-            const float remaining = rig.state.objects.health[static_cast<size_t>(target)];
-            ok &= expect(remaining < obj.health, "a near miss still damaged the target");
-            log::info("splash: near miss took the target from {:.0f} to {:.1f} health", obj.health,
-                      remaining);
+            rig.held = sim::FireControls{};
+            rig.held.selectWeapon = sim::WeaponConcussion;
+            rig.held.secondary = true;
+            rig.run(1);
+            rig.held.secondary = false;
+            rig.run(180);
+
+            const float after = rig.robots.robots[static_cast<size_t>(slot)].alive
+                                    ? rig.robots.robots[static_cast<size_t>(slot)].health
+                                    : 0.0f;
+            ok &= expect(after < before, "a near miss still damaged the target");
+            log::info("splash: near miss took the target from {:.0f} to {:.1f} health", before,
+                      after);
         }
     }
 

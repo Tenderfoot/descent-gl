@@ -1,0 +1,94 @@
+# descent-vk gunner: octagonal body, forward barrel.
+# THIS MESH MUST STAY CLOSED. Every edge is shared by exactly two triangles.
+# M3 extrudes silhouette edges into stencil shadow volumes and depth-fail
+# counting is only correct for a closed mesh; the loader treats an open edge as
+# a fatal asset error and prints the offending edge's coordinates.
+#
+# A mesh made of several shells is fine - two disjoint closed shells satisfy the
+# rule as well as one does, and their shadow volumes simply overlap, which
+# depth-fail counts correctly.
+#
+# -Z is forward. Wound counter-clockwise seen from outside; normals are not
+# authored, the loader computes flat per-face normals.
+
+v    1.500    1.500    0.000
+v    1.061    1.500    1.061
+v    0.000    1.500    1.500
+v   -1.061    1.500    1.061
+v   -1.500    1.500    0.000
+v   -1.061    1.500   -1.061
+v   -0.000    1.500   -1.500
+v    1.061    1.500   -1.061
+v    1.750   -1.500    0.000
+v    1.237   -1.500    1.237
+v    0.000   -1.500    1.750
+v   -1.237   -1.500    1.237
+v   -1.750   -1.500    0.000
+v   -1.237   -1.500   -1.237
+v   -0.000   -1.500   -1.750
+v    1.237   -1.500   -1.237
+v    0.420   -0.250    0.000
+v    0.210    0.114    0.000
+v   -0.210    0.114    0.000
+v   -0.420   -0.250    0.000
+v   -0.210   -0.614    0.000
+v    0.210   -0.614    0.000
+v    0.420   -0.250   -4.800
+v    0.210    0.114   -4.800
+v   -0.210    0.114   -4.800
+v   -0.420   -0.250   -4.800
+v   -0.210   -0.614   -4.800
+v    0.210   -0.614   -4.800
+
+vt 0.00 0.00
+vt 1.00 0.00
+vt 1.00 1.00
+
+f 1/1 10/2 9/3
+f 1/1 2/2 10/3
+f 2/1 11/2 10/3
+f 2/1 3/2 11/3
+f 3/1 12/2 11/3
+f 3/1 4/2 12/3
+f 4/1 13/2 12/3
+f 4/1 5/2 13/3
+f 5/1 14/2 13/3
+f 5/1 6/2 14/3
+f 6/1 15/2 14/3
+f 6/1 7/2 15/3
+f 7/1 16/2 15/3
+f 7/1 8/2 16/3
+f 8/1 9/2 16/3
+f 8/1 1/2 9/3
+f 1/1 3/2 2/3
+f 1/1 4/2 3/3
+f 1/1 5/2 4/3
+f 1/1 6/2 5/3
+f 1/1 7/2 6/3
+f 1/1 8/2 7/3
+f 9/1 10/2 11/3
+f 9/1 11/2 12/3
+f 9/1 12/2 13/3
+f 9/1 13/2 14/3
+f 9/1 14/2 15/3
+f 9/1 15/2 16/3
+f 17/1 24/2 23/3
+f 17/1 18/2 24/3
+f 18/1 25/2 24/3
+f 18/1 19/2 25/3
+f 19/1 26/2 25/3
+f 19/1 20/2 26/3
+f 20/1 27/2 26/3
+f 20/1 21/2 27/3
+f 21/1 28/2 27/3
+f 21/1 22/2 28/3
+f 22/1 23/2 28/3
+f 22/1 17/2 23/3
+f 17/1 19/2 18/3
+f 17/1 20/2 19/3
+f 17/1 21/2 20/3
+f 17/1 22/2 21/3
+f 23/1 24/2 25/3
+f 23/1 25/2 26/3
+f 23/1 26/2 27/3
+f 23/1 27/2 28/3

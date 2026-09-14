@@ -28,6 +28,8 @@ Options Options::parse(int argc, char** argv) {
             o.collisionTest = true;
         } else if (a == "--weapons-test") {
             o.weaponsTest = true;
+        } else if (a == "--robots-test") {
+            o.robotsTest = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {

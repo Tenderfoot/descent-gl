@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/combat.h"
+#include "sim/robots.h"
 #include "sim/ship.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace dvk {
 
@@ -23,6 +25,7 @@ struct SimState {
     // Fixed-capacity pools held by value: SimState is copied every step, and a
     // vector here would allocate in the simulation loop.
     sim::CombatState combat;
+    sim::RobotState robots;
 };
 
 // What the renderer draws: SimState interpolated between the two most recent
@@ -63,6 +66,19 @@ struct RenderState {
     // being drawn and stops casting.
     std::array<bool, sim::kMaxObjects> objectAlive{};
     int objectCount = 0;
+
+    // Robots, interpolated by slot.
+    struct RobotView {
+        glm::vec3 position{0.0f};
+        glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+        int type = 0;
+        int slot = 0;
+    };
+    std::array<RobotView, sim::kMaxRobots> robots{};
+    // Indexed by robot slot, so the light and shadow passes can cull a robot
+    // to the segments a light actually reaches.
+    std::array<int, sim::kMaxRobots> robotSegments{};
+    int robotCount = 0;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
@@ -112,6 +128,42 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         // Expanding as it fades reads as an explosion rather than a fading dot.
         flash.size = e.size * (0.55f + 0.85f * k);
         r.flashes[static_cast<size_t>(r.flashCount++)] = flash;
+    }
+
+    for (int i = 0; i < b.robots.count; ++i) {
+        const sim::Robot& cur = b.robots.robots[static_cast<size_t>(i)];
+        if (!cur.alive) continue;
+        const sim::Robot& prev = a.robots.robots[static_cast<size_t>(i)];
+        RenderState::RobotView view;
+        view.type = cur.type;
+        view.slot = i;
+        view.position =
+            prev.alive ? glm::mix(prev.body.position, cur.body.position, t) : cur.body.position;
+        view.orientation =
+            prev.alive ? glm::slerp(prev.orientation, cur.orientation, t) : cur.orientation;
+        r.robotSegments[static_cast<size_t>(i)] = cur.body.segment;
+        r.robots[static_cast<size_t>(r.robotCount++)] = view;
+    }
+
+    // Debris and drops ride the bolt list: they are small emissive things and
+    // the unlit pass draws them identically.
+    for (const sim::Debris& d : b.robots.debris) {
+        if (!d.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = d.body.position;
+        bolt.color = d.color * std::max(0.0f, 1.0f - d.age / d.lifetime);
+        bolt.size = 0.45f;
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+    for (const sim::Drop& drop : b.robots.drops) {
+        if (!drop.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
+        RenderState::Bolt bolt;
+        bolt.position = drop.position;
+        bolt.color = drop.kind == sim::DropKind::Energy ? glm::vec3(0.4f, 0.9f, 1.0f)
+                                                        : glm::vec3(0.5f, 1.0f, 0.5f);
+        // Pulses, so a drop in a dark corridor catches the eye.
+        bolt.size = 0.9f + 0.25f * std::sin(drop.age * 5.0f);
+        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
     }
 
     r.objectCount = b.combat.objects.count;

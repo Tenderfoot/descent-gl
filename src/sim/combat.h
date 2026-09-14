@@ -145,11 +145,14 @@ struct CombatState {
 // Sets up object health from the level's objects.
 void initObjects(const Level& level, ObjectHealth& out);
 
+struct RobotState;
+
 // One fixed step of everything in this file. `ship` is the player's body, used
-// for fire points and for taking splash damage.
-void stepCombat(const Level& level, CombatState& state, const Body& ship,
+// for fire points, as a target for robot fire, and for taking splash damage.
+// `robots` may be null before M6's robots exist.
+void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
-                const FireControls& controls, float dt);
+                const FireControls& controls, float dt, RobotState* robots);
 
 // Resets the player after a death. Returns true if a death happened this step.
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,

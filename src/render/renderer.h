@@ -22,6 +22,7 @@ struct Level;
 namespace sim {
 struct ContactLog;
 struct RayHit;
+struct RobotConfig;
 }
 struct Light;
 struct RenderState;
@@ -55,7 +56,7 @@ class Renderer {
 public:
     static constexpr GLsizei kSamples = 4;
 
-    explicit Renderer(const Level& level);
+    Renderer(const Level& level, const sim::RobotConfig& robots);
 
     void beginFrame(int fbWidth, int fbHeight);
     // `dynamicLights` holds everything that is not baked into the level: the
@@ -134,7 +135,9 @@ private:
     glm::vec3 eyePos(const RenderState& rs) const;
     glm::mat4 shipModelMatrix(const RenderState& rs) const;
 
-    void loadProps(const Level& level);
+    void loadProps(const Level& level, const sim::RobotConfig& robots);
+    void loadRobotMeshes(const sim::RobotConfig& robots);
+    void updateRobotOccluders(const RenderState& rs);
     void gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
                       const glm::vec3& eye, const PortalWalk& walk, int shadowBudget);
     void buildBillboards(const RenderState& rs);
@@ -169,6 +172,19 @@ private:
     std::unordered_map<std::string, Mesh> propMeshes_;
     std::unordered_map<std::string, OccluderMesh> propOccluders_;
     std::vector<Prop> props_;
+
+    // One entry per robot type, and one occluder per robot slot. A slot's
+    // occluder is only rebuilt when the robot in it changes type, which in
+    // practice is once.
+    struct RobotType {
+        const Mesh* mesh = nullptr;
+        const OccluderMesh* occluder = nullptr;
+        int textureLayer = 0;
+    };
+    std::vector<RobotType> robotTypes_;
+    std::vector<Occluder> robotOccluders_;
+    std::vector<int> robotOccluderType_;
+    const sim::RobotConfig* robotConfig_ = nullptr;
 
     // Every light being drawn this frame: the level's, then the headlight if
     // it is on. One list so the shadow build and the light passes cannot

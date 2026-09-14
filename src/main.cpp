@@ -8,6 +8,7 @@
 #include "game/state.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
+#include "game/robots_test.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
@@ -18,6 +19,7 @@
 #include "sim/combat.h"
 #include "sim/flight.h"
 #include "sim/flight_test.h"
+#include "sim/robots.h"
 #include "sim/ship.h"
 #include "sim/weapons.h"
 
@@ -48,6 +50,7 @@ constexpr double kMaxFrameTime = 0.25;
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kLevelPath = "assets/levels/test01.json";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
+constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 
 // The headlight. In a game with no ambient term this is the player's primary
 // way of seeing anything at all, so it is deliberately generous: a wide enough
@@ -98,7 +101,10 @@ int main(int argc, char** argv) {
         return dvk::runCollisionTest(kLevelPath, kFlightConfigPath);
     }
     if (opts.weaponsTest) {
-        return dvk::runWeaponsTest(kLevelPath, kWeaponConfigPath);
+        return dvk::runWeaponsTest(kLevelPath, kWeaponConfigPath, kRobotConfigPath);
+    }
+    if (opts.robotsTest) {
+        return dvk::runRobotsTest(kLevelPath, kWeaponConfigPath, kRobotConfigPath);
     }
 
     dvk::Window::Desc desc;
@@ -126,7 +132,8 @@ int main(int argc, char** argv) {
 #endif
 
     dvk::Level level = dvk::loadLevel(kLevelPath);
-    dvk::gl::Renderer renderer(level);
+    const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
+    dvk::gl::Renderer renderer(level, robotConfig);
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
     renderer.showStencil = opts.stencilView;
     renderer.drawWallNormals = opts.debugLines;
@@ -164,6 +171,7 @@ int main(int argc, char** argv) {
 
     dvk::sim::WeaponConfig weapons = dvk::sim::loadWeaponConfig(kWeaponConfigPath);
     dvk::sim::initObjects(level, cur.combat.objects);
+    dvk::sim::spawnRobots(level, robotConfig, cur.robots);
     prev = cur;
 
     // Rebuilt every frame and reused, so the vectors inside each Light keep
@@ -299,7 +307,9 @@ int main(int argc, char** argv) {
                 }
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
-                                 fire, static_cast<float>(kSimStep));
+                                 fire, static_cast<float>(kSimStep), &cur.robots);
+            dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
+                                 cur.ship.body, static_cast<float>(kSimStep));
             dvk::sim::checkPlayerDeath(level, cur.combat, cur.ship.body, cur.ship.orientation);
             consumedMouse = true;
             accumulator -= kSimStep;
@@ -540,6 +550,43 @@ int main(int argc, char** argv) {
                 ImGui::Text("%-9s %4d edges  %5d tris  %2d segs", label, ls[i].silhouetteEdges,
                             ls[i].volumeTriangles, ls[i].segments);
                 ImGui::PopID();
+            }
+            ImGui::EndChild();
+        }
+        ImGui::End();
+
+        ImGui::SetNextWindowPos(ImVec2(860, 12), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(510, 0), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("robots")) {
+            ImGui::Text("%d of %d alive   %d debris   %d drops", cur.robots.aliveCount(),
+                        cur.robots.count,
+                        static_cast<int>(std::count_if(
+                            cur.robots.debris.begin(), cur.robots.debris.end(),
+                            [](const dvk::sim::Debris& d) { return d.alive; })),
+                        static_cast<int>(std::count_if(
+                            cur.robots.drops.begin(), cur.robots.drops.end(),
+                            [](const dvk::sim::Drop& d) { return d.alive; })));
+            ImGui::Text("path field built for player segment %d", cur.robots.pathSegment);
+            ImGui::Separator();
+            ImGui::BeginChild("robot list", ImVec2(0, 220), true);
+            for (int i = 0; i < cur.robots.count; ++i) {
+                const dvk::sim::Robot& r = cur.robots.robots[static_cast<size_t>(i)];
+                if (!r.alive) {
+                    ImGui::TextDisabled("%2d  destroyed", i);
+                    continue;
+                }
+                const dvk::sim::RobotDef& def =
+                    robotConfig.types[static_cast<size_t>(r.type)];
+                const int16_t distance =
+                    r.body.segment >= 0 && r.body.segment < cur.robots.pathValidCount
+                        ? cur.robots.distanceToPlayer[static_cast<size_t>(r.body.segment)]
+                        : -1;
+                ImGui::Text("%2d %-7s %-7s <- %-7s  %4.0f/%-4.0f hp  seg %2d  %2d away  "
+                            "aware %.2f",
+                            i, def.name.c_str(),
+                            dvk::sim::kRobotModeNames[static_cast<size_t>(r.mode)],
+                            dvk::sim::kRobotModeNames[static_cast<size_t>(r.previousMode)],
+                            r.health, def.health, r.body.segment, distance, r.awareness);
             }
             ImGui::EndChild();
         }

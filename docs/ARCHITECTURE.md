@@ -621,6 +621,63 @@ particle system beyond that, deliberately.
 
 ---
 
+## Robots
+
+`src/sim/robots.h`. Three types from `assets/config/robots.json`, placed in the
+level's `objects` list: **an object whose type names a robot definition becomes
+a robot**, and everything else stays static scenery. Robots are `Body`s, so they
+cannot leave the mine any more than the player can — no separate containment
+logic, and therefore no separate bugs.
+
+### One breadth-first search serves every robot
+
+Pathing is a **distance field**, not a path per robot. One BFS from the player's
+segment labels every segment with its distance in portals; a robot steers
+towards whichever neighbouring segment has a lower number. Every robot chases
+the same thing, so they can all share it, and it is rebuilt only when the player
+changes segment.
+
+### Awareness, not line of sight
+
+The state machine is driven by an `awareness` value, not by whether the player
+is visible right now. Seeing the player sets it to 1; losing sight decays it
+over about three seconds. A robot therefore keeps hunting for a moment after you
+break line of sight, instead of forgetting you the instant a wall gets between
+you. Being *hit* also sets it — a hit is a noise.
+
+### Retreat is what sells it
+
+Pathing is easy and Attack is obvious. What makes robots read as cautious rather
+than as turrets is that an unaggressive one, having just finished a burst, backs
+off around the corner, waits, and comes back. `aggression` is the dice roll on
+that; the brute's is 0.95, so it effectively never does, and it is the wall you
+run into.
+
+Aim leads the player's velocity by `lead` — below 1, so a moving player is still
+hard to hit, which is what makes strafing worth doing. Early shots in a burst
+get extra spread, so a burst walks onto the target instead of all landing or all
+missing.
+
+### Friendly fire
+
+A robot's fire never hits a robot, and the player's never hits the player.
+Splash damage is the exception and hurts everything in range including the
+player, because splash that cannot hurt the firer is a missile you can safely
+shoot at your own feet.
+
+### Eyes
+
+Emissive billboards at local offsets from `robots.json`, drawn in the unlit
+pass, so they read in total darkness. In a mine with no ambient light the eyes
+are usually the first thing the player sees of a robot — which is the whole
+reason they exist.
+
+They are billboards rather than mesh faces because the meshes carry no material
+split, and a glow reads better at distance than a lit polygon would. A
+deviation from the plan's "emissive eye geometry", and worth knowing about.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort
