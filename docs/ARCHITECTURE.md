@@ -1076,6 +1076,39 @@ silhouette work, and `gatherLights` orders the shadow budget by the same test.
 
 ---
 
+## Asset validation at startup
+
+`src/game/asset_check.h`. Every `.obj` under `assets/models` and every `.json`
+under `assets/levels` goes through the M2 and M3 validators on every run, one
+report line each, before a window exists.
+
+Both validators already ran at load — but only for the assets a given run
+happens to touch. Play `mine01` and nothing ever looks at `test01`; a model no
+level places is never loaded at all. Walking the directories instead means a
+broken asset is found on the next run rather than on the run that first needs
+it, and before anything is on screen.
+
+Closure is asked through `checkClosure`, which reports rather than aborts, and
+which deliberately uses the same weld and adjacency rules as `buildOccluder` — a
+report using a different rule could pass an asset the loader then aborts on,
+which is worse than no report.
+
+### What "skip it in Release" does and does not mean
+
+M8 asks for a failing asset to be fatal in Debug and skipped with a warning in
+Release. That is what a failing **model** does: the game is better off missing a
+pillar than refusing to start.
+
+A failing **level** is fatal in both, which is a deliberate departure. Skipping
+it leaves nothing to play, so "continue without it" is not a better outcome than
+stopping and saying why. This is the same rule the level loader already had.
+
+The level report also prints the surface's Euler characteristic. `V - E + F = 2`
+is a closed genus-0 surface, which is the property the mine's own shadow volume
+depends on; both shipped levels report 2.
+
+---
+
 ## GL debugging
 
 `src/render/debug.h`. `KHR_debug` callback, installed synchronously so an abort

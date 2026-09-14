@@ -28,6 +28,7 @@ add_executable(descent
     src/core/log.cpp
     src/core/options.cpp
     src/core/window.cpp
+    src/game/asset_check.cpp
     src/game/collision_test.cpp
     src/game/level.cpp
     src/game/visibility.cpp

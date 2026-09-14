@@ -53,6 +53,27 @@ OccluderMesh buildOccluder(const std::vector<glm::vec3>& positions,
                            const std::vector<glm::uvec3>& triangles,
                            const std::vector<int>& triangleSegment, const std::string& name);
 
+// Closure as a question rather than an assertion.
+//
+// buildOccluder aborts on an open mesh, which is the right answer when that mesh
+// is about to cast: there is no tolerable degraded behaviour. The startup asset
+// report needs the opposite - to look at every shipped asset, say what is wrong
+// with each, and keep going - so it asks this instead.
+struct ClosureReport {
+    int weldedVertices = 0;
+    int triangles = 0;
+    int edges = 0;
+    int openEdges = 0;         // shared by exactly one triangle
+    int overSharedEdges = 0;   // shared by three or more
+    glm::vec3 badA{0.0f};      // the first offending edge, if any
+    glm::vec3 badB{0.0f};
+
+    bool closed() const { return openEdges == 0 && overSharedEdges == 0; }
+};
+
+ClosureReport checkClosure(const std::vector<glm::vec3>& positions,
+                           const std::vector<glm::uvec3>& triangles);
+
 // One placed instance: a mesh plus where it is. World positions and planes are
 // cached, so a static object pays for its transform once and the ship pays once
 // per frame. The world data decides which triangles face the light; the

@@ -146,6 +146,69 @@ OccluderMesh buildOccluder(const std::vector<glm::vec3>& positions,
     return mesh;
 }
 
+ClosureReport checkClosure(const std::vector<glm::vec3>& positions,
+                           const std::vector<glm::uvec3>& triangles) {
+    ClosureReport report;
+
+    // The same weld and adjacency buildOccluder does, and deliberately so: a
+    // report that used a different rule could pass an asset the loader will
+    // then abort on, which is worse than no report at all.
+    std::unordered_map<WeldKey, uint32_t, WeldHash> unique;
+    std::vector<uint32_t> remap(positions.size(), 0);
+    std::vector<glm::vec3> welded;
+    unique.reserve(positions.size());
+    for (size_t i = 0; i < positions.size(); ++i) {
+        const WeldKey key = weldKey(positions[i]);
+        const auto [it, inserted] = unique.emplace(key, static_cast<uint32_t>(welded.size()));
+        if (inserted) welded.push_back(positions[i]);
+        remap[i] = it->second;
+    }
+    report.weldedVertices = static_cast<int>(welded.size());
+
+    struct Counted {
+        uint32_t a = 0, b = 0;
+        int uses = 0;
+    };
+    std::vector<Counted> edges;
+    std::unordered_map<uint64_t, size_t> lookup;
+    lookup.reserve(triangles.size() * 3);
+
+    for (const glm::uvec3& tri : triangles) {
+        const glm::uvec3 w{remap[tri.x], remap[tri.y], remap[tri.z]};
+        if (w.x == w.y || w.y == w.z || w.x == w.z) continue;
+        ++report.triangles;
+        const uint32_t corner[3] = {w.x, w.y, w.z};
+        for (int e = 0; e < 3; ++e) {
+            const uint32_t u = corner[e];
+            const uint32_t v = corner[(e + 1) % 3];
+            const uint32_t a = std::min(u, v);
+            const uint32_t b = std::max(u, v);
+            const uint64_t key = static_cast<uint64_t>(a) << 32 | b;
+            auto it = lookup.find(key);
+            if (it == lookup.end()) {
+                lookup.emplace(key, edges.size());
+                edges.push_back({a, b, 1});
+            } else {
+                ++edges[it->second].uses;
+            }
+        }
+    }
+    report.edges = static_cast<int>(edges.size());
+
+    bool haveBad = false;
+    for (const Counted& edge : edges) {
+        if (edge.uses == 2) continue;
+        if (edge.uses < 2) ++report.openEdges;
+        if (edge.uses > 2) ++report.overSharedEdges;
+        if (!haveBad) {
+            report.badA = welded[edge.a];
+            report.badB = welded[edge.b];
+            haveBad = true;
+        }
+    }
+    return report;
+}
+
 void Occluder::reset(const OccluderMesh* mesh, const glm::mat4& transform) {
     mesh_ = mesh;
     worldPos_.resize(mesh ? mesh->positions.size() : 0);
