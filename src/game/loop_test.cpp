@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/session.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/gameflow.h"
@@ -108,6 +109,46 @@ bool expect(bool condition, const char* what) {
     return condition;
 }
 
+bool verifyLevelSession(const Level& level, const sim::RobotConfig& robots) {
+    bool ok = true;
+    LevelSession session;
+    ok &= expect(session.mode() == AppMode::MainMenu, "a session starts at the main menu");
+    ok &= expect(!session.active(), "a session starts without an active level");
+
+    session.start(level, robots);
+    const glm::vec3 initialPosition = session.current().ship.body.position;
+    const int initialRobots = session.current().robots.count;
+    const int initialObjects = session.current().combat.objects.count;
+    ok &= expect(session.mode() == AppMode::Playing, "starting a level enters play");
+    ok &= expect(session.advancesSimulation(), "play advances the simulation");
+
+    session.current().game.elapsed = 12.0f;
+    session.current().ship.body.position += glm::vec3(3.0f, 2.0f, 1.0f);
+    session.pause();
+    ok &= expect(session.mode() == AppMode::Paused, "pausing enters the paused state");
+    ok &= expect(!session.advancesSimulation(), "pause freezes the simulation");
+    session.resume();
+    ok &= expect(session.mode() == AppMode::Playing, "resuming returns to play");
+
+    session.finish();
+    ok &= expect(session.mode() == AppMode::RunSummary, "finishing enters the run summary");
+    ok &= expect(!session.advancesSimulation(), "the run summary freezes the simulation");
+    session.restart();
+    ok &= expect(session.mode() == AppMode::Playing, "restarting returns to play");
+    ok &= expect(session.current().game.elapsed == 0.0f, "restarting resets elapsed time");
+    ok &= expect(glm::distance(session.current().ship.body.position, initialPosition) < 1e-5f,
+                 "restarting resets the player position");
+    ok &= expect(session.current().robots.count == initialRobots, "restarting restores robots");
+    ok &= expect(session.current().combat.objects.count == initialObjects,
+                 "restarting restores objects");
+
+    session.leave();
+    ok &= expect(session.mode() == AppMode::MainMenu, "leaving returns to the main menu");
+    ok &= expect(!session.active(), "leaving clears the active level");
+    log::info("session lifecycle: {}", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 } // namespace
 
 int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char* robotConfigPath) {
@@ -116,6 +157,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     rig.weapons = sim::loadWeaponConfig(weaponConfigPath);
     rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
     bool ok = true;
+    ok &= verifyLevelSession(rig.level, rig.robotCfg);
 
     // Only a campaign level has a loop to test. test01 is a renderer and
     // physics fixture with no doors, no exit and no reactor, and running the

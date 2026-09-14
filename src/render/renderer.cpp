@@ -556,14 +556,15 @@ void Renderer::buildBillboards(const RenderState& rs) {
     // are usually the first thing the player sees of a robot.
     if (robotConfig_) {
         for (int i = 0; i < rs.robotCount; ++i) {
-            const RenderState::RobotView& view = rs.robots[static_cast<size_t>(i)];
-            if (view.type < 0 || view.type >= static_cast<int>(robotConfig_->types.size())) {
+            const RenderState::RobotView& robot = rs.robots[static_cast<size_t>(i)];
+            if (robot.type < 0 || robot.type >= static_cast<int>(robotConfig_->types.size())) {
                 continue;
             }
-            const sim::RobotDef& def = robotConfig_->types[static_cast<size_t>(view.type)];
-            const glm::mat3 basis = glm::mat3_cast(view.orientation);
+            const sim::RobotDef& def = robotConfig_->types[static_cast<size_t>(robot.type)];
+            const glm::mat3 basis = glm::mat3_cast(robot.orientation);
             for (const glm::vec3& eye : def.eyes) {
-                billboards_.add(view.position + basis * eye, right, up, def.eyeSize, def.eyeColor);
+                billboards_.add(robot.position + basis * eye, right, up, def.eyeSize,
+                                def.eyeColor);
             }
         }
     }

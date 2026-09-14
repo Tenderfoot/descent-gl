@@ -126,7 +126,7 @@ Time spent minimized and the final screenshot encode are both excluded from it.
 | F | Throw a flare |
 | H | Toggle the headlight |
 | M | Mute |
-| Escape | Toggle mouse capture |
+| Escape | Pause / resume |
 
 All of these come from one table in `src/game/bindings.h`; nothing else in the
 project names a GLFW key code for gameplay.

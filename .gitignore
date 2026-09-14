@@ -12,6 +12,7 @@ vcpkg_installed/
 
 # screenshots written by --screenshot
 *.screenshot.png
+imgui.ini
 
 # Linux dev-container dependencies (see tools/linux-deps.sh)
 .deps/

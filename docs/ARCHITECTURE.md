@@ -997,9 +997,29 @@ string literals rather than at anything it has to free.
 ### Four phases, and one direction through them
 
 `Playing → Countdown → Won`, or either of the first two → `Lost`. `stepGame`
-returns immediately in `Won` and `Lost`, so an end screen is a frozen
-simulation rather than a separate mode with its own loop. The phase never runs
-backwards; restarting rebuilds the state from the level instead of unwinding it.
+returns immediately in `Won` and `Lost`. The phase never runs backwards;
+restarting rebuilds the state from the level instead of unwinding it.
+
+### The application owns the run
+
+`src/game/session.h` separates application state from level state. `AppMode`
+tracks the main menu, active play, pause and the run summary while `GamePhase`
+continues to describe only events inside the simulation. That keeps a pause
+menu from becoming a simulated phase and gives later player-facing screens one
+place to decide whether the fixed step may advance.
+
+`LevelSession` owns the initial, previous and current `SimState`. Starting a
+level builds all three from the level and robot definitions. Restart copies the
+stored initial state back into both interpolation endpoints, so no velocity,
+projectile, door position or render interpolation survives. Leaving a run
+returns the application to the main menu without trying to reverse simulation
+events.
+
+Only `AppMode::Playing` admits fixed steps. Entering pause clears the
+accumulator, and resuming begins with an empty accumulator, so time spent in a
+menu cannot turn into a burst of catch-up simulation. Paused and summary time
+is excluded from the achieved-step-rate denominator for the same reason that
+minimized time is excluded.
 
 The reactor is not a special object type. It is a **robot whose definition sets
 `isReactor`**, which means it already has health, line of sight, a weapon and a

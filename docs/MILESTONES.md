@@ -1408,3 +1408,28 @@ the names are the contract, not the contents.
   alone. The segment is already carried on every event for the day that changes.
 - **No reverb and no doppler.** The clips are dry deliberately — the sense of
   space comes from attenuation and panning, and baked-in reverb fights it.
+
+---
+
+## Player shell — Phase 1 ✅
+
+Application modes and level-session ownership establish the lifecycle that the
+player-facing menus will drive. The executable still enters the level directly
+until the Phase 2 screens exist.
+
+`LevelSession` owns the initial and interpolation states, provides start,
+restart, pause, resume, finish and leave transitions, and exposes the single
+answer to whether the fixed simulation may advance. Escape now pauses and
+resumes, releasing and recapturing the mouse. Win and loss enter a run-summary
+mode instead of relying on the simulation phase alone to freeze the game.
+
+| Check | Result |
+| --- | --- |
+| Session starts outside a level | ✅ main menu, inactive |
+| Starting a level | ✅ playing, simulation advances |
+| Pause and run summary | ✅ simulation does not advance |
+| Restart | ✅ elapsed time, player, robots and objects restored |
+| Leave | ✅ main menu, inactive |
+| Debug and Release headless suites | ✅ all eight pass in both configurations |
+| Debug and Release rendered startup | ✅ 60 frames, clean exit, no GL errors |
+| Release resize, minimize and restore | ✅ 119.8 / 120 steps/s |

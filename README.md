@@ -95,7 +95,7 @@ performance measurement.**
 | Right mouse | Launch a missile |
 | F | Throw a flare |
 | H | Toggle the headlight |
-| Escape | Toggle mouse capture |
+| Escape | Pause / resume |
 
 Every one of these comes from a single table in `src/game/bindings.h`.
 
