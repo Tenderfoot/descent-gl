@@ -3,6 +3,7 @@
 #include "render/gl.h"
 
 #include <glm/mat4x4.hpp>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
 #include <string>
@@ -22,6 +23,7 @@ public:
     void bind() const { glUseProgram(program_); }
 
     void setMat4(const char* name, const glm::mat4& m) const;
+    void setVec2(const char* name, const glm::vec2& v) const;
     void setVec3(const char* name, const glm::vec3& v) const;
     void setVec4(const char* name, const glm::vec4& v) const;
     void setFloat(const char* name, float v) const;

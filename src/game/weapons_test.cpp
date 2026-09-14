@@ -60,6 +60,17 @@ struct Rig {
     }
 };
 
+// Only the player's shots. Robots fire into the same pool, so a plain count
+// of live projectiles also counts whatever is being shot AT the player - which
+// on a level with robots near the spawn is never zero.
+int playerBolts(const Rig& rig) {
+    int n = 0;
+    for (const sim::Projectile& p : rig.state.projectiles.items) {
+        if (p.alive && p.owner < 0) ++n;
+    }
+    return n;
+}
+
 bool expect(bool condition, const char* what) {
     if (!condition) log::error("FAILED: {}", what);
     return condition;
@@ -94,14 +105,14 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.state.player.headlightOn = false;
         rig.run(1, controls);
 
-        const int fired = rig.state.projectiles.count();
+        const int fired = playerBolts(rig);
         ok &= expect(fired == 1, "one shot on the first step");
 
         // A second step inside the cooldown must not produce another.
         rig.run(1, controls);
         const bool withinCooldown = def.fireInterval > kStep * 1.5f;
         if (withinCooldown) {
-            ok &= expect(rig.state.projectiles.count() == 1,
+            ok &= expect(playerBolts(rig) == 1,
                          "no second shot while the weapon is still cooling down");
         }
 
@@ -136,11 +147,11 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         // Step until the bolt is gone, so the impact effect can be counted
         // while it is still alive - they last a sixth of a second.
         int steps = 0;
-        while (rig.state.projectiles.count() > 0 && steps < 240) {
+        while (playerBolts(rig) > 0 && steps < 240) {
             rig.run(1, controls);
             ++steps;
         }
-        ok &= expect(rig.state.projectiles.count() == 0, "the bolt hit something and expired");
+        ok &= expect(playerBolts(rig) == 0, "the bolt hit something and expired");
         ok &= expect(rig.state.effects.count() > 0, "the impact spawned a flash");
         log::info("wall impact: bolt gone after {:.2f}s, {} impact flash(es) alive",
                   static_cast<float>(steps) * kStep, rig.state.effects.count());
@@ -164,7 +175,7 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         controls.primary = false;
         rig.run(60, controls);
 
-        const bool stopped = rig.state.projectiles.count() == 0;
+        const bool stopped = playerBolts(rig) == 0;
         ok &= expect(stopped, "a 2000 u/s bolt still stopped at a wall");
         log::info("tunnelling: a bolt at 2000 u/s (16.7 units per step) {}",
                   stopped ? "stopped at the wall" : "ESCAPED");
@@ -284,7 +295,7 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         controls.primary = true;
         rig.run(600, controls);
 
-        const int live = rig.state.projectiles.count();
+        const int live = playerBolts(rig);
         ok &= expect(live <= sim::kMaxProjectiles, "the projectile pool held");
         ok &= expect(rig.state.player.vulcanAmmo < 2000, "sustained fire spent ammo");
         log::info("vulcan spam: 5 s of fire, {} bolts live, {} rounds left, pool capacity {}",

@@ -68,8 +68,13 @@ inline glm::vec3 closestPointOnTriangle(const glm::vec3& p, const glm::vec3& a,
 // Moller-Trumbore. Returns the distance along a unit `dir`, or a negative
 // number if the ray misses. Two-sided on purpose: a ray leaving the mine hits
 // the back of a wall, and that still counts.
+// `edgeSlack` widens the barycentric bounds, so a ray passing exactly along a
+// triangle's edge still counts as a hit. Zero for surfaces, where a hair of
+// over-reporting would stop a ray short; a small positive value for portals,
+// where the two triangles of one quad share a diagonal and a ray straight down
+// that diagonal can otherwise miss both and be stopped by the wall behind.
 inline float rayTriangleDistance(const glm::vec3& origin, const glm::vec3& dir, const glm::vec3& a,
-                                 const glm::vec3& b, const glm::vec3& c) {
+                                 const glm::vec3& b, const glm::vec3& c, float edgeSlack = 0.0f) {
     constexpr float kEpsilon = 1e-5f;
     const glm::vec3 ab = b - a;
     const glm::vec3 ac = c - a;
@@ -80,11 +85,11 @@ inline float rayTriangleDistance(const glm::vec3& origin, const glm::vec3& dir, 
     const float inv = 1.0f / det;
     const glm::vec3 tv = origin - a;
     const float u = glm::dot(tv, pv) * inv;
-    if (u < 0.0f || u > 1.0f) return -1.0f;
+    if (u < -edgeSlack || u > 1.0f + edgeSlack) return -1.0f;
 
     const glm::vec3 qv = glm::cross(tv, ab);
     const float v = glm::dot(dir, qv) * inv;
-    if (v < 0.0f || u + v > 1.0f) return -1.0f;
+    if (v < -edgeSlack || u + v > 1.0f + edgeSlack) return -1.0f;
 
     return glm::dot(ac, qv) * inv;
 }

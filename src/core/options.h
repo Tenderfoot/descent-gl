@@ -36,8 +36,15 @@ namespace dvk {
 //   --robots-test       drive the robot state machine through idle, alert,
 //                       chase, attack, retreat and death, and check they never
 //                       leave the mine. Needs no window and no GL.
-//   --no-ui             hide the ImGui panels, so a screenshot shows the game
-//                       rather than the debug windows
+//   --loop-test         play the level's win and lose conditions through:
+//                       keys against doors, a shut door against light, the
+//                       reactor, the countdown, the exit and every pickup.
+//                       Needs no window and no GL.
+//   --level PATH        load a level other than the default mine01
+//   --no-ui             hide both the HUD and the debug panels, so a
+//                       screenshot shows only the game
+//   --debug-ui          start with the ImGui debug panels open (F3 at
+//                       runtime); they are off by default from M7
 //   --autofire W        hold the trigger for weapon W (0 laser, 1 vulcan,
 //                       2 concussion, 3 homing, 4 flares), so a screenshot can
 //                       show bolts in flight and the lights they carry
@@ -51,6 +58,7 @@ namespace dvk {
 struct Options {
     int frames = -1;
     std::string screenshot;
+    std::string level;
     bool resizeTest = false;
     bool chase = false;
     bool flightTest = false;
@@ -58,12 +66,14 @@ struct Options {
     bool collisionTest = false;
     bool weaponsTest = false;
     bool robotsTest = false;
+    bool loopTest = false;
     int startSegment = -1;
     bool wireframeVolumes = false;
     bool stencilView = false;
     bool debugLines = false;
     int autofire = -1;
     bool noUi = false;
+    bool debugUi = false;
     int width = 1600;
     int height = 900;
 

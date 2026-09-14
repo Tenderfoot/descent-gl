@@ -46,6 +46,36 @@ struct ContactLog {
     }
 };
 
+// The triangles of every door that is currently shut, in world space.
+//
+// A door is a portal in the segment graph, so it contributes nothing to the
+// static wall list. While it is closed it has to stop bodies, rays and bolts
+// anyway, and it has to do so from both sides. Rebuilt once per step and handed
+// to everything that asks a geometric question, so collision, line of sight and
+// projectiles cannot disagree about whether a door is shut.
+struct SolidDoors {
+    struct Face {
+        std::array<glm::vec3, 3> p{};
+        glm::vec3 normal{0.0f};
+        int segmentA = -1;
+        int segmentB = -1;
+    };
+    static constexpr int kCapacity = 64;
+    std::array<Face, kCapacity> faces{};
+    int count = 0;
+
+    void clear() { count = 0; }
+    bool touches(int segment) const {
+        for (int i = 0; i < count; ++i) {
+            if (faces[static_cast<size_t>(i)].segmentA == segment ||
+                faces[static_cast<size_t>(i)].segmentB == segment) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 struct CollisionConfig {
     // How many times the push-out is repeated per step. Corners need more than
     // one pass: resolving against one wall can push the body into another.
@@ -62,7 +92,7 @@ struct CollisionConfig {
 // velocity so it slides, and updates body.segment. Returns the number of
 // contacts resolved. `log` may be null.
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
-                     ContactLog* log);
+                     ContactLog* log, const SolidDoors* doors = nullptr);
 
 // --- queries ------------------------------------------------------------
 
@@ -79,12 +109,13 @@ struct RayHit {
 // leaving through a portal continues into the neighbour. Stops at the first
 // wall hit or at maxDistance.
 RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& direction,
-               float maxDistance, int startSegment);
+               float maxDistance, int startSegment, const SolidDoors* doors = nullptr);
 
 // The same path, for a sphere of the given radius. This is what fast
 // projectiles move along in M5, so that a bolt crossing several segments in one
 // step cannot pass through a wall.
 RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3& direction,
-                   float radius, float maxDistance, int startSegment);
+                   float radius, float maxDistance, int startSegment,
+                   const SolidDoors* doors = nullptr);
 
 } // namespace dvk::sim

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/combat.h"
+#include "sim/gameflow.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 
@@ -26,6 +27,7 @@ struct SimState {
     // vector here would allocate in the simulation loop.
     sim::CombatState combat;
     sim::RobotState robots;
+    sim::GameState game;
 };
 
 // What the renderer draws: SimState interpolated between the two most recent
@@ -79,6 +81,25 @@ struct RenderState {
     // to the segments a light actually reaches.
     std::array<int, sim::kMaxRobots> robotSegments{};
     int robotCount = 0;
+
+    // Pickups still on the floor, as emissive markers.
+    struct PickupView {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        bool present = false;
+    };
+    std::array<PickupView, sim::kMaxPickups> pickups{};
+    int pickupCount = 0;
+
+    // How far each door has slid open, so the renderer can place the slabs.
+    std::array<float, sim::kMaxDoors> doorOpenness{};
+    int doorCount = 0;
+
+    // The mine coming apart during the countdown: a world-space offset added
+    // to the camera, and a multiplier on every static light so they flicker.
+    glm::vec3 shakeOffset{0.0f};
+    float staticLightScale = 1.0f;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
@@ -164,6 +185,13 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         // Pulses, so a drop in a dark corridor catches the eye.
         bolt.size = 0.9f + 0.25f * std::sin(drop.age * 5.0f);
         r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    r.doorCount = static_cast<int>(sim::kMaxDoors);
+    for (int i = 0; i < r.doorCount; ++i) {
+        r.doorOpenness[static_cast<size_t>(i)] =
+            glm::mix(a.game.doors[static_cast<size_t>(i)].openness,
+                     b.game.doors[static_cast<size_t>(i)].openness, t);
     }
 
     r.objectCount = b.combat.objects.count;

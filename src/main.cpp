@@ -8,6 +8,7 @@
 #include "game/state.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
+#include "game/loop_test.h"
 #include "game/robots_test.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
@@ -19,6 +20,7 @@
 #include "sim/combat.h"
 #include "sim/flight.h"
 #include "sim/flight_test.h"
+#include "sim/gameflow.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 #include "sim/weapons.h"
@@ -48,7 +50,7 @@ constexpr double kSimStep = 1.0 / kSimHz;
 constexpr double kMaxFrameTime = 0.25;
 
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
-constexpr const char* kLevelPath = "assets/levels/test01.json";
+constexpr const char* kDefaultLevelPath = "assets/levels/mine01.json";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 
@@ -88,6 +90,7 @@ constexpr double kResizeTestSeconds = 9.0;
 
 int main(int argc, char** argv) {
     const dvk::Options opts = dvk::Options::parse(argc, argv);
+    const char* levelPath = opts.level.empty() ? kDefaultLevelPath : opts.level.c_str();
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -95,16 +98,19 @@ int main(int argc, char** argv) {
         return dvk::sim::runFlightTest(kFlightConfigPath);
     }
     if (opts.worldTest) {
-        return dvk::runWorldTest(kLevelPath);
+        return dvk::runWorldTest(levelPath);
     }
     if (opts.collisionTest) {
-        return dvk::runCollisionTest(kLevelPath, kFlightConfigPath);
+        return dvk::runCollisionTest(levelPath, kFlightConfigPath);
     }
     if (opts.weaponsTest) {
-        return dvk::runWeaponsTest(kLevelPath, kWeaponConfigPath, kRobotConfigPath);
+        return dvk::runWeaponsTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
     }
     if (opts.robotsTest) {
-        return dvk::runRobotsTest(kLevelPath, kWeaponConfigPath, kRobotConfigPath);
+        return dvk::runRobotsTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
+    }
+    if (opts.loopTest) {
+        return dvk::runLoopTest(levelPath, kWeaponConfigPath, kRobotConfigPath);
     }
 
     dvk::Window::Desc desc;
@@ -131,7 +137,7 @@ int main(int argc, char** argv) {
     dvk::gl::installDebugCallback(/*fatalOnHigh=*/false);
 #endif
 
-    dvk::Level level = dvk::loadLevel(kLevelPath);
+    dvk::Level level = dvk::loadLevel(levelPath);
     const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
     dvk::gl::Renderer renderer(level, robotConfig);
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
@@ -166,12 +172,27 @@ int main(int argc, char** argv) {
     dvk::CameraMode camera =
         opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
 
+    // F3 brings the debug panels back. Off by default, because from M7 the HUD
+    // is what the player reads and the panels are for tuning.
+    bool showDebugUi = !opts.noUi && opts.debugUi;
+
     dvk::PortalWalk walk;
     dvk::LightFlood flood;
 
     dvk::sim::WeaponConfig weapons = dvk::sim::loadWeaponConfig(kWeaponConfigPath);
     dvk::sim::initObjects(level, cur.combat.objects);
     dvk::sim::spawnRobots(level, robotConfig, cur.robots);
+
+    const dvk::sim::GameConfig gameConfig;
+    dvk::sim::initGame(level, cur.robots, cur.game);
+
+    // Rebuilt each step and handed to collision, line of sight and projectiles
+    // alike, so none of them can disagree about whether a door is shut.
+    dvk::sim::SolidDoors solidDoors;
+
+    // A fresh start, kept so any key can restart from an end screen without
+    // reloading the level.
+    const dvk::SimState initialState = cur;
     prev = cur;
 
     // Rebuilt every frame and reused, so the vectors inside each Light keep
@@ -256,7 +277,18 @@ int main(int argc, char** argv) {
         if (input.pressed(GLFW_KEY_ESCAPE)) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
-        if (input.pressed(GLFW_KEY_H)) {
+        // Any key restarts from an end screen. Checked before the toggles
+        // below so the restart key does not also flip the headlight.
+        if (cur.game.phase == dvk::sim::GamePhase::Won ||
+            cur.game.phase == dvk::sim::GamePhase::Lost) {
+            if (input.anyKeyPressed() || input.mousePressed(GLFW_MOUSE_BUTTON_LEFT)) {
+                cur = initialState;
+                prev = cur;
+                accumulator = 0.0;
+            }
+        } else if (input.pressed(GLFW_KEY_F3)) {
+            showDebugUi = !showDebugUi;
+        } else if (input.pressed(GLFW_KEY_H)) {
             // Refuses to come on with no energy left, which is the whole point
             // of it costing any.
             cur.combat.player.headlightOn =
@@ -283,8 +315,28 @@ int main(int argc, char** argv) {
             dvk::sim::CollisionConfig collision;
             collision.scrapeDamping = flight.wallScrape;
             cur.ship.body.radius = flight.shipRadius;
+            // The shut-door faces for this step, built before anything asks a
+            // geometric question.
+            solidDoors.clear();
+            for (size_t di = 0; di < level.doors.size() && di < dvk::sim::kMaxDoors; ++di) {
+                if (cur.game.doors[di].openness >= 0.75f) continue;
+                const dvk::Door& door = level.doors[di];
+                const int split[2][3] = {{0, 1, 2}, {0, 2, 3}};
+                for (int t = 0; t < 2 && solidDoors.count < dvk::sim::SolidDoors::kCapacity; ++t) {
+                    dvk::sim::SolidDoors::Face& face =
+                        solidDoors.faces[static_cast<size_t>(solidDoors.count++)];
+                    for (int k = 0; k < 3; ++k) {
+                        face.p[static_cast<size_t>(k)] =
+                            door.corners[static_cast<size_t>(split[t][k])];
+                    }
+                    face.normal = door.normal;
+                    face.segmentA = door.segment;
+                    face.segmentB = door.neighbour;
+                }
+            }
+
             dvk::sim::resolveCollision(level, cur.ship.body, collision,
-                                       static_cast<float>(kSimStep), &contacts);
+                                       static_cast<float>(kSimStep), &contacts, &solidDoors);
 
             dvk::sim::FireControls fire;
             // Only the first sim step of a frame sees the button edges, for
@@ -310,7 +362,10 @@ int main(int argc, char** argv) {
                                  fire, static_cast<float>(kSimStep), &cur.robots);
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep));
-            dvk::sim::checkPlayerDeath(level, cur.combat, cur.ship.body, cur.ship.orientation);
+            dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
+                               cur.ship.body, static_cast<float>(kSimStep));
+            // In M5 zero shields respawned you on the spot. From M7 it ends
+            // the level, and the end screen offers a restart.
             consumedMouse = true;
             accumulator -= kSimStep;
             ++totalSteps;
@@ -319,6 +374,45 @@ int main(int argc, char** argv) {
         const auto alpha = static_cast<float>(accumulator / kSimStep);
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
         rs.camera = camera;
+
+        // The mine coming apart. Driven from wall-clock rather than the sim, so
+        // the shake is smooth at any frame rate and never accumulates into the
+        // ship's actual position.
+        if (cur.game.shake > 0.0f) {
+            const auto t = static_cast<float>(clock.seconds());
+            const float amp = cur.game.shake * 0.9f;
+            rs.shakeOffset = glm::vec3(std::sin(t * 41.0f) + std::sin(t * 17.0f) * 0.6f,
+                                       std::sin(t * 37.0f + 1.7f) + std::sin(t * 23.0f) * 0.5f,
+                                       std::sin(t * 29.0f + 0.4f)) * amp * 0.5f;
+            // A flicker that dips rather than brightens: the lights are failing.
+            const float flicker = 0.72f + 0.28f * std::sin(t * 26.0f) * std::sin(t * 7.3f);
+            rs.staticLightScale = 1.0f - cur.game.shake * (1.0f - flicker);
+        }
+
+        rs.pickupCount = static_cast<int>(
+            std::min(level.pickups.size(), static_cast<size_t>(dvk::sim::kMaxPickups)));
+        for (int i = 0; i < rs.pickupCount; ++i) {
+            const dvk::Pickup& pickup = level.pickups[static_cast<size_t>(i)];
+            dvk::RenderState::PickupView& view = rs.pickups[static_cast<size_t>(i)];
+            view.present = !cur.game.collected[static_cast<size_t>(i)];
+            view.position = pickup.position;
+            const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(clock.seconds()) * 3.0f +
+                                                         static_cast<float>(i));
+            switch (pickup.kind) {
+                case dvk::PickupKind::Shield: view.color = glm::vec3(0.4f, 1.0f, 0.55f); break;
+                case dvk::PickupKind::Energy: view.color = glm::vec3(0.35f, 0.8f, 1.0f); break;
+                case dvk::PickupKind::LaserUpgrade: view.color = glm::vec3(1.0f, 0.55f, 0.9f); break;
+                case dvk::PickupKind::Concussion: view.color = glm::vec3(1.0f, 0.6f, 0.3f); break;
+                case dvk::PickupKind::Homing: view.color = glm::vec3(0.6f, 0.85f, 1.0f); break;
+                case dvk::PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
+                case dvk::PickupKind::KeyBlue: view.color = glm::vec3(0.35f, 0.55f, 1.0f); break;
+                case dvk::PickupKind::KeyYellow: view.color = glm::vec3(1.0f, 0.9f, 0.3f); break;
+                case dvk::PickupKind::KeyRed: view.color = glm::vec3(1.0f, 0.35f, 0.3f); break;
+                case dvk::PickupKind::Count: break;
+            }
+            view.color *= pulse;
+            view.size = pickup.kind >= dvk::PickupKind::KeyBlue ? 1.1f : 0.85f;
+        }
 
         // Every light that is not baked into the level, rebuilt each frame.
         // The vector keeps its capacity and each Light keeps its segment list's
@@ -366,7 +460,7 @@ int main(int argc, char** argv) {
             l.radius = radius;
             l.castsShadows = true;
             l.segments.clear();
-            dvk::rebuildLightSegments(level, l, flood);
+            dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
         };
 
         for (const dvk::sim::Projectile& p : cur.combat.projectiles.items) {
@@ -400,9 +494,35 @@ int main(int argc, char** argv) {
         renderer.beginFrame(fb.x, fb.y);
         renderer.buildDebugLines(level, rs, contacts, noseRay);
         if (!freezeVisible) {
-            walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos);
+            walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos,
+                       &cur.game.doorField);
         }
-        renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget);
+
+        dvk::gl::HudData hud;
+        hud.show = !opts.noUi;
+        hud.shields = cur.combat.player.shields;
+        hud.energy = cur.combat.player.energy;
+        hud.weaponName = dvk::sim::kWeaponNames[static_cast<size_t>(cur.combat.player.weapon)];
+        hud.laserLevel = cur.combat.player.weapon == dvk::sim::WeaponLaser
+                             ? cur.combat.player.laserLevel
+                             : 0;
+        switch (cur.combat.player.weapon) {
+            case dvk::sim::WeaponVulcan: hud.ammo = cur.combat.player.vulcanAmmo; break;
+            case dvk::sim::WeaponConcussion: hud.ammo = cur.combat.player.concussionAmmo; break;
+            case dvk::sim::WeaponHoming: hud.ammo = cur.combat.player.homingAmmo; break;
+            default: hud.ammo = -1; break;
+        }
+        hud.flares = cur.combat.player.flares;
+        for (int k = 0; k < 3; ++k) hud.keys[k] = cur.game.keys[static_cast<size_t>(k)];
+        hud.countdown = cur.game.phase == dvk::sim::GamePhase::Countdown ? cur.game.countdown
+                                                                        : -1.0f;
+        hud.phase = static_cast<int>(cur.game.phase);
+        hud.message = cur.game.endReason;
+        hud.elapsed = cur.game.elapsed;
+        hud.robotsDestroyed = cur.game.robotsDestroyed;
+        hud.robotsTotal = cur.game.robotsAtStart;
+
+        renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
         renderer.resolve();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -410,7 +530,8 @@ int main(int argc, char** argv) {
         ImGui::NewFrame();
         // --no-ui still runs a frame, so ImGui's internal state stays
         // consistent; it just does not open any window.
-        if (!opts.noUi) {
+        // ImGui is debug-only from M7: the HUD carries what the player needs.
+        if (showDebugUi) {
         ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(330, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("descent-vk")) {
@@ -654,7 +775,7 @@ int main(int argc, char** argv) {
                 lightEditorSelection = static_cast<int>(level.lights.size()) - 1;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Save level")) dvk::saveLevel(kLevelPath, level);
+            if (ImGui::Button("Save level")) dvk::saveLevel(levelPath, level);
             ImGui::SameLine();
             ImGui::TextDisabled("%d lights", static_cast<int>(level.lights.size()));
 

@@ -34,8 +34,26 @@ void portalTriangles(const Level& level, int segment, int side, glm::vec3 out[6]
 
 } // namespace
 
+namespace {
+
+// True if the door faces block the way from `segment` through `side`. The
+// caller has already established the side is a portal.
+bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
+    if (!doors) return false;
+    for (int i = 0; i < doors->count; ++i) {
+        const SolidDoors::Face& f = doors->faces[static_cast<size_t>(i)];
+        if ((f.segmentA == segment && f.segmentB == neighbour) ||
+            (f.segmentB == segment && f.segmentA == neighbour)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
-                     ContactLog* log) {
+                     ContactLog* log, const SolidDoors* doors) {
     if (log) log->clear();
     if (level.segments.empty()) return 0;
 
@@ -114,6 +132,43 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
             }
         }
 
+        // Shut doors, which are not in the static wall list because the side
+        // they fill is a portal. Pushed out of on whichever side the body is,
+        // so a door closing on a body shoves it clear rather than through.
+        if (doors) {
+            for (int fi = 0; fi < doors->count; ++fi) {
+                const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
+                if (face.segmentA != body.segment && face.segmentB != body.segment) continue;
+
+                const glm::vec3 closest =
+                    closestPointOnTriangle(body.position, face.p[0], face.p[1], face.p[2]);
+                const glm::vec3 away = body.position - closest;
+                const float distance = glm::length(away);
+                if (distance >= body.radius) continue;
+
+                const glm::vec3 normal =
+                    distance > kEpsilon
+                        ? away / distance
+                        : (glm::dot(body.velocity, face.normal) < 0.0f ? face.normal
+                                                                       : -face.normal);
+                body.position += normal * (body.radius - distance + cfg.skin);
+                const float into = glm::dot(body.velocity, normal);
+                if (into < 0.0f) body.velocity -= normal * into;
+
+                if (log) {
+                    Contact c;
+                    c.point = closest;
+                    c.normal = normal;
+                    c.segment = body.segment;
+                    c.triangle = -1;
+                    c.depth = body.radius - distance;
+                    log->add(c);
+                }
+                ++resolvedThisPass;
+                ++total;
+            }
+        }
+
         if (resolvedThisPass == 0) break;
     }
 
@@ -126,7 +181,7 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
 }
 
 RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& direction,
-               float maxDistance, int startSegment) {
+               float maxDistance, int startSegment, const SolidDoors* doors) {
     RayHit result;
     if (level.segments.empty()) return result;
 
@@ -158,17 +213,33 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
 
         // The nearest portal the ray leaves through, if it leaves before it
         // meets a wall.
+        // A shut door stops a ray exactly as a wall does, which is what keeps a
+        // robot from seeing through one and a bolt from flying through it.
+        if (doors) {
+            for (int fi = 0; fi < doors->count; ++fi) {
+                const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
+                if (face.segmentA != segment && face.segmentB != segment) continue;
+                const float t = rayTriangleDistance(origin + dir * travelled, dir, face.p[0],
+                                                    face.p[1], face.p[2]);
+                if (t > kEpsilon && t < bestWall) {
+                    bestWall = t;
+                    bestTriangle = -2;   // a door, not a wall triangle
+                }
+            }
+        }
+
         float bestPortal = bestWall;
         int nextSegment = -1;
         const Segment& seg = level.segments[static_cast<size_t>(segment)];
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
             if (!sd.isPortal()) continue;
+            if (doorShut(doors, segment, sd.neighbour)) continue;
             glm::vec3 tri[6];
             portalTriangles(level, segment, side, tri);
             for (int t2 = 0; t2 < 2; ++t2) {
                 const float t = rayTriangleDistance(origin + dir * travelled, dir, tri[t2 * 3 + 0],
-                                            tri[t2 * 3 + 1], tri[t2 * 3 + 2]);
+                                                    tri[t2 * 3 + 1], tri[t2 * 3 + 2]);
                 if (t > kEpsilon && t < bestPortal) {
                     bestPortal = t;
                     nextSegment = sd.neighbour;
@@ -185,7 +256,14 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
             continue;
         }
 
-        if (bestTriangle >= 0) {
+        if (bestTriangle == -2) {
+            result.hit = true;
+            result.distance = travelled + bestWall;
+            result.point = origin + dir * result.distance;
+            result.normal = -dir;
+            result.segment = segment;
+            result.triangle = -1;
+        } else if (bestTriangle >= 0) {
             const WallTriangle& w = level.walls[static_cast<size_t>(bestTriangle)];
             result.hit = true;
             result.distance = travelled + bestWall;
@@ -210,7 +288,7 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
 // kMaxSweepSteps and reports no hit - which for a projectile means it keeps
 // flying, the safe answer.
 RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3& direction,
-                   float radius, float maxDistance, int startSegment) {
+                   float radius, float maxDistance, int startSegment, const SolidDoors* doors) {
     RayHit result;
     if (level.segments.empty()) return result;
 
@@ -237,7 +315,9 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
         int candidateCount = 0;
         candidates[candidateCount++] = segment;
         for (const SideData& sd : seg.sides) {
-            if (sd.isPortal()) candidates[candidateCount++] = sd.neighbour;
+            if (sd.isPortal() && !doorShut(doors, segment, sd.neighbour)) {
+                candidates[candidateCount++] = sd.neighbour;
+            }
         }
 
         float nearest = maxDistance * 2.0f + radius;
@@ -258,8 +338,32 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
             }
         }
 
+        // Shut doors are surfaces too, and a bolt has to stop at one.
+        bool nearestIsDoor = false;
+        if (doors) {
+            for (int fi = 0; fi < doors->count; ++fi) {
+                const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
+                if (face.segmentA != segment && face.segmentB != segment) continue;
+                const float d = distanceToTriangle(p, face.p[0], face.p[1], face.p[2]);
+                if (d < nearest) {
+                    nearest = d;
+                    nearestIsDoor = true;
+                    nearestSegment = segment;
+                }
+            }
+        }
+
         const float gap = nearest - radius;
         if (gap <= kEpsilon * 10.0f) {
+            if (nearestIsDoor) {
+                result.hit = true;
+                result.distance = travelled;
+                result.point = p;
+                result.normal = -dir;
+                result.segment = nearestSegment;
+                result.triangle = -1;
+                return result;
+            }
             if (nearestTriangle < 0) return result;
             const WallTriangle& w = level.walls[static_cast<size_t>(nearestTriangle)];
             result.hit = true;

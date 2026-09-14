@@ -141,20 +141,22 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
     // --- pathing through portals --------------------------------------------
     {
         rig.reset();
-        // Put the player in the shaft head and a drone at the far end of the
-        // corridor, so reaching it means crossing several portals.
-        rig.player.segment = 13;
-        rig.player.position = rig.level.segments[13].center;
-
+        // The player stays at the level start, and the robot chosen is
+        // whichever live one is physically furthest from it. Picking a segment
+        // number instead baked test01's layout into the test, and it stopped
+        // finding anything the moment a second level existed.
         sim::Robot* robot = nullptr;
+        float furthest = -1.0f;
         for (int i = 0; i < rig.robots.count; ++i) {
             sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
-            if (r.alive && r.body.segment <= 2) {
+            if (!r.alive || r.body.segment == rig.player.segment) continue;
+            const float d = glm::length(r.body.position - rig.player.position);
+            if (d > furthest) {
+                furthest = d;
                 robot = &r;
-                break;
             }
         }
-        ok &= expect(robot != nullptr, "a robot starts near the corridor mouth");
+        ok &= expect(robot != nullptr, "a robot starts away from the player");
 
         if (robot) {
             const int slot = static_cast<int>(robot - rig.robots.robots.data());
@@ -177,9 +179,9 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
 
             const int crossed = static_cast<int>(visited.size()) - 1;
             ok &= expect(crossed >= 2, "the robot crossed at least two portals chasing the player");
-            log::info("pathing: robot started in segment {} and reached {} segments ({} portals "
-                      "crossed), ending in segment {}",
-                      startSegment, visited.size(), crossed,
+            log::info("pathing: robot started in segment {} ({:.0f} units away) and reached {} "
+                      "segments ({} portals crossed), ending in segment {}",
+                      startSegment, furthest, visited.size(), crossed,
                       rig.robots.robots[static_cast<size_t>(slot)].body.segment);
         }
     }

@@ -24,6 +24,9 @@ public:
     bool mouseDown(int glfwButton) const;
     bool mousePressed(int glfwButton) const;
 
+    // Any key at all went down this frame, for "press any key to continue".
+    bool anyKeyPressed() const;
+
     glm::vec2 consumeMouseDelta();     // pixels moved since last consume
     bool mouseCaptured() const { return captured_; }
     void setMouseCaptured(GLFWwindow* w, bool captured);

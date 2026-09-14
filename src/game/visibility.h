@@ -7,6 +7,9 @@
 namespace dvk {
 
 struct Level;
+namespace sim {
+struct DoorField;
+}
 
 // Portal-traversal visibility: the second of the project's permanent bets.
 //
@@ -23,8 +26,11 @@ public:
     // level, or for looking down a corridor of identical segments.
     static constexpr int kMaxDepth = 24;
 
+    // `doors`, when given, stops the walk at any door that is shut - so a
+    // closed door hides what is behind it instead of merely blocking the way
+    // through.
     void build(const Level& level, int fromSegment, const glm::mat4& viewProj,
-               const glm::vec3& eye);
+               const glm::vec3& eye, const sim::DoorField* doors = nullptr);
 
     const std::vector<int>& visible() const { return visible_; }
     bool isVisible(int segment) const {
@@ -45,6 +51,7 @@ private:
     void visit(const Level& level, int segment, const Rect& window, int depth);
 
     const glm::mat4* viewProj_ = nullptr;
+    const sim::DoorField* doors_ = nullptr;
     glm::vec3 eye_{0.0f};
 
     std::vector<int> visible_;

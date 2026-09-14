@@ -1,6 +1,7 @@
 #include "game/visibility.h"
 
 #include "game/level.h"
+#include "sim/gameflow.h"
 
 #include <glm/geometric.hpp>
 
@@ -10,7 +11,7 @@
 namespace dvk {
 
 void PortalWalk::build(const Level& level, int fromSegment, const glm::mat4& viewProj,
-                       const glm::vec3& eye) {
+                       const glm::vec3& eye, const sim::DoorField* doors) {
     ++frame_;
     visible_.clear();
     mark_.resize(level.segments.size(), 0);
@@ -21,6 +22,7 @@ void PortalWalk::build(const Level& level, int fromSegment, const glm::mat4& vie
 
     viewProj_ = &viewProj;
     eye_ = eye;
+    doors_ = doors;
 
     if (fromSegment < 0 || fromSegment >= level.segmentCount()) {
         // Outside the mine (or the level is empty): fall back to drawing
@@ -54,6 +56,7 @@ void PortalWalk::visit(const Level& level, int segment, const Rect& window, int 
     for (int side = 0; side < SideCount; ++side) {
         const SideData& sd = seg.sides[static_cast<size_t>(side)];
         if (!sd.isPortal()) continue;
+        if (doors_ && doors_->isBlocked(segment, side)) continue;
 
         // Already reached this neighbour at least as directly: anything it
         // could show has already been collected through a wider window.

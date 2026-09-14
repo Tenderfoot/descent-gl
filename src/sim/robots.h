@@ -61,6 +61,11 @@ struct RobotDef {
     float eyeSize = 0.32f;
     std::vector<glm::vec3> eyes;   // local offsets
     // Chance of each drop, in order: nothing, energy, shield.
+    // The reactor is a robot that does not move: high health, slow bolts,
+    // stationary. Reusing the robot path gives it pathing it never uses, but
+    // also gives it shadow casting, damage, death and debris for free - and
+    // one code path that is exercised by every other robot in the level.
+    bool isReactor = false;
     float dropNothing = 0.35f;
     float dropEnergy = 0.35f;
     float dropShield = 0.30f;

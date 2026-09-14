@@ -1,6 +1,7 @@
 #include "game/level.h"
 
 #include "core/log.h"
+#include "sim/gameflow.h"
 #include "sim/geometry.h"
 
 #include <nlohmann/json.hpp>
@@ -199,7 +200,8 @@ void validate(const Level& level, const std::string& path) {
 
 } // namespace
 
-void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch) {
+void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
+                          const sim::DoorField* doors) {
     light.segments.clear();
     if (level.segments.empty()) return;
 
@@ -228,6 +230,7 @@ void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch)
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
             if (!sd.isPortal()) continue;
+            if (doors && doors->isBlocked(si, side)) continue;
             if (scratch.mark[static_cast<size_t>(sd.neighbour)] == scratch.stamp) continue;
 
             // Stop at a portal the light cannot reach. Measured to the nearest
@@ -347,6 +350,7 @@ Level loadLevel(const std::string& path) {
             for (size_t i = 0; i < SideCount; ++i) {
                 SideData& sd = seg.sides[i];
                 sd.neighbour = sides[i].value("portal", -1);
+                sd.door = sides[i].value("door", -1);
                 sd.texture = sides[i].value("texture", 0);
                 if (auto it = sides[i].find("uv"); it != sides[i].end()) {
                     for (size_t k = 0; k < 4 && k < it->size(); ++k) {
@@ -378,6 +382,42 @@ Level loadLevel(const std::string& path) {
                 light.segment = lj.value("segment", -1);
                 level.lights.push_back(light);
             }
+        }
+
+        if (auto it = j.find("doors"); it != j.end()) {
+            for (const auto& dj : *it) {
+                Door door;
+                door.segment = dj.at("segment").get<int>();
+                door.side = dj.at("side").get<int>();
+                const std::string key = dj.value("key", std::string("none"));
+                for (int k = 0; k < 3; ++k) {
+                    if (key == kKeyNames[static_cast<size_t>(k)]) door.key = static_cast<KeyColor>(k);
+                }
+                door.openDistance = dj.value("openDistance", door.openDistance);
+                door.openTime = dj.value("openTime", door.openTime);
+                door.closeDelay = dj.value("closeDelay", door.closeDelay);
+                level.doors.push_back(door);
+            }
+        }
+
+        if (auto it = j.find("pickups"); it != j.end()) {
+            for (const auto& pj : *it) {
+                Pickup pickup;
+                const std::string kind = pj.at("kind").get<std::string>();
+                for (size_t k = 0; k < kPickupNames.size(); ++k) {
+                    if (kind == kPickupNames[k]) pickup.kind = static_cast<PickupKind>(k);
+                }
+                pickup.position = readVec3(pj.at("position"));
+                pickup.segment = pj.value("segment", -1);
+                level.pickups.push_back(pickup);
+            }
+        }
+
+        if (auto it = j.find("exit"); it != j.end()) {
+            level.exitTrigger.present = true;
+            level.exitTrigger.position = readVec3(it->at("position"));
+            level.exitTrigger.radius = it->value("radius", 6.0f);
+            level.exitTrigger.segment = it->value("segment", -1);
         }
 
         if (auto it = j.find("objects"); it != j.end()) {
@@ -412,6 +452,58 @@ Level loadLevel(const std::string& path) {
     validate(level, path);
     splitSides(level);
 
+    // Doors are resolved after the split, because they need the side's corners
+    // and its averaged normal. A door on a side that is not a portal is a level
+    // error: there would be nothing on the other side to open into.
+    for (size_t di = 0; di < level.doors.size(); ++di) {
+        Door& door = level.doors[di];
+        if (door.segment < 0 || door.segment >= level.segmentCount()) {
+            log::fatal("{}: door {} is in segment {}, which does not exist", path, di, door.segment);
+        }
+        if (door.side < 0 || door.side >= SideCount) {
+            log::fatal("{}: door {} is on side {}, which is not one of the six", path, di,
+                       door.side);
+        }
+        SideData& sd = level.segments[static_cast<size_t>(door.segment)]
+                           .sides[static_cast<size_t>(door.side)];
+        if (!sd.isPortal()) {
+            log::fatal("{}: door {} is on segment {} side {}, which is a solid wall. A door has "
+                       "to be a portal - there must be somewhere for it to open into.",
+                       path, di, door.segment, kSideNames[static_cast<size_t>(door.side)]);
+        }
+        sd.door = static_cast<int>(di);
+        door.neighbour = sd.neighbour;
+        door.corners = level.sideCorners(door.segment, door.side);
+        door.center = sd.center;
+        door.normal = sd.normal;
+
+        // The neighbour's matching side points at the same door, so either
+        // segment can ask "is the way out of here shut?" without searching.
+        Segment& other = level.segments[static_cast<size_t>(door.neighbour)];
+        for (int os = 0; os < SideCount; ++os) {
+            if (other.sides[static_cast<size_t>(os)].neighbour == door.segment) {
+                other.sides[static_cast<size_t>(os)].door = static_cast<int>(di);
+                break;
+            }
+        }
+    }
+
+    for (Pickup& pickup : level.pickups) {
+        if (pickup.segment < 0 || pickup.segment >= level.segmentCount()) {
+            pickup.segment = findSegment(level, pickup.position, pickup.segment);
+        }
+        if (pickup.segment < 0) {
+            log::fatal("{}: pickup '{}' at {:.1f} {:.1f} {:.1f} is not inside any segment", path,
+                       kPickupNames[static_cast<size_t>(pickup.kind)], pickup.position.x,
+                       pickup.position.y, pickup.position.z);
+        }
+    }
+
+    if (level.exitTrigger.present &&
+        (level.exitTrigger.segment < 0 || level.exitTrigger.segment >= level.segmentCount())) {
+        level.exitTrigger.segment = findSegment(level, level.exitTrigger.position);
+    }
+
     for (Light& light : level.lights) rebuildLightSegments(level, light);
 
     for (LevelObject& obj : level.objects) {
@@ -432,9 +524,10 @@ Level loadLevel(const std::string& path) {
             if (sd.altDiagonal) ++altDiagonals;
         }
     }
-    log::info("level '{}': {} segments, {} portals, {} wall triangles, {} lights, {} objects",
+    log::info("level '{}': {} segments, {} portals, {} wall triangles, {} lights, {} objects, "
+              "{} doors, {} pickups",
               path, level.segments.size(), portals / 2, level.walls.size(), level.lights.size(),
-              level.objects.size());
+              level.objects.size(), level.doors.size(), level.pickups.size());
     log::info("  {} of {} sides took the alternate diagonal at the minimum-crease split",
               altDiagonals, level.segments.size() * SideCount);
     return level;
@@ -453,6 +546,7 @@ bool saveLevel(const std::string& path, const Level& level) {
             nlohmann::json side;
             if (sd.isPortal()) {
                 side["portal"] = sd.neighbour;
+                if (sd.door >= 0) side["door"] = sd.door;
             } else {
                 side["texture"] = sd.texture;
             }
@@ -485,6 +579,32 @@ bool saveLevel(const std::string& path, const Level& level) {
         if (obj.health > 0.0f) oj["health"] = obj.health;
         oj["segment"] = obj.segment;
         j["objects"].push_back(oj);
+    }
+
+    for (const Door& door : level.doors) {
+        nlohmann::json dj;
+        dj["segment"] = door.segment;
+        dj["side"] = door.side;
+        dj["key"] = door.key == KeyColor::None
+                        ? std::string("none")
+                        : std::string(kKeyNames[static_cast<size_t>(door.key)]);
+        dj["openDistance"] = door.openDistance;
+        dj["openTime"] = door.openTime;
+        dj["closeDelay"] = door.closeDelay;
+        j["doors"].push_back(dj);
+    }
+    for (const Pickup& pickup : level.pickups) {
+        j["pickups"].push_back(
+            {{"kind", kPickupNames[static_cast<size_t>(pickup.kind)]},
+             {"position", {pickup.position.x, pickup.position.y, pickup.position.z}},
+             {"segment", pickup.segment}});
+    }
+    if (level.exitTrigger.present) {
+        j["exit"] = {{"position",
+                      {level.exitTrigger.position.x, level.exitTrigger.position.y,
+                       level.exitTrigger.position.z}},
+                     {"radius", level.exitTrigger.radius},
+                     {"segment", level.exitTrigger.segment}};
     }
 
     j["start"]["segment"] = level.start.segment;

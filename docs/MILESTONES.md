@@ -559,6 +559,106 @@ machine. Iconify/restore and performance as ever.
 
 ---
 
-## M7 — The loop ⬜
+## M7 — The loop 🟡 In progress
+
+Pickups, keyed doors, the reactor, the countdown, the exit, win and lose
+screens, an in-game HUD, and `mine01`. **Paused mid-milestone at the user's
+request; one known failure is recorded below.**
+
+### Done and verified
+
+`--loop-test` plays the win and lose conditions through with no window and no
+GL:
+
+| Check | Result |
+| --- | --- |
+| Three keyed doors | ✅ each: locked held, **every wrong key held**, right key opened |
+| A shut door blocks light | ✅ a probe light reaches **11 segments shut, 18 open** |
+| Reactor | ✅ 600 health, destroyed → countdown 45.0 s, exit unlocked |
+| Mine shake ramps | ✅ 0.000 at the start of the countdown, 0.445 thirty seconds in |
+| Reaching the exit wins | ✅ |
+| Countdown reaching zero loses | ✅ "the mine went up with you still in it" |
+| Shields at zero loses | ✅ "shields gone" |
+| Pickups | ✅ **16 of 16** collected on touch and each had an effect |
+| `mine01` loads and validates | ✅ **34 segments**, 41 portals, 244 wall triangles, 14 lights, 18 objects, 3 doors, 16 pickups |
+| `mine01` wall surface is closed | ✅ 124 vertices − 366 edges + 244 triangles = 2 |
+| 16 robots including the reactor | ✅ |
+| HUD | ✅ shields and energy bars, weapon and ammo, flares, key indicators, reticle, countdown, end screens |
+| ImGui behind F3 | ✅ debug panels are off by default from this milestone |
+
+`test01` is kept and still loads; `--level PATH` selects it.
+
+### Known failure: one raycast in 884 on `mine01`
+
+`--collision-test` reports **1 disagreement of 884 rays** on `mine01` (it passes
+cleanly on `test01`). Diagnosed, not yet fixed:
+
+A ray from segment 24's centre heading exactly (−0.707, 0, −0.707) — straight
+down a grid diagonal — is reported as hitting segment 24's *back* wall at 14.675
+units. Marching the same ray shows it actually squeaks past the corner with
+**0.241 units of clearance** and continues to about 71 units. So the raycast is
+stopping short: the ray should have exited through segment 24's portal into
+segment 26, and the portal-exit test missed at that grazing angle.
+
+An attempted fix — widening the barycentric bounds of the portal test so a ray
+along the shared diagonal of a portal's two triangles still counts — made things
+worse: 5 rays then leaked *out* of the mine entirely. Reverted.
+
+The failure is conservative in gameplay terms (a ray stops earlier than it
+should, never later), it is confined to exact grid diagonals, and the swept
+sphere is unaffected: **884 of 884 sweeps behave correctly**. It still needs a
+proper fix before M7 is called done.
+
+### The rest of the level flow
+
+Containment, sliding and portal crossing all pass on `mine01` at its larger
+size: 884 containment trials with 0 escapes, 122 walls slid without catching,
+82 portal crossings.
+
+### Doors
+
+A door is a **portal in the graph** carrying a slab that fills the opening while
+it is shut, rather than a new kind of side. The two segments still share their
+four vertices, so the mine's wall surface stays closed and M3's occluder still
+validates. One `DoorField` — a byte per segment side — is consulted by the
+portal walk, the light flood fill and collision alike, so those three cannot
+disagree about whether a door is shut.
+
+### Three harness assumptions that broke on the bigger level
+
+Worth recording, because all three were the tests and not the code:
+
+1. The weapons test counted *all* live projectiles to decide whether the
+   player's bolt had landed. On a level with robots near the spawn, robot fire
+   is in the same pool and the count is never zero.
+2. The robots test looked for "a robot in segment ≤ 2", which baked `test01`'s
+   numbering in. It now picks whichever live robot is physically furthest from
+   the player.
+3. The collision test's marching oracle stopped only when the point left the
+   mine, so a ray along a grid diagonal could march through the single point
+   where two segments meet at a corner. It now also requires a little clearance
+   from the surface.
+
+### Also verified on this branch
+
+| Check | Result |
+| --- | --- |
+| Debug / Release build clean | ✅ no warnings |
+| World, weapons, robots, loop, flight tests on `mine01` | ✅ PASS |
+| Same tests on `test01` | ✅ PASS (loop test reports SKIPPED: `test01` has no doors or exit) |
+| `--resize-test` | ✅ completes |
+| Step rate, 640×360, Release, 250 frames | **119.9 / 120** |
+
+### Not done yet
+
+- **The raycast diagonal case above** — the one outstanding failure.
+- `ARCHITECTURE.md` sections for doors, the HUD and the game flow.
+- Playtesting `mine01` end to end, which needs the real machine: whether the
+  key routing is legible, whether 45 seconds is the right countdown, and
+  whether 16 robots is too many or too few.
+
+---
+
+## M8 — Polish and performance ⬜
 
 Not started.

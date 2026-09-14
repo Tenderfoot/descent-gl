@@ -55,6 +55,19 @@ std::array<glm::vec3, 26> makeDirections() {
 // surface (validated in M3), so a ray from an interior point crosses it an odd
 // number of times. Three directions and a majority vote, because a single ray
 // that grazes an edge can double-count it.
+// How far the point is from the mine's surface. A ray marched exactly along a
+// grid diagonal can pass through the single point where two segments meet at a
+// corner: the parity test still says "inside", while raycast - correctly -
+// stops on one of the two walls that meet there. Requiring a little clearance
+// makes the oracle agree with the answer a body actually needs.
+float clearance(const Level& level, const glm::vec3& p) {
+    float best = 1e30f;
+    for (const WallTriangle& w : level.walls) {
+        best = std::min(best, sim::distanceToTriangle(p, w.p[0], w.p[1], w.p[2]));
+    }
+    return best;
+}
+
 bool insideMine(const Level& level, const glm::vec3& p) {
     // Deliberately irrational-looking directions: a ray down an axis lies in
     // the plane of a grid-aligned wall far too often.
@@ -261,7 +274,9 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                 }
 
                 float marched = 0.0f;
-                while (marched < kMaxDistance && insideMine(level, origin + dir * marched)) {
+                while (marched < kMaxDistance) {
+                    const glm::vec3 at = origin + dir * marched;
+                    if (!insideMine(level, at) || clearance(level, at) < kMarchStep) break;
                     marched += kMarchStep;
                 }
 

@@ -19,6 +19,13 @@ bool Input::pressed(int key) const {
     return cur_[k] && !prev_[k];
 }
 
+bool Input::anyKeyPressed() const {
+    for (size_t i = 0; i < kMaxKeys; ++i) {
+        if (cur_[i] && !prev_[i]) return true;
+    }
+    return false;
+}
+
 bool Input::mouseDown(int button) const {
     return button >= 0 && button < kMaxButtons && buttonCur_[static_cast<size_t>(button)];
 }

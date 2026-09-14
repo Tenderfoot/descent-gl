@@ -146,6 +146,35 @@ RobotConfig RobotConfig::defaults() {
                   glm::vec3(0.0f, 1.9f, -1.5f)};
     cfg.types.push_back(brute);
 
+    RobotDef reactor;
+    reactor.name = "reactor";
+    reactor.model = "reactor";
+    reactor.isReactor = true;
+    reactor.health = 600.0f;
+    reactor.radius = 5.5f;
+    reactor.speed = 0.0f;
+    reactor.acceleration = 0.0f;
+    reactor.turnRate = 0.8f;
+    reactor.sightRange = 130.0f;
+    reactor.attackRange = 130.0f;
+    reactor.aggression = 1.0f;      // never retreats; it cannot move anyway
+    reactor.retreatThreshold = -1.0f;
+    reactor.projectileSpeed = 48.0f;
+    reactor.projectileDamage = 16.0f;
+    reactor.fireInterval = 0.8f;
+    reactor.burstCount = 2;
+    reactor.burstPause = 1.8f;
+    reactor.spread = 0.06f;
+    reactor.lead = 0.5f;
+    reactor.color = glm::vec3(1.0f, 0.55f, 0.2f);
+    reactor.eyeColor = glm::vec3(1.0f, 0.62f, 0.22f);
+    reactor.eyeSize = 2.6f;
+    reactor.eyes = {glm::vec3(0.0f, 0.0f, 0.0f)};
+    reactor.dropNothing = 1.0f;
+    reactor.dropEnergy = 0.0f;
+    reactor.dropShield = 0.0f;
+    cfg.types.push_back(reactor);
+
     return cfg;
 }
 
@@ -195,6 +224,7 @@ RobotConfig loadRobotConfig(const std::string& path) {
             getVec3(tj, "color", def.color);
             getVec3(tj, "eyeColor", def.eyeColor);
             get(tj, "eyeSize", def.eyeSize);
+            get(tj, "isReactor", def.isReactor);
             get(tj, "dropNothing", def.dropNothing);
             get(tj, "dropEnergy", def.dropEnergy);
             get(tj, "dropShield", def.dropShield);
@@ -240,6 +270,7 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["color"] = {def.color.r, def.color.g, def.color.b};
         tj["eyeColor"] = {def.eyeColor.r, def.eyeColor.g, def.eyeColor.b};
         tj["eyeSize"] = def.eyeSize;
+        tj["isReactor"] = def.isReactor;
         tj["dropNothing"] = def.dropNothing;
         tj["dropEnergy"] = def.dropEnergy;
         tj["dropShield"] = def.dropShield;

@@ -63,6 +63,25 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         std::make_unique<Shader>("shaders/debugline.vert", "shaders/debugline.frag");
     billboardShader_ =
         std::make_unique<Shader>("shaders/billboard.vert", "shaders/billboard.frag");
+    hudShader_ = std::make_unique<Shader>("shaders/hud.vert", "shaders/hud.frag");
+
+    // One unit cube reused for every door half. A door is a box; there is no
+    // reason for it to be anything else.
+    slabMesh_ = std::make_unique<Mesh>(makeCube());
+    {
+        ModelData slab;
+        slab.positions = {
+            {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f},
+            {-0.5f, -0.5f, 0.5f},  {0.5f, -0.5f, 0.5f},  {0.5f, 0.5f, 0.5f},  {-0.5f, 0.5f, 0.5f}};
+        slab.triangles = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4},
+                          {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+        slabOccluderMesh_ = buildOccluder(slab.positions, slab.triangles, {}, "door slab");
+    }
+    doorSlabs_.resize(static_cast<size_t>(sim::kMaxDoors) * 2);
+    doorOccluders_.resize(static_cast<size_t>(sim::kMaxDoors) * 2);
+    for (Occluder& occluder : doorOccluders_) {
+        occluder.reset(&slabOccluderMesh_, glm::mat4(1.0f));
+    }
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
     levelMesh_ = std::make_unique<LevelMesh>(level);
@@ -256,6 +275,190 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
     }
 }
 
+// Places the two halves of every door. A door slides apart across the opening,
+// so the halves stay inside the doorway's own plane and end up buried in the
+// wall to either side rather than poking through the ceiling.
+void Renderer::buildDoors(const RenderState& rs, const Level& level) {
+    const size_t count = std::min(level.doors.size(), static_cast<size_t>(sim::kMaxDoors));
+    for (size_t di = 0; di < count; ++di) {
+        const Door& door = level.doors[di];
+        const float openness =
+            di < static_cast<size_t>(rs.doorCount) ? rs.doorOpenness[di] : 0.0f;
+
+        // A frame from the opening's own edges, so a deformed doorway still
+        // gets a slab that fits it.
+        const glm::vec3 acrossRaw = (door.corners[1] - door.corners[0]) +
+                                    (door.corners[2] - door.corners[3]);
+        const glm::vec3 upRaw = (door.corners[3] - door.corners[0]) +
+                                (door.corners[2] - door.corners[1]);
+        const float width = glm::length(acrossRaw) * 0.5f;
+        const float height = glm::length(upRaw) * 0.5f;
+        if (width < 1e-3f || height < 1e-3f) continue;
+
+        const glm::vec3 across = acrossRaw / (width * 2.0f);
+        const glm::vec3 up = upRaw / (height * 2.0f);
+        const glm::vec3 normal = glm::normalize(glm::cross(across, up));
+
+        glm::mat4 basis(1.0f);
+        basis[0] = glm::vec4(across, 0.0f);
+        basis[1] = glm::vec4(up, 0.0f);
+        basis[2] = glm::vec4(normal, 0.0f);
+
+        for (int half = 0; half < 2; ++half) {
+            const float side = half == 0 ? -1.0f : 1.0f;
+            const float slide = side * (0.25f + openness * 0.5f) * width;
+            const glm::vec3 centre = door.center + across * slide;
+
+            glm::mat4 model = glm::translate(glm::mat4(1.0f), centre) * basis;
+            model = glm::scale(model, glm::vec3(width * 0.5f, height, 0.9f));
+
+            DoorSlab& slab = doorSlabs_[di * 2 + static_cast<size_t>(half)];
+            slab.model = model;
+            // A door that is open enough to fly through stops blocking light
+            // and stops casting; below that it is a wall.
+            const bool solid = openness < 0.75f;
+            slab.segmentA = solid ? door.segment : -1;
+            slab.segmentB = solid ? door.neighbour : -1;
+            doorOccluders_[di * 2 + static_cast<size_t>(half)].setTransform(model);
+        }
+    }
+    for (size_t di = count; di < static_cast<size_t>(sim::kMaxDoors); ++di) {
+        doorSlabs_[di * 2].segmentA = -1;
+        doorSlabs_[di * 2].segmentB = -1;
+        doorSlabs_[di * 2 + 1].segmentA = -1;
+        doorSlabs_[di * 2 + 1].segmentB = -1;
+    }
+}
+
+void Renderer::buildHud(const HudData& hud) {
+    if (!hud.show) {
+        hud_.begin(target_.width(), target_.height());
+        hud_.upload();
+        return;
+    }
+
+    const float w = static_cast<float>(target_.width());
+    const float h = static_cast<float>(target_.height());
+    // One scale for the whole HUD, tied to height, so it reads the same on any
+    // window size instead of shrinking to nothing at 4K.
+    const float s = std::max(1.5f, h / 260.0f);
+    hud_.begin(target_.width(), target_.height());
+
+    const glm::vec4 white(1.0f, 1.0f, 1.0f, 0.92f);
+    const glm::vec4 dim(0.75f, 0.8f, 0.9f, 0.8f);
+
+    // Reticle: a gap in the middle so it frames the target rather than
+    // covering it.
+    const float cx = w * 0.5f;
+    const float cy = h * 0.5f;
+    const float arm = 5.0f * s;
+    const float gap = 3.0f * s;
+    const float thin = std::max(1.0f, s * 0.6f);
+    const glm::vec4 reticle(0.6f, 1.0f, 0.7f, 0.75f);
+    hud_.rect(cx - gap - arm, cy - thin * 0.5f, arm, thin, reticle);
+    hud_.rect(cx + gap, cy - thin * 0.5f, arm, thin, reticle);
+    hud_.rect(cx - thin * 0.5f, cy - gap - arm, thin, arm, reticle);
+    hud_.rect(cx - thin * 0.5f, cy + gap, thin, arm, reticle);
+
+    // Shields and energy, bottom left.
+    const float barW = 44.0f * s;
+    const float barH = 4.0f * s;
+    const float left = 8.0f * s;
+    float y = h - 8.0f * s - barH;
+    hud_.text("energy", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
+    hud_.bar(left, y, barW, barH, hud.energy / 100.0f, glm::vec4(0.3f, 0.75f, 1.0f, 0.9f));
+    y -= barH + 12.0f * s;
+    hud_.text("shields", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
+    hud_.bar(left, y, barW, barH, hud.shields / 100.0f, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
+
+    // Weapon and ammo, bottom right.
+    {
+        std::string line = hud.weaponName;
+        if (hud.laserLevel > 0 && line == "laser") line += " " + std::to_string(hud.laserLevel);
+        if (hud.ammo >= 0) line += "  " + std::to_string(hud.ammo);
+        const float tw = hud_.textWidth(line, s);
+        hud_.text(line, w - left - tw, h - 8.0f * s - 7.0f * s, s, white);
+
+        const std::string flares = "flares " + std::to_string(hud.flares);
+        const float fw = hud_.textWidth(flares, s * 0.7f);
+        hud_.text(flares, w - left - fw, h - 8.0f * s - 18.0f * s, s * 0.7f, dim);
+    }
+
+    // Keys, top right: lit when held, a dark outline when not, so their
+    // absence is as readable as their presence.
+    {
+        const glm::vec4 colors[3] = {{0.35f, 0.55f, 1.0f, 1.0f},
+                                     {1.0f, 0.9f, 0.3f, 1.0f},
+                                     {1.0f, 0.35f, 0.3f, 1.0f}};
+        const float size = 6.0f * s;
+        for (int k = 0; k < 3; ++k) {
+            const float x = w - left - (3 - k) * (size + 3.0f * s);
+            const glm::vec4 c = hud.keys[k] ? colors[k]
+                                            : glm::vec4(colors[k].r * 0.18f, colors[k].g * 0.18f,
+                                                        colors[k].b * 0.18f, 0.75f);
+            hud_.rect(x, left, size, size, c);
+        }
+    }
+
+    // The countdown, large and centred, because it is the only number that
+    // matters once it is running.
+    if (hud.countdown >= 0.0f) {
+        const int seconds = static_cast<int>(hud.countdown);
+        const int hundredths = static_cast<int>((hud.countdown - static_cast<float>(seconds)) * 100.0f);
+        std::string text = std::to_string(seconds) + ":" +
+                           (hundredths < 10 ? "0" : "") + std::to_string(hundredths);
+        const float big = s * 3.2f;
+        const float tw = hud_.textWidth(text, big);
+        // Red and pulsing under ten seconds.
+        const float urgency = hud.countdown < 10.0f ? 1.0f : 0.0f;
+        const glm::vec4 c(1.0f, 0.85f - 0.6f * urgency, 0.4f - 0.35f * urgency, 0.95f);
+        hud_.text(text, cx - tw * 0.5f, 14.0f * s, big, c);
+        const std::string label = "get out";
+        hud_.text(label, cx - hud_.textWidth(label, s) * 0.5f, 14.0f * s + big * 8.0f, s, c);
+    }
+
+    if (hud.phase >= 2) {
+        const std::string title = hud.phase == 2 ? "mine destroyed" : "you are dead";
+        const float big = s * 2.6f;
+        hud_.text(title, cx - hud_.textWidth(title, big) * 0.5f, cy - big * 10.0f, big,
+                  hud.phase == 2 ? glm::vec4(0.6f, 1.0f, 0.7f, 1.0f)
+                                 : glm::vec4(1.0f, 0.45f, 0.35f, 1.0f));
+
+        const std::string reason = hud.message;
+        hud_.text(reason, cx - hud_.textWidth(reason, s) * 0.5f, cy - big * 3.0f, s, dim);
+
+        const std::string stats = "time " + std::to_string(static_cast<int>(hud.elapsed)) +
+                                  "s   robots " + std::to_string(hud.robotsDestroyed) + "/" +
+                                  std::to_string(hud.robotsTotal);
+        hud_.text(stats, cx - hud_.textWidth(stats, s) * 0.5f, cy + big, s, white);
+
+        const std::string again = "press any key";
+        hud_.text(again, cx - hud_.textWidth(again, s) * 0.5f, cy + big * 4.0f, s, dim);
+    }
+
+    hud_.upload();
+}
+
+void Renderer::hudPass() {
+    if (hud_.quadCount() == 0) return;
+    // Drawn on the resolved framebuffer, after the blit, for the same reason
+    // ImGui is: it is axis-aligned and gains nothing from multisampling.
+    hudShader_->bind();
+    hudShader_->setVec2("uScreen", glm::vec2(static_cast<float>(target_.width()),
+                                             static_cast<float>(target_.height())));
+    glDisable(GL_DEPTH_TEST);
+    // Culling off: the shader flips y to put the HUD origin at the top-left,
+    // which reverses the winding of every quad. Leaving it on culls the entire
+    // HUD and produces exactly nothing, with no error anywhere.
+    glDisable(GL_CULL_FACE);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    hud_.draw();
+    glDisable(GL_BLEND);
+    glEnable(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+}
+
 void Renderer::buildBillboards(const RenderState& rs) {
     billboards_.clear();
 
@@ -272,6 +475,14 @@ void Renderer::buildBillboards(const RenderState& rs) {
     for (int i = 0; i < rs.flashCount; ++i) {
         const RenderState::Flash& f = rs.flashes[static_cast<size_t>(i)];
         billboards_.add(f.position, right, up, f.size, f.color * f.fade);
+    }
+
+    // Pickups. Emissive so they can be found in a dark corridor, and pulsing
+    // so they are not mistaken for a wall detail.
+    for (int i = 0; i < rs.pickupCount; ++i) {
+        const RenderState::PickupView& pickup = rs.pickups[static_cast<size_t>(i)];
+        if (!pickup.present) continue;
+        billboards_.add(pickup.position, right, up, pickup.size, pickup.color);
     }
 
     // Robot eyes. Emissive, so they read in total darkness - which matters
@@ -347,11 +558,13 @@ glm::mat4 Renderer::buildView(const RenderState& rs) const {
     const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, -1.0f);
     const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
 
+    // The shake is added to the eye and not to the look-at target, so the mine
+    // appears to move rather than the ship appearing to aim somewhere else.
     if (rs.camera == CameraMode::Chase) {
-        const glm::vec3 eye = rs.shipPos + basis * kChaseOffset;
+        const glm::vec3 eye = rs.shipPos + basis * kChaseOffset + rs.shakeOffset;
         return glm::lookAt(eye, rs.shipPos + forward * kChaseLookAhead, up);
     }
-    return glm::lookAt(rs.shipPos, rs.shipPos + forward, up);
+    return glm::lookAt(rs.shipPos + rs.shakeOffset, rs.shipPos + rs.shakeOffset + forward, up);
 }
 
 glm::vec3 Renderer::eyePos(const RenderState& rs) const {
@@ -442,6 +655,19 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                 ++stats_.shadowCasters;
             }
 
+            for (size_t si = 0; si < doorSlabs_.size(); ++si) {
+                const DoorSlab& slab = doorSlabs_[si];
+                if (slab.segmentA < 0) continue;
+                const bool reached =
+                    std::binary_search(light.segments.begin(), light.segments.end(),
+                                       slab.segmentA) ||
+                    std::binary_search(light.segments.begin(), light.segments.end(),
+                                       slab.segmentB);
+                if (!reached) continue;
+                volumes_.add(doorOccluders_[si], light.position, nullptr);
+                ++stats_.shadowCasters;
+            }
+
             // The ship casts only when it is actually on screen, which is the
             // chase camera. In first person the camera sits INSIDE the hull, so
             // its shadow volume begins at the eye and blacks out most of the
@@ -505,6 +731,13 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
                                             glm::mat4_cast(view.orientation));
         robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
+    }
+
+    for (const DoorSlab& slab : doorSlabs_) {
+        if (slab.segmentA < 0) continue;
+        if (!walk.isVisible(slab.segmentA) && !walk.isVisible(slab.segmentB)) continue;
+        depthShader_->setMat4("uModel", slab.model);
+        slabMesh_->draw();
     }
 
     if (rs.camera == CameraMode::Chase) {
@@ -614,7 +847,10 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         walls_->bind(0);
         wallShader_->setVec3("uEyePos", eyePos(rs));
         wallShader_->setVec3("uLightPos", light.position);
-        wallShader_->setVec3("uLightColor", light.color * light.intensity);
+        // Static lights flicker while the mine is coming apart. Dynamic ones
+        // are bolts and flares, which have nothing to do with the reactor.
+        const float scale = li < staticLightCount_ ? rs.staticLightScale : 1.0f;
+        wallShader_->setVec3("uLightColor", light.color * light.intensity * scale);
         wallShader_->setFloat("uLightRadius", light.radius);
         wallShader_->setInt("uIsSpot", light.type == LightType::Spot ? 1 : 0);
         if (light.type == LightType::Spot) {
@@ -662,6 +898,18 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
         }
 
+        for (const DoorSlab& slab : doorSlabs_) {
+            if (slab.segmentA < 0) continue;
+            if (!walk.isVisible(slab.segmentA) && !walk.isVisible(slab.segmentB)) continue;
+            const bool reached =
+                std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentA) ||
+                std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentB);
+            if (!reached) continue;
+            wallShader_->setInt("uLayerOverride", WallHazard);
+            wallShader_->setMat4("uModel", slab.model);
+            slabMesh_->draw();
+        }
+
         // The ship is lit by the same pass. It carries no texture-layer
         // attribute, so the override selects its tile from the same array.
         if (rs.camera == CameraMode::Chase && walk.isVisible(rs.shipSegment) &&
@@ -698,7 +946,8 @@ void Renderer::visualiseStencil() {
     glDisable(GL_BLEND);
 }
 
-void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
+void Renderer::unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk) {
+    (void)level;
     glDisable(GL_STENCIL_TEST);
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_GEQUAL);
@@ -760,7 +1009,8 @@ void Renderer::unlitPass(const RenderState& rs, const PortalWalk& walk) {
 }
 
 void Renderer::drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
-                         const std::vector<Light>& dynamicLights, int shadowBudget) {
+                         const std::vector<Light>& dynamicLights, int shadowBudget,
+                         const HudData& hud) {
     const float aspect = target_.height() > 0
                              ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
                              : 1.0f;
@@ -772,15 +1022,18 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
 
     gatherLights(level, dynamicLights, eyePos(rs), walk, shadowBudget);
     updateRobotOccluders(rs);
+    buildDoors(rs, level);
     buildBillboards(rs);
+    buildHud(hud);
     buildShadowVolumes(rs, walk);
     depthPrepass(rs, walk);
     lightPasses(rs, walk);
-    unlitPass(rs, walk);
+    unlitPass(rs, level, walk);
 }
 
 void Renderer::resolve() {
     target_.resolveToDefault();
+    hudPass();
 }
 
 } // namespace dvk::gl

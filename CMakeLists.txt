@@ -30,12 +30,14 @@ add_executable(descent
     src/game/collision_test.cpp
     src/game/level.cpp
     src/game/visibility.cpp
+    src/game/loop_test.cpp
     src/game/robots_test.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
     src/render/billboards.cpp
     src/render/debug_lines.cpp
+    src/render/hud.cpp
     src/render/level_mesh.cpp
     src/render/mesh.cpp
     src/render/model.cpp
@@ -51,6 +53,7 @@ add_executable(descent
     src/sim/combat.cpp
     src/sim/flight.cpp
     src/sim/flight_test.cpp
+    src/sim/gameflow.cpp
     src/sim/robots.cpp
     src/sim/ship.cpp
     src/sim/weapons.cpp

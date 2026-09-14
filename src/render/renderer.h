@@ -3,6 +3,7 @@
 #include "render/gl.h"
 #include "render/billboards.h"
 #include "render/debug_lines.h"
+#include "render/hud.h"
 #include "render/level_mesh.h"
 #include "render/mesh.h"
 #include "render/model.h"
@@ -52,6 +53,25 @@ namespace dvk::gl {
 // geometry is axis-aligned text and rectangles that gain nothing from
 // multisampling, and keeping it out means the resolve carries only scene
 // colour.
+// Everything the HUD draws, gathered by the game layer so the renderer does not
+// reach into simulation state.
+struct HudData {
+    bool show = true;
+    float shields = 100.0f;
+    float energy = 100.0f;
+    const char* weaponName = "laser";
+    int laserLevel = 1;
+    int ammo = -1;          // -1 when the weapon runs on energy
+    int flares = 0;
+    bool keys[3] = {false, false, false};
+    float countdown = -1.0f;   // < 0 when the reactor is still standing
+    int phase = 0;             // 0 playing, 1 countdown, 2 won, 3 lost
+    const char* message = "";
+    float elapsed = 0.0f;
+    int robotsDestroyed = 0;
+    int robotsTotal = 0;
+};
+
 class Renderer {
 public:
     static constexpr GLsizei kSamples = 4;
@@ -64,7 +84,8 @@ public:
     // Passed in rather than stored because it is simulation state, rebuilt
     // every frame by the game layer.
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
-                   const std::vector<Light>& dynamicLights, int shadowBudget);
+                   const std::vector<Light>& dynamicLights, int shadowBudget,
+                   const HudData& hud);
 
     // Rebuilds the debug line list for this frame. Call before drawScene.
     // Everything here is a toggle because the mine is dark and these lines are
@@ -144,7 +165,10 @@ private:
     void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
     void lightPasses(const RenderState& rs, const PortalWalk& walk);
-    void unlitPass(const RenderState& rs, const PortalWalk& walk);
+    void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
+    void buildDoors(const RenderState& rs, const Level& level);
+    void buildHud(const HudData& hud);
+    void hudPass();
 
     void stencilPass(ShadowVolumes::Range range);
     void visualiseStencil();
@@ -205,6 +229,20 @@ private:
     DebugLines debugLines_;
     Billboards billboards_;
     std::unique_ptr<Shader> billboardShader_;
+    Hud hud_;
+    std::unique_ptr<Shader> hudShader_;
+
+    // Two sliding halves per door, plus one occluder each so a shut door casts
+    // a shadow like the wall it is standing in for.
+    struct DoorSlab {
+        glm::mat4 model{1.0f};
+        int segmentA = -1;
+        int segmentB = -1;
+    };
+    std::unique_ptr<Mesh> slabMesh_;
+    OccluderMesh slabOccluderMesh_;
+    std::vector<DoorSlab> doorSlabs_;
+    std::vector<Occluder> doorOccluders_;
 
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order

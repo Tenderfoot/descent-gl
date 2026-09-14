@@ -46,8 +46,17 @@ inline constexpr std::array<const char*, SideCount> kSideNames{"left",   "top", 
 
 // One face of a segment: either a wall to be drawn, or a portal into a
 // neighbour.
+enum class KeyColor : int { None = -1, Blue = 0, Yellow, Red, Count };
+
+inline constexpr std::array<const char*, 3> kKeyNames{"blue", "yellow", "red"};
+
 struct SideData {
     int neighbour = -1;  // >= 0 makes this a portal into that segment
+    // >= 0 makes this portal a door: index into Level::doors. A door is a
+    // portal in the graph - so the two segments still share their four vertices
+    // and the mine's wall surface stays closed - with a slab that fills the
+    // opening while it is shut.
+    int door = -1;
     int texture = 0;     // layer in the wall texture array, walls only
     std::array<glm::vec2, 4> uv{};
 
@@ -116,6 +125,46 @@ struct WallTriangle {
     int side = 0;
 };
 
+// A door fills one portal. Opens when a body comes close, closes again after a
+// delay, and refuses to open at all without the right key.
+struct Door {
+    int segment = 0;
+    int side = 0;
+    int neighbour = 0;
+    KeyColor key = KeyColor::None;
+    float openDistance = 11.0f;
+    float openTime = 0.9f;      // seconds to travel from shut to open
+    float closeDelay = 2.5f;    // seconds held open after nothing is near
+    // The four corners of the opening, cached from the side so the slab and
+    // its collision do not have to look them up every step.
+    std::array<glm::vec3, 4> corners{};
+    glm::vec3 center{0.0f};
+    glm::vec3 normal{0.0f};
+};
+
+enum class PickupKind : int {
+    Shield = 0, Energy, LaserUpgrade, Concussion, Homing, Flares,
+    KeyBlue, KeyYellow, KeyRed, Count,
+};
+
+inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)> kPickupNames{
+    "shield", "energy", "laser", "concussion", "homing", "flares",
+    "key_blue", "key_yellow", "key_red"};
+
+struct Pickup {
+    PickupKind kind = PickupKind::Shield;
+    glm::vec3 position{0.0f};
+    int segment = -1;
+};
+
+// Where the level is escaped from, once the reactor is gone.
+struct ExitTrigger {
+    bool present = false;
+    glm::vec3 position{0.0f};
+    float radius = 6.0f;
+    int segment = -1;
+};
+
 // A static thing standing in the mine. M3 places these purely as shadow
 // casters; M6 turns the same entries into robots.
 struct LevelObject {
@@ -135,6 +184,9 @@ struct Level {
     std::vector<Segment> segments;
     std::vector<Light> lights;
     std::vector<LevelObject> objects;
+    std::vector<Door> doors;
+    std::vector<Pickup> pickups;
+    ExitTrigger exitTrigger;
     PlayerStart start;
 
     // Wall triangles grouped by segment, with the range each segment owns, so
@@ -167,9 +219,17 @@ struct LightFlood {
     uint32_t stamp = 0;
 };
 
+namespace sim {
+struct DoorField;
+}
+
 // Recomputes one light's segment set. Call after moving it or changing radius;
 // a stale set is how a light ends up lighting a room through a wall.
-void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch);
+//
+// `doors`, when given, stops the flood at any door that is shut, so a closed
+// door blocks light as well as movement.
+void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
+                          const sim::DoorField* doors = nullptr);
 
 // Convenience for load time and the editor, where one more allocation does not
 // matter.

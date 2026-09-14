@@ -30,14 +30,20 @@ Options Options::parse(int argc, char** argv) {
             o.weaponsTest = true;
         } else if (a == "--robots-test") {
             o.robotsTest = true;
+        } else if (a == "--loop-test") {
+            o.loopTest = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {
             o.wireframeVolumes = true;
         } else if (a == "--stencil-view") {
             o.stencilView = true;
+        } else if (a == "--level" && hasNext) {
+            o.level = argv[++i];
         } else if (a == "--no-ui") {
             o.noUi = true;
+        } else if (a == "--debug-ui") {
+            o.debugUi = true;
         } else if (a == "--autofire" && hasNext) {
             o.autofire = std::atoi(argv[++i]);
         } else if (a == "--debug-lines") {
