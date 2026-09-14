@@ -6,8 +6,16 @@ vendored in `vendor/` and everything else is plain ES modules served straight
 off disk.
 
 ```
-tools/editor/serve.py          # then open http://127.0.0.1:8080
+tools/editor/serve.py          # prints the URL it bound to
 ```
+
+It listens on 8137, or the next free port after it, and prints which. Not 8080:
+that one is already taken on a lot of machines — llama.cpp's web UI and half the
+dev servers ever written default to it — and the failure is nasty, because the
+editor does not start, the browser shows whatever *does* own 8080, and it looks
+like the editor is broken rather than absent. Pass `--port` to name one
+yourself, and it will fail on that port rather than quietly serving somewhere
+you are not looking.
 
 ## What it is for
 

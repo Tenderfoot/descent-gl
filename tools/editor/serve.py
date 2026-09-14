@@ -5,7 +5,7 @@ Serves tools/editor/ and exposes the three things a browser cannot do for
 itself: list the level files, read one, write one back, and run the game's own
 validator over the result.
 
-    tools/editor/serve.py            # then open http://127.0.0.1:8080
+    tools/editor/serve.py            # prints the URL it actually bound to
 
 Binds the loopback interface only. It writes into assets/levels/ and runs the
 game binary, so it is a development tool and not something to expose: the level
@@ -247,18 +247,65 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send_bytes(200, target.read_bytes(), kind or "application/octet-stream")
 
 
+# Not 8080. That one is already taken on a lot of machines - llama.cpp's web UI
+# and half the dev servers ever written default to it - and the failure is
+# nasty: the editor does not start, the browser shows whatever does own 8080,
+# and it looks like the editor is broken rather than absent.
+DEFAULT_PORT = 8137
+PORTS_TO_TRY = 12
+
+
+def serve(host, port, explicit):
+    """Bind before announcing anything, so the URL printed is the real one.
+
+    When the port was not asked for by name, walk forward a few and say which
+    one it landed on. When it WAS asked for by name, fail on that port rather
+    than quietly serving somewhere the caller is not looking.
+    """
+    last = None
+    for candidate in range(port, port + (1 if explicit else PORTS_TO_TRY)):
+        try:
+            return http.server.ThreadingHTTPServer((host, candidate), Handler)
+        except OSError as e:
+            last = e
+            continue
+
+    if explicit:
+        raise SystemExit(
+            f"cannot listen on {host}:{port} - {last.strerror}.\n"
+            f"Something else is already using that port; 8080 in particular is usually "
+            f"llama.cpp's web UI or another dev server.\n"
+            f"Run without --port to take the first free one from {DEFAULT_PORT}, or name a "
+            f"different one.")
+    raise SystemExit(
+        f"cannot listen on any port from {port} to {port + PORTS_TO_TRY - 1} on {host} - "
+        f"{last.strerror}.\nName one explicitly with --port.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=None,
+                        help=f"default {DEFAULT_PORT}, or the next free port after it")
     parser.add_argument("--host", default="127.0.0.1",
                         help="loopback by default, and there is no good reason to change it")
     args = parser.parse_args()
 
+    httpd = serve(args.host, args.port or DEFAULT_PORT, explicit=args.port is not None)
+    bound = httpd.server_address[1]
+
     binary = find_binary()
-    print(f"descent level editor    http://{args.host}:{args.port}")
-    print(f"  levels   {LEVELS.relative_to(ROOT)}")
-    print(f"  verify   {binary.relative_to(ROOT) if binary else 'no build found - Verify disabled'}")
-    http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
+    # Flushed, because the one thing a person needs from this program is the
+    # URL, and Python block-buffers stdout the moment it is piped or captured.
+    print(f"descent level editor    http://{args.host}:{bound}", flush=True)
+    if args.port is None and bound != DEFAULT_PORT:
+        print(f"  note     {DEFAULT_PORT} was busy, so this is on {bound}", flush=True)
+    print(f"  levels   {LEVELS.relative_to(ROOT)}", flush=True)
+    print(f"  verify   {binary.relative_to(ROOT) if binary else 'no build found - Verify disabled'}",
+          flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print()
 
 
 if __name__ == "__main__":

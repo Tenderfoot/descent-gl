@@ -127,7 +127,7 @@ not part of the game build — no CMake target, no vcpkg entry, no node
 toolchain.
 
 ```
-tools/editor/serve.py        # then open http://127.0.0.1:8080
+tools/editor/serve.py        # prints the URL it bound to
 ```
 
 It draws the mine with the game's own triangulation, checks every structural
