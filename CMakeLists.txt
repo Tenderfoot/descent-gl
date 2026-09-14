@@ -5,13 +5,21 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(glfw3 CONFIG REQUIRED)
-find_package(glad CONFIG REQUIRED)
-find_package(glm CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
-find_package(Stb REQUIRED)
-find_package(nlohmann_json CONFIG REQUIRED)
-find_package(tinyobjloader CONFIG REQUIRED)
+# The shipping build resolves dependencies through vcpkg (see CMakePresets.json).
+# A Linux dev container has no vcpkg; cmake/LinuxDeps.cmake defines the same
+# target names from distribution packages plus .deps/. Same dependency set
+# either way -- see the allowlist in CLAUDE.md.
+if(VCPKG_TOOLCHAIN OR MSVC)
+    find_package(glfw3 CONFIG REQUIRED)
+    find_package(glad CONFIG REQUIRED)
+    find_package(glm CONFIG REQUIRED)
+    find_package(imgui CONFIG REQUIRED)
+    find_package(Stb REQUIRED)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    find_package(tinyobjloader CONFIG REQUIRED)
+else()
+    include(${CMAKE_SOURCE_DIR}/cmake/LinuxDeps.cmake)
+endif()
 
 add_executable(descent
     src/main.cpp
@@ -47,6 +55,8 @@ target_compile_definitions(descent PRIVATE
 )
 if(MSVC)
     target_compile_options(descent PRIVATE /W4 /permissive- /utf-8 /Zc:__cplusplus)
+else()
+    target_compile_options(descent PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT descent)

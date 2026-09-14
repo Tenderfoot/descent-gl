@@ -19,6 +19,25 @@ cmake --build --preset local-debug
 cmake --build --preset local-release
 ```
 
+### Linux dev container
+
+The shipping target is Windows/MSVC. A Linux container can still build and
+smoke-run the game, which is how an agent without the dev machine verifies a
+milestone:
+
+```
+sudo tools/linux-deps.sh          # apt packages, glad, imgui into .deps/
+cmake --preset linux
+cmake --build --preset linux-debug
+tools/run-headless.sh --frames 120 --screenshot /tmp/shot.png
+```
+
+Dependencies are the same allowlist, resolved from distribution packages plus
+`.deps/` instead of vcpkg (`cmake/LinuxDeps.cmake`). GL goes through zink over
+lavapipe, because Mesa's llvmpipe advertises only GL 4.5 and this project asks
+for 4.6 core. It is software rendering: tens of fps, not thousands. Treat it as
+a correctness check, never as a performance measurement.
+
 `CMakePresets.json` is committed and resolves vcpkg from `$env{VCPKG_ROOT}`.
 `CMakeUserPresets.json` is machine-local and git-ignored; it defines the
 `local` preset that points `VCPKG_ROOT` at the VS-bundled vcpkg. A fresh clone

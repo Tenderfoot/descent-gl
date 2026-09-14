@@ -12,3 +12,6 @@ vcpkg_installed/
 
 # screenshots written by --screenshot
 *.screenshot.png
+
+# Linux dev-container dependencies (see tools/linux-deps.sh)
+.deps/
