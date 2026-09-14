@@ -563,7 +563,9 @@ machine. Iconify/restore and performance as ever.
 
 Pickups, keyed doors, the reactor, the countdown, the exit, win and lose
 screens, an in-game HUD, and `mine01`. **Paused mid-milestone at the user's
-request; one known failure is recorded below.**
+request.** The one known failure recorded below turned out to be the test's own
+oracle and is now fixed; see *Fixes after M7 — the raycast oracle* at the end of
+this file.
 
 ### Done and verified
 
@@ -588,7 +590,7 @@ GL:
 
 `test01` is kept and still loads; `--level PATH` selects it.
 
-### Known failure: one raycast in 884 on `mine01`
+### Known failure: one raycast in 884 on `mine01` — RESOLVED, it was the test
 
 `--collision-test` reports **1 disagreement of 884 rays** on `mine01` (it passes
 cleanly on `test01`). Diagnosed, not yet fixed:
@@ -608,6 +610,14 @@ The failure is conservative in gameplay terms (a ray stops earlier than it
 should, never later), it is confined to exact grid diagonals, and the swept
 sphere is unaffected: **884 of 884 sweeps behave correctly**. It still needs a
 proper fix before M7 is called done.
+
+**Everything above this line is wrong about where the bug was.** `raycast` was
+correct; the marching oracle this section trusted was not. Both the segment-24
+diagnosis here and the segment-16 one recorded under the rendering follow-up were
+the oracle terminating itself on a legitimate grazing pass. The section is kept
+as written because the reasoning it contains is instructive — it treated
+agreement between two methods as evidence about the faster one, and never
+questioned the slower one. See *Fixes after M7 — the raycast oracle* below.
 
 ### The rest of the level flow
 
@@ -651,7 +661,8 @@ Worth recording, because all three were the tests and not the code:
 
 ### Not done yet
 
-- **The raycast diagonal case above** — the one outstanding failure.
+- ~~**The raycast diagonal case above**~~ — fixed; it was the test's oracle, not
+  the collision code.
 - `ARCHITECTURE.md` sections for doors, the HUD and the game flow.
 - Playtesting `mine01` end to end, which needs the real machine: whether the
   key routing is legible, whether 45 seconds is the right countdown, and
@@ -806,3 +817,64 @@ Release executable reports segment **16**, direction (-0.71, 0, -0.71): raycast
 from the earlier segment-24 diagnosis above, including the direction of error;
 the old claim that the remaining ray always stops early needs re-investigation.
 No collision, projectile, or gameplay door-blocking behavior was changed.
+
+That re-investigation is done: the call for it was the right instinct, and the
+answer was that **neither number described a collision bug**. See the section
+below.
+
+---
+
+## Fixes after M7 — the raycast oracle
+
+M7's one outstanding failure, carried since the milestone was paused, was never in
+`src/sim`. `--collision-test` checked `sim::raycast` against a marching oracle,
+and it was the oracle that was wrong.
+
+The ray it flagged, from segment 16's centre on `mine01` along (−0.71, 0, −0.71),
+passes from segment 16 into segment 14 through a portal and **grazes the portal
+corner with 0.0202 units of clearance**, still inside the mine, with clearance
+climbing back to 0.11, 0.29 and 0.47 over the next three steps. The oracle
+stopped there because M7 had given it a "stay at least one 0.05-unit step clear
+of the surface" rule — added to stop it marching *through* the point where two
+segments meet at a grid diagonal, which was the earlier segment-24 report. One
+guard, two opposite false results, and that is why the recorded diagnosis flipped
+direction between runs.
+
+`raycast` was never consulted about objects or robots, so the robot spawn-point
+fix recorded above could not have been involved either: the query takes wall
+triangles, portals and shut doors, and nothing else.
+
+### The fix
+
+The marching oracle is replaced by an exact one: test the ray against every wall
+triangle in the level and keep the nearest hit. The union of all wall triangles is
+one closed surface (M3 validates that), so the first triangle the ray meets *is*
+the wall it hits. It walks no segment graph, which is what keeps it independent of
+`raycast`, and it has no threshold to tune against grazing angles. 244 triangle
+tests per ray on `mine01`.
+
+The tolerance drops from **0.35 units to 0.001**, which is float noise rather than
+a fudge factor.
+
+### Verified (Linux container, software GL; these tests need no window and no GL)
+
+| Check | Result |
+| --- | --- |
+| `--collision-test` on `mine01`, Debug and Release | ✅ **PASS** — 884 rays, 0 missed, **0 disagreements**, worst delta **0.000011 u** |
+| `--collision-test` on `test01`, Debug and Release | ✅ **PASS** — 364 rays, worst delta **0.000011 u** |
+| Containment, sliding, portals, sweeps, unchanged | ✅ 884 trials 0 escapes, 122 walls 0 caught, 82 crossings 0 failed, 884/884 sweeps |
+| Negative control: `raycast` perturbed by **0.01 u** | ✅ caught on **all 884 rays** — 35× below what the old 0.35 tolerance could see |
+| World, weapons, robots, loop, flight tests on `mine01` | ✅ PASS |
+| Same on `test01` | ✅ PASS (loop SKIPPED, no doors or exit) |
+| Debug and Release build | ✅ clean, no new warnings |
+
+The collision, projectile and door-blocking code is untouched: the only change is
+`src/game/collision_test.cpp`.
+
+### What this closes
+
+M7's "not done yet" list loses its one failure. What remains for the milestone is
+the `ARCHITECTURE.md` work for doors, the HUD and the game flow, and playing
+`mine01` end to end on the dev machine — key routing, the 45-second countdown,
+and whether 16 robots is the right number. None of that can be settled in the
+container.

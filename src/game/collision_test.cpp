@@ -11,12 +11,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace dvk {
 
 namespace {
 
 constexpr float kStep = 1.0f / 120.0f;
+
+// Ignore an intersection at the ray's own origin. The origins here are segment
+// centres, so nothing legitimate sits this close.
+constexpr float kHitEpsilon = 1.0e-4f;
 
 // The 26 directions through a cube's faces, edges and corners. Fixed and
 // deterministic, and they cover the cases that matter: straight at a wall,
@@ -33,6 +38,31 @@ std::array<glm::vec3, 26> makeDirections() {
         }
     }
     return dirs;
+}
+
+// Where the ray meets the mine's surface, by testing every wall triangle in the
+// level and keeping the nearest. The union of all wall triangles is one closed
+// surface (validated in M3), so the first triangle a ray from an interior point
+// meets is the wall it hits. That makes this exact: no stepping, no threshold to
+// tune, and no segment graph - which is what keeps it independent of the thing
+// it checks, since raycast's whole job is to walk that graph.
+//
+// This replaced a marching oracle that stepped a point along the ray until it
+// left the mine. Marching cannot tell passing through a corner from passing
+// near one, and both answers it was given were wrong. With no clearance
+// requirement it walked through the single point where two segments meet at a
+// grid diagonal. With one (M7 added it, 0.05 units) it stopped at any near
+// graze: on mine01 a ray from segment 16's centre along (-0.71, 0, -0.71)
+// clears a portal corner by 0.0202 units and carries on into segment 14, but
+// the marched oracle called that a wall at 13.850 units and so reported
+// raycast's correct 71.023 as the milestone's one outstanding failure.
+float firstWallHit(const Level& level, const glm::vec3& origin, const glm::vec3& dir) {
+    float best = std::numeric_limits<float>::infinity();
+    for (const WallTriangle& w : level.walls) {
+        const float t = sim::rayTriangleDistance(origin, dir, w.p[0], w.p[1], w.p[2]);
+        if (t > kHitEpsilon && t < best) best = t;
+    }
+    return best;
 }
 
 // Is this point inside the mine at all?
@@ -55,19 +85,6 @@ std::array<glm::vec3, 26> makeDirections() {
 // surface (validated in M3), so a ray from an interior point crosses it an odd
 // number of times. Three directions and a majority vote, because a single ray
 // that grazes an edge can double-count it.
-// How far the point is from the mine's surface. A ray marched exactly along a
-// grid diagonal can pass through the single point where two segments meet at a
-// corner: the parity test still says "inside", while raycast - correctly -
-// stops on one of the two walls that meet there. Requiring a little clearance
-// makes the oracle agree with the answer a body actually needs.
-float clearance(const Level& level, const glm::vec3& p) {
-    float best = 1e30f;
-    for (const WallTriangle& w : level.walls) {
-        best = std::min(best, sim::distanceToTriangle(p, w.p[0], w.p[1], w.p[2]));
-    }
-    return best;
-}
-
 bool insideMine(const Level& level, const glm::vec3& p) {
     // Deliberately irrational-looking directions: a ray down an axis lies in
     // the plane of a grid-aligned wall far too often.
@@ -242,13 +259,17 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
 
     // --- raycast, against an independent method ---------------------------
     //
-    // Marching a point in small increments until it leaves the mine is a slow
-    // and obviously-correct way to find the same wall. If the two disagree, one
-    // of them is wrong, and it is worth knowing which before M5 starts firing
+    // Testing the ray against every wall triangle in the level is a slow and
+    // obviously-correct way to find the same wall. If the two disagree, one of
+    // them is wrong, and it is worth knowing which before M5 starts firing
     // things along the fast one.
+    //
+    // The tolerance is float noise rather than a fudge factor: both methods
+    // intersect the same triangles with the same routine, so the only
+    // difference is the order they are visited in and the origin each test
+    // starts from. Anything larger than this is a real disagreement.
     {
-        constexpr float kMarchStep = 0.05f;
-        constexpr float kTolerance = 0.35f;
+        constexpr float kTolerance = 1.0e-3f;
         constexpr float kMaxDistance = 400.0f;
         int tested = 0;
         int misses = 0;
@@ -273,27 +294,29 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                     continue;
                 }
 
-                float marched = 0.0f;
-                while (marched < kMaxDistance) {
-                    const glm::vec3 at = origin + dir * marched;
-                    if (!insideMine(level, at) || clearance(level, at) < kMarchStep) break;
-                    marched += kMarchStep;
+                const float brute = firstWallHit(level, origin, dir);
+                if (!std::isfinite(brute)) {
+                    log::error("no wall triangle anywhere along the ray from segment {} heading "
+                               "{:.2f} {:.2f} {:.2f}, but the mine is closed",
+                               si, dir.x, dir.y, dir.z);
+                    ++disagreements;
+                    continue;
                 }
 
-                const float delta = std::abs(marched - hit.distance);
+                const float delta = std::abs(brute - hit.distance);
                 worst = std::max(worst, delta);
                 if (delta > kTolerance) {
                     if (disagreements < 4) {
                         log::error("raycast says {:.3f} units from segment {} heading {:.2f} "
-                                   "{:.2f} {:.2f}, marching says {:.3f}",
-                                   hit.distance, si, dir.x, dir.y, dir.z, marched);
+                                   "{:.2f} {:.2f}, every-triangle says {:.3f}",
+                                   hit.distance, si, dir.x, dir.y, dir.z, brute);
                     }
                     ++disagreements;
                 }
             }
         }
-        log::info("raycast: {} rays, {} missed, {} disagreed with marching (worst {:.3f} units, "
-                  "tolerance {:.2f})",
+        log::info("raycast: {} rays, {} missed, {} disagreed with every-triangle (worst {:.6f} "
+                  "units, tolerance {:.6f})",
                   tested, misses, disagreements, worst, kTolerance);
         if (misses > 0 || disagreements > 0) ok = false;
     }
