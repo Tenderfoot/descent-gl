@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>descent level editor</title>
+<link rel="stylesheet" href="src/editor.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",
+    "three/addons/controls/TransformControls.js": "./vendor/TransformControls.js"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="viewport"></div>
+
+  <aside id="panel">
+    <header>
+      <h1>descent level editor</h1>
+      <div class="row">
+        <select id="level-select" title="Levels in assets/levels/"></select>
+        <button id="new-level" title="Create a new level in assets/levels/">New…</button>
+        <button id="reload" title="Discard changes and re-read the file">Reload</button>
+      </div>
+      <div class="row">
+        <button id="save" class="primary">Save</button>
+        <button id="verify" title="Run the game's own headless checks over the saved file">Verify</button>
+      </div>
+      <div class="row">
+        <button id="undo" title="Ctrl+Z">Undo</button>
+        <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+        <button id="top-view" title="Top-down orthographic view, like the automap">Top</button>
+      </div>
+      <p id="status" class="status"></p>
+    </header>
+
+    <section>
+      <h2>Edit</h2>
+      <div id="modes" class="modes"></div>
+      <div id="tools" class="tools"></div>
+      <label class="snap" title="Round a dragged vertex to this grid. 0 is off, which is the default: the shipped levels have vertices on fractional coordinates and a grid would quantise them the first time one is dragged.">grid
+        <input id="snap" type="number" min="0" max="20" step="0.5" value="0">
+      </label>
+    </section>
+
+    <section>
+      <h2>Level</h2>
+      <dl id="stats"></dl>
+    </section>
+
+    <section>
+      <h2>Show</h2>
+      <div id="layers" class="layers"></div>
+    </section>
+
+    <section>
+      <h2>Selection</h2>
+      <div id="selection" class="selection">Click a wall or a gizmo.</div>
+    </section>
+
+    <section>
+      <h2 id="findings-title">Checks</h2>
+      <div id="findings" class="findings"></div>
+    </section>
+
+    <section id="verify-section" hidden>
+      <h2>Game report</h2>
+      <div id="verify-list" class="checklist"></div>
+      <details id="verify-raw"><summary>full output</summary><pre id="verify-output"></pre></details>
+    </section>
+  </aside>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

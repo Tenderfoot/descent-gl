@@ -1,0 +1,216 @@
+{
+  "name": "base",
+  "comment": "Three segments in a row. The smallest level that can express every structural rule, including a portal walk long enough for reachability to mean something. Built by tools/editor/tests/conformance.mjs as the base every broken variant is mutated from.",
+  "vertices": [
+    [
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      20.0,
+      0.0,
+      0.0
+    ],
+    [
+      20.0,
+      20.0,
+      0.0
+    ],
+    [
+      0.0,
+      20.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      20.0
+    ],
+    [
+      20.0,
+      0.0,
+      20.0
+    ],
+    [
+      20.0,
+      20.0,
+      20.0
+    ],
+    [
+      0.0,
+      20.0,
+      20.0
+    ],
+    [
+      40.0,
+      0.0,
+      0.0
+    ],
+    [
+      40.0,
+      20.0,
+      0.0
+    ],
+    [
+      40.0,
+      0.0,
+      20.0
+    ],
+    [
+      40.0,
+      20.0,
+      20.0
+    ],
+    [
+      60.0,
+      0.0,
+      0.0
+    ],
+    [
+      60.0,
+      20.0,
+      0.0
+    ],
+    [
+      60.0,
+      0.0,
+      20.0
+    ],
+    [
+      60.0,
+      20.0,
+      20.0
+    ]
+  ],
+  "segments": [
+    {
+      "verts": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "sides": [
+        {
+          "texture": 0
+        },
+        {
+          "texture": 1
+        },
+        {
+          "portal": 1
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        }
+      ]
+    },
+    {
+      "verts": [
+        1,
+        8,
+        9,
+        2,
+        5,
+        10,
+        11,
+        6
+      ],
+      "sides": [
+        {
+          "portal": 0
+        },
+        {
+          "texture": 1
+        },
+        {
+          "portal": 2
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        }
+      ]
+    },
+    {
+      "verts": [
+        8,
+        12,
+        13,
+        9,
+        10,
+        14,
+        15,
+        11
+      ],
+      "sides": [
+        {
+          "portal": 1
+        },
+        {
+          "texture": 1
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        }
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "position": [
+        30.0,
+        10.0,
+        10.0
+      ],
+      "radius": 40.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 2.0,
+      "type": "point",
+      "segment": 1
+    }
+  ],
+  "start": {
+    "segment": 0,
+    "position": [
+      10.0,
+      10.0,
+      10.0
+    ],
+    "orientation": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  }
+}

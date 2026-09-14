@@ -1052,3 +1052,239 @@ Playing `mine01` end to end on the dev machine: whether the key routing reads,
 whether 45 seconds is the right countdown, and whether 16 robots is too many or
 too few. That is a judgement call at a keyboard, not something the container can
 answer.
+
+---
+
+## E0–E2 — The level editor: viewer, validation parity, round trip ✅
+
+A browser tool for authoring `assets/levels/*.json`, in `tools/editor/`. Not
+part of the game build: no CMake target, no vcpkg entry, no node toolchain,
+three.js vendored beside it. See `docs/ARCHITECTURE.md`, *Authoring: the level
+editor*.
+
+E0 is the viewer, E1 is validation parity with the game, E2 is saving. It does
+not modify geometry yet — that is E3. Doing the round trip first is the point:
+a save that is only nearly faithful turns every later edit into an
+unreviewable diff, and it is much easier to prove a no-op before there is
+anything that could make it stop being one.
+
+### Verified
+
+Measured in the Linux dev container (software rendering; the editor is a
+browser page, so the development machine's numbers do not apply).
+
+| Check | Result |
+| --- | --- |
+| Editor reproduces the game's counts, `mine01` | ✅ 34 segments, 244 wall triangles, 124 welded vertices, 366 edges |
+| Editor reproduces the game's counts, `test01` | ✅ 14 segments, 112 wall triangles, 58 welded vertices, 168 edges |
+| Triangulation port is faithful | ✅ **81 of 204** and **42 of 84** sides take the alternate diagonal — the same numbers the loader logs |
+| Closed wall surface | ✅ V−E+F = 2 on both, matching `--validate-assets` |
+| Open and save is byte-exact | ✅ `git diff` empty on both shipped levels, through the unit test *and* through the real Save button in Chromium |
+| Validator agreement | ✅ 15 broken levels, one per rule: editor rejects, game aborts, both name the same segment and side |
+| Editor-only rules stay editor-only | ✅ overlap and unreachable: editor warns, game loads silently |
+| Conformance run | ✅ 36 assertions, 0 failures |
+| Verify button runs the real binary | ✅ `--world-test`, `--collision-test`, `--loop-test` all PASS on the saved `mine01`, reported into the panel |
+| Page drives clean in Chromium | ✅ no console errors, no page errors, no failed requests; WebGL2 |
+| Path traversal into the repo | ✅ refused: `/../../CLAUDE.md` 404, `..%2f..%2f` level names 400 |
+| Game still builds and passes | ✅ `--validate-assets` unchanged, no asset touched |
+
+### What is in it
+
+Orbit and click-to-select, segments coloured by texture index with the split
+diagonal visible, portals and doors as translucent quads, lights with a reach
+sphere, objects, pickups, the start and the exit as gizmos. Selecting a light
+outlines every segment its flood fill reaches, which is the property hardest to
+picture from the file. X-ray drops the walls to a shell, because a mine seen
+from outside is a closed hull; double-click flies the camera into a segment.
+
+2,100 lines of JavaScript and Python, plus 712 KB of vendored three.js.
+
+### Two things the editor catches that the game does not
+
+Both warnings, both asserted by the conformance run to be things the game
+loads without complaint:
+
+- **Overlapping segments.** `findSegment` returns whichever it tests first, so
+  a ship flying there jumps between rooms.
+- **Unreachable segments.** Dead data, or a room nobody can ever enter.
+
+### Two ways its writer beats `saveLevel()`
+
+Neither changes what loads; both make the file better. It **preserves
+`comment`**, which `saveLevel` drops — so the prose atop `mine01.json` survives
+a save — and it **writes a light's `segment`** instead of making the loader
+search for it again. It is also the only one of the two that can round-trip at
+all: `nlohmann::json` sorts keys alphabetically and widens `float` to `double`,
+which turns `0.86` into `0.8600000143051147`.
+
+### Not done here
+
+E3 (extrude, join, delete, vertex dragging), E4 (entity tools, OBJ preview),
+E5 (2D map view, the checklist panel). The riskiest piece is E3's corner
+correspondence: getting the mapping from a new segment's eight corner slots
+onto four existing and four new vertices wrong produces a twisted segment that
+still validates. It gets tested against the validator in every rotation.
+
+---
+
+## E3 — The level editor: geometry editing ✅
+
+Extrude, join, split, delete, vertex dragging, textures, undo and redo.
+`tools/editor/src/ops.js` and `history.js`. Still no change to the game.
+
+The primitive is **extrude**: a wall grows into a new segment whose matching
+face reuses the wall's four vertex *indices*, so the portal is exact because it
+was never built any other way. **Join** is the same rule from the other end —
+two walls already in the same place become a portal by rewriting one segment's
+indices to the other's. It never moves geometry to close a gap, because a
+portal made by nudging vertices until they coincide is exactly the file that
+validates, renders, walks, and leaks light.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| Extrude in all six directions | ✅ each produces a **box**: 8 distinct corners, no edge under 1 unit, every face planar to 1e-3, four indices shared with the wall it grew from |
+| Extrude refuses a side that is already a portal | ✅ |
+| Extrude depth defaults to the source segment's | ✅ 20.00 wanted, 20.00 got |
+| Join, shared-index path | ✅ two extrudes that meet already share four corners; joining closes the surface |
+| Join, rewrite path | ✅ two wings with different indices for the same four places: rewritten, seam closed, **24 → 20 vertices** |
+| Join refuses sides that are not coincident | ✅ names the distance (27.618 in the UI run) |
+| Join refuses a side that is already a portal | ✅ |
+| Delete undoes an extrude exactly | ✅ back to 3 segments and 16 vertices, orphans dropped |
+| Delete from the middle reindexes everything | ✅ graph, doors, entities, player start |
+| Delete takes the entities inside with it | ✅ 1 light, 1 object on `test01` segment 2 |
+| Delete does not relocate the player start | ✅ goes to −1 and the validator says so |
+| A delete that pinches the surface is reported | ✅ `test01` segment 2: 0 open, **1 over-shared**, Save refused |
+| A level built from extrude + join + delete | ✅ validates, surface closed, round-trips, **and the game loads it** |
+| `tests/ops.mjs` | ✅ 25 assertions, 0 failures |
+| `tests/conformance.mjs` still passes | ✅ 36 assertions |
+| Extrude in the browser | ✅ 124→128 vertices, 34→35 segments, 244→252 wall triangles, surface still closed |
+| Undo / redo in the browser | ✅ exact restore both ways, then Save byte-identical (30418 bytes) and all three game checks PASS |
+| Vertex drag with snap | ✅ vertex 55 moved and snapped, surface stayed closed, one undo entry per drag |
+| Join handshake in the UI | ✅ arm → select → *Join to 28 top* → refusal surfaced, level untouched, Cancel offered |
+| No console or page errors | ✅ |
+
+### The one algorithm that matters
+
+Which of a new segment's eight corner slots takes which existing vertex. Get
+it wrong and you get a twisted segment that passes every structural rule —
+every rule in the format is about indices, and a twist is about which index
+went in which slot, so "it validates" is not evidence.
+
+So the permutation is **derived** from the cube's corner coordinates rather
+than written down, and the test checks shape rather than legality. A
+hand-built table would be right for the side it was checked on and quietly
+twisted for the other five; the first version of the test caught nothing
+because it only asked whether the result validated, which it did.
+
+### Two things the editor refuses to paper over
+
+- **Two extrudes that meet** leave two walls in the same place until they are
+  joined — an over-shared surface. That is reported, not hidden, and it is how
+  the author is told to join them.
+- **A delete that pinches** leaves four faces on one edge. Nothing in the
+  delete can fix it; the closure check reports it and Save refuses.
+
+---
+
+## E4 — The level editor: entities ✅
+
+Lights, robots and scenery, pickups, doors, the exit and the player start.
+`tools/editor/src/entities.js` and `obj.js`. Still no change to the game.
+
+Objects are drawn as their real meshes rather than boxes, through a small OBJ
+parser checked against the counts `--validate-assets` prints.
+
+### The field the loader trusts
+
+Every entity caches which segment contains it. `loadLevel` recomputes that
+field when it is missing or out of range — and **trusts it when it is merely
+wrong**. An entity dragged across a portal without re-resolving is a light that
+lights the wrong room, and nothing anywhere complains, because nothing is
+structurally invalid. Everything that moves an entity re-resolves it against
+the same `findSegment` the loader uses.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| OBJ parser against the game's counts | ✅ brute 72, drone 20, gunner 48, pillar 28, reactor 76, ship 22 — exact |
+| A placed light, pickup, object, exit knows its segment | ✅ |
+| Moving a light across two portals re-resolves it | ✅ and **agrees with `findSegment`**, not with a hard-coded index |
+| Moving the player start re-resolves it | ✅ |
+| A pickup placed outside the mine | ✅ reported, not silently written |
+| A door is wired onto both sides of its portal | ✅ near and far both index 0 |
+| A door on a solid wall | ✅ refused, with the reason the game would give |
+| A portal cannot have two doors | ✅ |
+| Removing a door renumbers the rest, both sides | ✅ |
+| The player start cannot be removed | ✅ |
+| Key colours offered are only the ones the level has | ✅ |
+| A level with a new room, light, robot, reactor, key, door and exit | ✅ validates, round-trips, **the game loads it** |
+| The game walks to the editor-placed key and collects it | ✅ "1 of 1 collected and had an effect", key seen and collected |
+| `tests/entities.mjs` | ✅ 30 assertions |
+| `tests/ops.mjs`, `tests/conformance.mjs` still pass | ✅ 25 and 36 |
+| Entity placement in the browser | ✅ light 14→15, drone 18→19, property editors, checks clean |
+| Objects draw as their real meshes | ✅ |
+| No console or page errors | ✅ |
+
+### A finding: `--loop-test` is not a general oracle
+
+Despite its name, `src/game/loop_test.cpp` asserts the level has exactly three
+keyed doors and a gunner — it is `mine01`'s regression test, not a check of
+whether an arbitrary level can be played. It skips only when there are no doors
+or no exit, so an editor-built level with one door and no gunner is neither
+skipped nor passing.
+
+The editor's Verify button originally reported that as a failure. It now marks
+the check with the level it was written for and reports it under an advisory
+note without counting it, because folding it in would train the author to
+ignore the one check that catches a mine you cannot finish. The general part of
+its output — that the placed key is seen, collected and has an effect — is
+asserted in `tests/entities.mjs` instead.
+
+---
+
+## E5 — The level editor: authoring from nothing ✅
+
+**New**, the top-down view, and a Verify panel that reads like a checklist.
+`tools/editor/src/create.js`. Still no change to the game.
+
+A tool that can only edit the two levels already in the repository is not an
+authoring tool, and until this milestone that is what it was.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| A new level has nothing wrong with it | ✅ 1 segment, 8 vertices, 12 wall triangles, V−E+F = 2 |
+| It can be extruded from all six sides | ✅ every one valid |
+| It round-trips through the writer | ✅ |
+| Level names | ✅ refuses existing, empty, a path, a space, a leading dash, 65 chars |
+| The game loads one made from scratch and grown once | ✅ no abort |
+| …and only objects that it is too small | ✅ the three `--world-test` size complaints, nothing structural |
+| Authored end to end in the browser | ✅ New → extrude → Save (1953 bytes) → Verify "loads cleanly" |
+| Top-down view | ✅ orthographic, rotation locked |
+| `tests/create.mjs` | ✅ 21 assertions |
+| All four suites | ✅ conformance 36, ops 25, entities 30, create 21 |
+| No console or page errors | ✅ |
+
+### Reading the game's verdict
+
+The panel now reports each check as a row, because two very different things
+hide behind a non-zero exit and the difference is the one an author needs:
+**cannot load** (the game aborted — broken), **N notes** (it loaded and
+objected), and **advisory** (the check was written for another level).
+
+Only an abort counts against the headline. A correct one-room mine trips
+`--world-test`'s "no segment is dark" and "portal culling is doing nothing"; a
+correct five-room mine trips `--loop-test`'s assertions about `mine01`'s three
+keyed doors. A panel that cried failure at every correct small level would
+teach the author to ignore the checks — and one of those checks is the only
+thing that catches a mine you cannot finish.
+
+### The editor is done
+
+E0 viewer, E1 validation parity, E2 round trip, E3 geometry, E4 entities,
+E5 authoring. 112 assertions across four suites, all of them checked against
+the real binary where the binary has an opinion.

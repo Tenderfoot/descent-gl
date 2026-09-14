@@ -146,6 +146,224 @@ tile across a 20-unit wall.
 
 ---
 
+## Authoring: the level editor (E0-E2)
+
+`tools/editor/`. A browser tool that reads and writes `assets/levels/*.json`.
+It is not part of the game build — no CMake target, no vcpkg entry, no node
+toolchain — and three.js is vendored beside it.
+
+`mine01` is 124 vertices and 34 segments written by hand, which is about the
+ceiling for a text editor. The reason a tool is needed rather than more
+patience is the format's central rule: two segments joined through a portal
+reference **the same four vertex indices**, not four coincident positions.
+Nothing about that is visible while typing JSON, and getting it wrong produces
+a light leak that looks like a renderer bug.
+
+So the editor is segment-graph-native. It knows about segments, portals and
+the shared vertex array; from E3 the primitive operation is *extrude a side
+into a new segment*, which creates the reciprocal portal and shares the four
+vertices by construction. There is no free vertex-soup mode.
+
+### It draws the game's triangulation, not its own
+
+`tools/editor/src/geometry.js` is a port of `splitSides()`. A side is a general
+quad, split at load by whichever diagonal leaves the smaller crease, and
+**every later system uses those triangles and never the quad**. An editor that
+drew the quads, or split them the other way, would be showing a mine subtly
+different from the one the game builds, with no error anywhere to say so.
+
+That the port is faithful is checked by a number rather than by reading it:
+the editor must reproduce the loader's own log line, *"81 of 204 sides took the
+alternate diagonal"*, exactly, for both shipped levels. That number moves if
+the rule is ported wrong.
+
+### Two validators, and the conformance run
+
+`tools/editor/src/validate.js` reimplements `validate()`, the door and entity
+resolution that follows it in `loadLevel()`, and `asset_check.cpp`'s
+closed-surface check. Two implementations of one format drift, and the way
+anyone finds out is by authoring a level the editor called fine and the game
+aborts on.
+
+So `tools/editor/tests/conformance.mjs` mutates a three-segment base level one
+rule at a time and asks both: the editor must reject it, the game must abort
+on it, and the two must name the same segment and side. Fifteen cases, one per
+rule. Compiling the C++ validator to WASM was the alternative and was rejected:
+a whole toolchain, for seventy lines.
+
+Two checks exist only in the editor, as warnings, because the game makes
+neither and both produce behaviour that looks like a bug elsewhere:
+**overlapping segments** (`findSegment` answers with whichever it tests first,
+so a ship jumps between rooms) and **unreachable segments** (dead data, or a
+room nobody can enter). The conformance run asserts the *inverse* for these —
+the editor warns and the game loads the level silently — which is what keeps
+them honest about being editor-only.
+
+### Saving is a no-op
+
+Opening a shipped level and pressing Save produces the same bytes: `git diff`
+is empty. This is proved before any editing feature exists, because a round
+trip that is only *nearly* faithful turns every later save into an
+unreviewable diff.
+
+`saveLevel()` cannot manage it. `nlohmann::json` sorts object keys
+alphabetically, and a `float` widened to `double` on the way out turns `0.86`
+into `0.8600000143051147`. The editor's writer keeps each object's source key
+order, omits fields sitting at their default, and formats numbers the way the
+files do — floats with a `.0`, indices bare. It also fixes two things
+`saveLevel` gets wrong: it **preserves `comment`**, which `saveLevel` drops (so
+the prose atop `mine01.json` survives a save), and it **writes a light's
+`segment`** rather than making the loader search for it again.
+
+### The server, and Verify
+
+`tools/editor/serve.py` is loopback-only and does the three things a browser
+cannot: list the levels, read one, write one back. It also exposes **Verify**,
+which runs the real binary — `--world-test`, `--collision-test`, `--loop-test`
+— over the saved file and prints what it said into the panel. The editor's own
+checks are the fast feedback; the game is the answer. Nothing new was invented
+to verify levels, because the headless flags already do it.
+
+The level name in a request is matched against a strict pattern and joined to
+`assets/levels/` rather than taken as a path, static files are resolved and
+then confirmed to still be inside `tools/editor/`, and a save parses the body
+before replacing the file — unreadable JSON in `assets/levels/` makes every
+later game start fatal, editor or not.
+
+### Editing, and the one algorithm that matters (E3)
+
+The primitive is **extrude**: a wall grows into a new segment whose matching
+face reuses the wall's four vertex *indices*. The portal is exact because it
+was never built any other way.
+
+Which of the new segment's eight corner slots takes which existing vertex is
+the whole of the problem, and it is the only place in the editor where a bug
+produces a level that passes every structural rule and is still wrong — a
+twisted segment. Every rule in the format is about indices; a twist is about
+which index went in which slot. So the correspondence is **derived** from the
+cube's corner coordinates (the permutation that reflects the cube through that
+side's plane) rather than written down: a hand-built table is right for the
+side it was checked on and quietly twisted for the other five. `tests/ops.mjs`
+extrudes in all six directions and checks the result is a *box* — eight
+distinct corners, no degenerate edge, every face planar — not merely a legal
+one.
+
+**Join** is the same rule from the other end. Two walls already in the same
+place become a portal by rewriting one segment's four indices to the other's,
+across the whole level, and dropping what that makes redundant. It never moves
+geometry to close a gap: a portal made by nudging vertices until they coincide
+is exactly the file that validates, renders, walks, and leaks light. If the
+corners are not already coincident it refuses and says how far off they are.
+
+Two consequences worth knowing, both of which the editor reports rather than
+hides:
+
+- Extruding into a space where a vertex already exists **reuses** it, so two
+  extrudes that meet already share their four corners and the join between
+  them only has to set the portals. In between, the level has two walls in the
+  same place — an over-shared surface — and the closure check is what tells
+  the author to join them.
+- Deleting a segment from the middle of a cluster can leave four faces meeting
+  along one edge. The shadow volumes cannot use that, and no cleverness in the
+  delete fixes it, because the geometry genuinely pinches. The closure check
+  reports it, Save refuses, and undo is one keystroke away.
+
+Delete also takes the lights, pickups and objects inside the segment with it —
+keeping the lamp floating in the rock the room became is not what anyone means
+— but not the player start or the exit, which are the level rather than
+furniture and are left pointing at nothing, loudly.
+
+Every edit goes through one function that records undo, applies the operation,
+revalidates and redraws. Nothing calls the operations directly, so there is no
+path that changes a level and forgets to re-check it. Undo is by snapshot
+through the writer and reader, which means an undone level is byte-identical
+to one loaded from the file — and that a bug in the writer surfaces here
+rather than a week later in a diff.
+
+### Entities, and the field the loader trusts (E4)
+
+Lights, robots and scenery, pickups, doors, the exit and the player start.
+Objects are drawn as their real meshes — `tools/editor/src/obj.js` is just
+enough OBJ to get a silhouette, checked against the triangle counts
+`--validate-assets` prints, because placing a robot as a grey box is placing it
+and hoping.
+
+The rule all of it protects is one field. Every entity caches which segment
+contains it, and `loadLevel` recomputes that field when it is missing or out of
+range — but **trusts it when it is merely wrong**. So an entity dragged across
+a portal without re-resolving produces a light that lights the wrong room, or a
+pickup in a segment the player never enters, and no validator anywhere
+complains because nothing is structurally invalid. Everything in the editor
+that moves an entity re-resolves the field against the same `findSegment` the
+loader uses, and the tests assert the answer matches `findSegment` rather than
+matching a hard-coded index.
+
+Two things the editor refuses that the game does not check: a door anywhere but
+on a portal (the game is fatal on this, so refusing is just saying it earlier),
+and a door keyed to a colour the level has no key for — a red door in a mine
+with no red key is a mine that cannot be finished, and nothing checks for it.
+
+### `--loop-test` is not a general oracle
+
+Worth recording, because the name says otherwise and the editor's Verify button
+originally believed it. `src/game/loop_test.cpp` asserts the level has exactly
+three keyed doors and a gunner: it is `mine01`'s regression test, not a check
+of whether an arbitrary level can be played. It skips only when a level has no
+doors or no exit, so an editor-built level with one door and no gunner is
+neither skipped nor passing.
+
+The server therefore marks a check with the level it was written for, and the
+panel reports that check under an advisory note without counting it. Folding
+its verdict into every level's result would train the author to ignore the one
+check that catches a mine you cannot finish. What *is* general in its output is
+still asserted in the editor's own tests: that the key the editor placed gets
+seen, collected, and has an effect.
+
+### Starting from nothing (E5)
+
+A tool that can only edit the two levels already in the repository is not an
+authoring tool. **New** writes a starter level — one segment, eight vertices,
+six walls, a start and a light — and opens it; everything else is grown with
+extrude. It is deliberately not a template with rooms in it, because a guessed
+layout is a layout the author deletes first.
+
+The starter is built by handing a plain object to the same reader a file goes
+through, so it carries the same derived data and cannot drift from what a
+loaded level is. `tests/create.mjs` asserts it is extrudable from all six
+sides, not merely valid: a starter that validates and cannot be grown is no
+use.
+
+### Reading the game's verdict
+
+The Verify panel reports each check as a row, because two very different things
+hide behind a non-zero exit:
+
+- **The game aborted.** The level is broken; nothing else matters.
+- **The game loaded it and objected.** Some objections mean the level is *too
+  small to exercise what the check tests*. A correct one-room mine trips "no
+  segment is dark" and "portal culling is doing nothing" from `--world-test`,
+  and a correct five-room mine trips `--loop-test`'s assertions about
+  `mine01`'s three keyed doors.
+
+Only an abort counts against the headline; everything else is shown and
+explained. This matters more than it sounds: a panel that cried failure at
+every correct small level would teach the author to ignore the checks, and one
+of those checks is the only thing that catches a mine you cannot finish.
+
+### What it is not
+
+Not the renderer. No shadows, no falloff, no reversed-Z, and the colours are
+flat and deliberately unlike the game's: this is a diagram, and reading it as
+a screenshot would be a mistake. A mine seen from outside is a closed hull, so
+walls are `DoubleSide` and an x-ray toggle drops them to a shell; double-click
+flies the camera into a segment. "How does this look" is answered by
+`--segment N --no-ui --screenshot`.
+
+The in-game ImGui light editor stays. Tweaking a light under real shadowed
+lighting is not something a browser can do; structure is what the editor owns.
+
+---
+
 ## Portal visibility
 
 `src/game/visibility.h`. From the segment the camera is in, recurse through
