@@ -168,6 +168,13 @@ The rectangle is an axis-aligned bound, not the portal's exact shape, so the
 walk over-reports slightly around bends. That is the intended trade: it can
 only ever draw too much, never too little, and too little is what makes holes.
 
+Each segment accumulates a bounding union of the screen windows through which
+it has been reached. A newly exposed window triggers another traversal, even
+when the segment was already reached at the same or a shallower graph depth.
+A shorter path also triggers traversal to restore the remaining depth budget.
+Graph depth alone cannot establish that all visible exits were explored.
+Coverage is reset every frame, including when a door opens or closes.
+
 The ImGui "freeze visible set" toggle stops the walk being rebuilt while the
 camera keeps moving, so the cull can be inspected from outside it. Without it
 the one thing you cannot see is what the cull decided.
@@ -451,15 +458,20 @@ plane irrelevant.
 
 ### The segment-set boundary rule
 
-For the mine, only wall triangles in the light's segment set are considered, and
-an edge with just one triangle inside that subset is treated as **not** a
-silhouette. That leaves the volume open at the subset's border.
+The mine's shadow volume is built from the **entire closed wall surface**.
+The light's segment set still limits receivers and selects separate object
+casters, but must not cut triangles out of the mine occluder.
 
-It is safe because the border portals are all farther from the light than its
-radius: the opening is out beyond the distance at which this light contributes
-exactly zero, and the lighting pass only ever draws segments in the same set.
-Closing it would mean extruding walls the light cannot reach, every frame, to
-affect pixels that are never shaded.
+The former subset rule omitted boundary edges and left the emitted volume
+open. Light falloff does not make that safe: depth-fail counts intersections
+behind a visible receiver, including geometry beyond the light radius. Missing
+boundaries can therefore suppress light on nearby walls as black polygons.
+
+`appendShadowVolume` is shared by rendering and the headless world test. The
+test checks oriented edge cancellation on the emitted homogeneous triangles,
+including finite caps and caps at infinity, for every static level light.
+This validates the generated volume rather than only the source mesh. Building
+the complete mine increases volume work; performance tuning must preserve closure.
 
 ### Anti-aliasing
 

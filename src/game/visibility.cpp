@@ -16,6 +16,7 @@ void PortalWalk::build(const Level& level, int fromSegment, const glm::mat4& vie
     visible_.clear();
     mark_.resize(level.segments.size(), 0);
     bestDepth_.assign(level.segments.size(), kMaxDepth + 1);
+    covered_.assign(level.segments.size(), Rect{1, 1, -1, -1});
     visited_ = 0;
     crossed_ = 0;
     deepest_ = 0;
@@ -41,6 +42,20 @@ void PortalWalk::build(const Level& level, int fromSegment, const glm::mat4& vie
 
 void PortalWalk::visit(const Level& level, int segment, const Rect& window, int depth) {
     const auto si = static_cast<size_t>(segment);
+    const Rect previous = covered_[si];
+    const bool contained = !previous.empty() &&
+        window.minX >= previous.minX && window.minY >= previous.minY &&
+        window.maxX <= previous.maxX && window.maxY <= previous.maxY;
+    if (contained && bestDepth_[si] <= depth) return;
+
+    // A shorter route does not imply a wider view. Revisit when another
+    // portal adds screen coverage, or when a shorter route restores traversal
+    // budget. The bounding union may overdraw but cannot hide a visible exit.
+    const Rect expanded = previous.empty() ? window : Rect{
+        std::min(previous.minX, window.minX), std::min(previous.minY, window.minY),
+        std::max(previous.maxX, window.maxX), std::max(previous.maxY, window.maxY)};
+    covered_[si] = expanded;
+    depth = std::min(depth, bestDepth_[si]);
     ++visited_;
     deepest_ = std::max(deepest_, depth);
 
@@ -57,10 +72,6 @@ void PortalWalk::visit(const Level& level, int segment, const Rect& window, int 
         const SideData& sd = seg.sides[static_cast<size_t>(side)];
         if (!sd.isPortal()) continue;
         if (doors_ && doors_->isBlocked(segment, side)) continue;
-
-        // Already reached this neighbour at least as directly: anything it
-        // could show has already been collected through a wider window.
-        if (bestDepth_[static_cast<size_t>(sd.neighbour)] <= depth + 1) continue;
 
         const std::array<glm::vec3, 4> corners = level.sideCorners(segment, side);
 
@@ -112,10 +123,10 @@ void PortalWalk::visit(const Level& level, int segment, const Rect& window, int 
         }
 
         Rect next;
-        next.minX = std::max(window.minX, portal.minX);
-        next.maxX = std::min(window.maxX, portal.maxX);
-        next.minY = std::max(window.minY, portal.minY);
-        next.maxY = std::min(window.maxY, portal.maxY);
+        next.minX = std::max(expanded.minX, portal.minX);
+        next.maxX = std::min(expanded.maxX, portal.maxX);
+        next.minY = std::max(expanded.minY, portal.minY);
+        next.maxY = std::min(expanded.maxY, portal.maxY);
         if (next.empty()) continue;
 
         ++crossed_;

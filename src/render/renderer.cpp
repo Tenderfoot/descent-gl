@@ -120,7 +120,6 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     loadRobotMeshes(robots);
     loadProps(level, robots);
 
-    segmentMask_.assign(level.segments.size(), 0);
     lit_.reserve(level.segments.size());
     ranges_.reserve(level.lights.size() + 1);
     lightStats_.reserve(level.lights.size() + 1);
@@ -619,13 +618,8 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
 
         const bool casts = li < castsShadow_.size() && castsShadow_[li] != 0;
         if (anyVisible && casts) {
-            std::fill(segmentMask_.begin(), segmentMask_.end(), uint8_t{0});
-            for (int segment : light.segments) {
-                segmentMask_[static_cast<size_t>(segment)] = 1;
-            }
-
-            // The mine's own walls, restricted to this light's segments.
-            volumes_.add(mineOccluder_, light.position, &segmentMask_);
+            // Depth-fail needs the whole closed mine, including walls beyond light range.
+            volumes_.add(mineOccluder_, light.position);
             ++stats_.shadowCasters;
 
             for (size_t pi = 0; pi < props_.size(); ++pi) {
@@ -636,7 +630,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                                         prop.segment)) {
                     continue;
                 }
-                volumes_.add(prop.occluder, light.position, nullptr);
+                volumes_.add(prop.occluder, light.position);
                 ++stats_.shadowCasters;
             }
 
@@ -651,7 +645,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                                                         light.segments.end(), segment)) {
                     continue;
                 }
-                volumes_.add(robotOccluders_[slot], light.position, nullptr);
+                volumes_.add(robotOccluders_[slot], light.position);
                 ++stats_.shadowCasters;
             }
 
@@ -664,7 +658,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                     std::binary_search(light.segments.begin(), light.segments.end(),
                                        slab.segmentB);
                 if (!reached) continue;
-                volumes_.add(doorOccluders_[si], light.position, nullptr);
+                volumes_.add(doorOccluders_[si], light.position);
                 ++stats_.shadowCasters;
             }
 
@@ -681,7 +675,7 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
             const bool isHeadlight = static_cast<int>(li) == headlightIndex_;
             if (!isHeadlight && rs.camera == CameraMode::Chase &&
                 std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
-                volumes_.add(shipOccluder_, light.position, nullptr);
+                volumes_.add(shipOccluder_, light.position);
                 ++stats_.shadowCasters;
             }
         }

@@ -662,3 +662,51 @@ Worth recording, because all three were the tests and not the code:
 ## M8 — Polish and performance ⬜
 
 Not started.
+
+---
+
+## Rendering follow-up — shadow closure and portal revisits
+
+Investigated black polygon artifacts that disappear when individual lights stop
+casting shadows, and rooms that remain black through an opened doorway.
+
+- Mine shadow volumes now use the entire closed mine surface. The earlier
+  segment-subset optimization left openings in emitted volumes; radius falloff
+  cannot protect depth-fail counts from missing geometry behind a receiver.
+- Portal traversal now revisits a room when another route expands its screen
+  window, rather than assuming that a shallow graph path already saw every exit.
+  Coverage is cleared every frame, so closing a door cannot retain old visibility.
+- The world test checks oriented edge cancellation in actual emitted shadow
+  triangles and includes a door opening onto a second route into the same room.
+
+### Verified on Windows / RTX 4070 Ti
+
+- The new portal fixture failed before the traversal fix (the opened door did
+  not reveal the exit), then passed opening and closing without camera movement.
+- Generated shadow volumes are closed for all 14 `mine01` lights and all eight
+  `test01` lights. World tests pass in Debug and Release; culling still limits
+  the sampled visible sets to 14/34 and 10/14 segments respectively.
+- World, loop, weapons, robots and flight tests pass in both configurations on
+  both levels (`test01` skips the loop test because it has no game flow).
+- Debug and Release build successfully. The existing C4456 warning in
+  `Renderer::buildBillboards` remains. Debug verification used a separate
+  `build/verify` directory because the user's original Debug game was running.
+- Before/after start-room screenshots show corrected lighting around the door.
+  The exact user camera pose was not reproduced; this is not an end-to-end
+  confirmation of every reported doorway artifact.
+- Debug resize/iconify/restore: 1797 frames, 119.8 simulation steps/s, no GL
+  error/fatal messages; 50 minimized frames excluded from timing.
+- Debug render probes from all 34 segment centres: three frames each, no
+  process failures or GL error/fatal messages. These are smoke checks, not
+  image-based assertions of shadow correctness.
+- Release smoke run: 1000 frames in 3.174 s (~315 fps), framebuffer 2560x1421,
+  119.7 simulation steps/s. This is a start-room sample, not the M8 benchmark.
+
+### Still outstanding
+
+The collision issue remains outside this rendering fix. A freshly rebuilt
+Release executable reports segment **16**, direction (-0.71, 0, -0.71): raycast
+71.023 units versus marching 13.850, one disagreement in 884 rays. This differs
+from the earlier segment-24 diagnosis above, including the direction of error;
+the old claim that the remaining ray always stops early needs re-investigation.
+No collision, projectile, or gameplay door-blocking behavior was changed.

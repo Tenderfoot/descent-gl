@@ -163,34 +163,6 @@ void Occluder::setTransform(const glm::mat4& transform) {
     }
 }
 
-int silhouetteEdgeCount(const Occluder& occluder, const glm::vec3& lightPos,
-                        const std::vector<uint8_t>* segmentMask) {
-    const OccluderMesh* mesh = occluder.mesh();
-    if (!mesh) return 0;
-    const std::vector<glm::vec4>& planes = occluder.worldPlanes();
-
-    const auto included = [&](int tri) {
-        if (!segmentMask) return true;
-        const int segment = mesh->triangleSegment[static_cast<size_t>(tri)];
-        if (segment < 0) return true;
-        return segment < static_cast<int>(segmentMask->size()) &&
-               (*segmentMask)[static_cast<size_t>(segment)] != 0;
-    };
-    const auto faces = [&](int tri) {
-        const glm::vec4& plane = planes[static_cast<size_t>(tri)];
-        return glm::dot(glm::vec3(plane), lightPos) + plane.w > 0.0f;
-    };
-
-    int count = 0;
-    for (const OccluderMesh::Edge& edge : mesh->edges) {
-        const bool in0 = included(edge.tri0);
-        const bool in1 = edge.tri1 >= 0 && included(edge.tri1);
-        if (in0 != in1 || !in0) continue;
-        if (faces(edge.tri0) != faces(edge.tri1)) ++count;
-    }
-    return count;
-}
-
 ShadowVolumes::ShadowVolumes() {
     glCreateVertexArrays(1, &vao_);
     glCreateBuffers(1, &vbo_);
@@ -218,62 +190,42 @@ ShadowVolumes::Range ShadowVolumes::endLight() {
     return {lightFirst_, static_cast<GLsizei>(vertices_.size()) - lightFirst_};
 }
 
-void ShadowVolumes::add(const Occluder& occluder, const glm::vec3& lightPos,
-                        const std::vector<uint8_t>* segmentMask) {
+void ShadowVolumes::add(const Occluder& occluder, const glm::vec3& lightPos) {
+    silhouetteEdges_ += appendShadowVolume(occluder, lightPos, vertices_, facesLight_);
+}
+
+int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
+                       std::vector<glm::vec4>& vertices, std::vector<uint8_t>& facesLight) {
+    int silhouetteEdges = 0;
     const OccluderMesh* mesh = occluder.mesh();
-    if (!mesh || mesh->triangles.empty()) return;
+    if (!mesh || mesh->triangles.empty()) return 0;
 
     const std::vector<glm::vec3>& pos = occluder.worldPositions();
     const std::vector<glm::vec4>& planes = occluder.worldPlanes();
 
-    const auto included = [&](int tri) {
-        if (!segmentMask) return true;
-        const int segment = mesh->triangleSegment[static_cast<size_t>(tri)];
-        if (segment < 0) return true;
-        return segment < static_cast<int>(segmentMask->size()) &&
-               (*segmentMask)[static_cast<size_t>(segment)] != 0;
-    };
-
     // Which triangles face the light. Computed once here rather than twice per
     // edge below.
-    facesLight_.assign(mesh->triangles.size(), 0);
+    facesLight.assign(mesh->triangles.size(), 0);
     for (size_t t = 0; t < mesh->triangles.size(); ++t) {
-        if (!included(static_cast<int>(t))) continue;
         const glm::vec4& plane = planes[t];
         const bool faces = glm::dot(glm::vec3(plane), lightPos) + plane.w > 0.0f;
-        facesLight_[t] = faces ? 1u : 0u;
+        facesLight[t] = faces ? 1u : 0u;
     }
 
-    const auto emitFinite = [&](const glm::vec3& p) { vertices_.emplace_back(p, 1.0f); };
+    const auto emitFinite = [&](const glm::vec3& p) { vertices.emplace_back(p, 1.0f); };
     // A vertex at infinity carries the direction away from the light, with
     // w = 0. Under the project's infinite far plane it lands exactly on the far
     // plane instead of being clipped, which is what keeps the counts right.
     const auto emitInfinite = [&](const glm::vec3& p) {
-        vertices_.emplace_back(p - lightPos, 0.0f);
+        vertices.emplace_back(p - lightPos, 0.0f);
     };
     // --- sides: one quad per silhouette edge -----------------------------
     for (const OccluderMesh::Edge& edge : mesh->edges) {
-        const bool in0 = included(edge.tri0);
-        const bool in1 = edge.tri1 >= 0 && included(edge.tri1);
-
-        // An edge with only one triangle inside the subset is a boundary of the
-        // subset, not a silhouette of the occluder, and is deliberately skipped.
-        //
-        // Why that is safe: the subset is the light's segment set, whose border
-        // portals are all farther from the light than its radius. The volume
-        // therefore has an opening, but only out beyond the distance at which
-        // this light contributes exactly zero - and the lighting pass only ever
-        // draws the segments in this same set. Closing it would mean extruding
-        // walls the light cannot reach, every frame, to affect pixels that are
-        // never shaded.
-        if (in0 != in1) continue;
-        if (!in0) continue;
-
-        const bool f0 = facesLight_[static_cast<size_t>(edge.tri0)] != 0;
-        const bool f1 = facesLight_[static_cast<size_t>(edge.tri1)] != 0;
+        const bool f0 = facesLight[static_cast<size_t>(edge.tri0)] != 0;
+        const bool f1 = facesLight[static_cast<size_t>(edge.tri1)] != 0;
         if (f0 == f1) continue;
 
-        ++silhouetteEdges_;
+        ++silhouetteEdges;
 
         // Take the edge as the LIGHT-FACING triangle winds it. That is what
         // makes the quad's outward normal point out of the volume, which is
@@ -312,7 +264,7 @@ void ShadowVolumes::add(const Occluder& occluder, const glm::vec3& lightPos,
     // facing triangles cap the near end as they are, and the same triangles
     // reversed and pushed to infinity cap the far end.
     for (size_t t = 0; t < mesh->triangles.size(); ++t) {
-        if (!facesLight_[t]) continue;
+        if (!facesLight[t]) continue;
         const glm::uvec3 tri = mesh->triangles[t];
 
         emitFinite(pos[tri.x]);
@@ -323,6 +275,7 @@ void ShadowVolumes::add(const Occluder& occluder, const glm::vec3& lightPos,
         emitInfinite(pos[tri.z]);
         emitInfinite(pos[tri.y]);
     }
+    return silhouetteEdges;
 }
 
 void ShadowVolumes::upload() {
