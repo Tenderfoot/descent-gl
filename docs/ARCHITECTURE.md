@@ -570,7 +570,7 @@ it keeps flying, the safe answer.
 
 Neither query allocates.
 
-### `--collision-test`, and two wrong oracles
+### `--collision-test`, and four wrong oracles
 
 The test flies the ship into every wall of the level from all 26 face, edge and
 corner directions at max speed, re-applying full throttle every step so the body
@@ -595,8 +595,34 @@ was wrong twice before it was right:
    deliberately off-axis directions and a majority vote, because a single ray
    that grazes an edge double-counts it. Zero false anything.
 
-The collision code was correct throughout. **If a test disagrees with the code,
-the test is a suspect too** — and here it was the culprit twice running.
+The raycast half of the test had a second oracle — "how far to the wall?" — and
+that one was wrong twice more. Both attempts marched a point along the ray in
+0.05-unit steps until it left the mine:
+
+4. **Marching on the parity test alone.** A ray along a grid diagonal can pass
+   through the single point where two segments meet at a corner. Parity still
+   says "inside" there, so the march walked out through the corner and carried on
+   to a wall much further away than the one `raycast` correctly stopped at.
+5. **Marching, plus a clearance requirement.** M7 closed that hole by also
+   requiring the point to stay a step clear of the surface, which opened the
+   opposite one: a ray that *legitimately* grazes a corner now ends the march. On
+   `mine01` a ray from segment 16's centre along (−0.71, 0, −0.71) clears a
+   portal corner by 0.0202 units and continues into segment 14 — the march called
+   that a wall at 13.850 units and reported `raycast`'s correct 71.023 as a
+   failure. It stood as M7's one outstanding failure until it was traced.
+6. **Every wall triangle, nearest hit.** The wall union is closed, so the first
+   triangle the ray meets *is* the wall it hits. No stepping, no threshold, and
+   no segment graph — that last part is what keeps it independent of `raycast`,
+   whose whole job is to walk that graph. 244 triangle tests per ray on
+   `mine01`. The two now agree to 0.000011 units on both levels, so the
+   tolerance is 0.001 rather than 0.35; a deliberately injected 0.01-unit error
+   in `raycast` is caught on all 884 rays.
+
+The collision code was correct throughout — all four times. **If a test
+disagrees with the code, the test is a suspect too**, and on this one it was the
+culprit every time. The last of the four is worth the reminder: it was recorded
+in `MILESTONES.md` as a collision bug, with a diagnosis that changed between
+runs, and it was never collision at all.
 
 ---
 
