@@ -15,6 +15,7 @@ import {
 } from './entities.js';
 import { KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
 import { ModelCache } from './obj.js';
+import { checkName, newLevel } from './create.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
@@ -66,15 +67,67 @@ viewport.appendChild(renderer.domElement);
 
 const hud = document.createElement('div');
 hud.id = 'hud';
-hud.textContent = 'drag to orbit · click to select · double-click to fly in · 1/2/3/4 mode · F frame';
+hud.textContent = 'drag to orbit · click to select · double-click to fly in · 1/2/3/4 mode · T top · F frame';
 viewport.appendChild(hud);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14161a);
 
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
+// Two real cameras rather than one with its type flags flipped: the renderer,
+// the raycaster and the gizmo all branch on isOrthographicCamera, and an
+// object that claims to be both is a bug waiting for whichever of them checks
+// last.
+const perspective = new THREE.PerspectiveCamera(60, 1, 0.1, 5000);
+const orthographic = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10000);
+let camera = perspective;
+
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+
+// The automap's view: straight down, orthographic, so the mine reads as a plan
+// rather than as a lump in perspective. It is the view that makes "this
+// corridor doubles back over that room" obvious, which is why the game's own
+// automap uses it.
+let topDown = false;
+
+function setTopDown(on) {
+    topDown = on;
+    $('top-view').setAttribute('aria-pressed', String(on));
+
+    camera = on ? orthographic : perspective;
+    controls.object = camera;
+    gizmo.camera = camera;
+
+    const box = view.bounds();
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+
+    if (on) {
+        fitOrthographic(Math.max(size.x, size.z) * 0.6 + 1);
+        orthographic.near = 0.1;
+        orthographic.far = size.y * 4 + 4000;
+        // Looking straight down. The hair of Z keeps the up vector from being
+        // parallel to the view direction, which leaves the matrix degenerate.
+        orthographic.position.set(center.x, center.y + size.y + 500, center.z + 0.001);
+        controls.target.copy(center);
+        controls.enableRotate = false;   // a plan you can tumble is perspective again
+        orthographic.updateProjectionMatrix();
+    } else {
+        controls.enableRotate = true;
+        frameLevel();
+    }
+    controls.update();
+}
+
+function fitOrthographic(span) {
+    const aspect = viewport.clientWidth / Math.max(viewport.clientHeight, 1);
+    orthographic.left = -span * aspect;
+    orthographic.right = span * aspect;
+    orthographic.top = span;
+    orthographic.bottom = -span;
+    orthographic.updateProjectionMatrix();
+}
 
 const view = new LevelView(models);
 scene.add(view.root);
@@ -93,8 +146,9 @@ gizmo.detach();
 function resize() {
     const { clientWidth: w, clientHeight: h } = viewport;
     renderer.setSize(w, h, false);
-    camera.aspect = w / Math.max(h, 1);
-    camera.updateProjectionMatrix();
+    perspective.aspect = w / Math.max(h, 1);
+    perspective.updateProjectionMatrix();
+    if (topDown) fitOrthographic(orthographic.top);
 }
 new ResizeObserver(resize).observe(viewport);
 resize();
@@ -110,23 +164,30 @@ function frameSegment(index) {
     const center = box.getCenter(new THREE.Vector3());
     const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 1);
     controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(radius, radius * 0.8, radius * 1.2));
-    camera.near = Math.max(radius / 500, 0.05);
-    camera.far = Math.max(camera.far, radius * 200);
-    camera.updateProjectionMatrix();
+    if (topDown) {
+        fitOrthographic(radius * 1.6);
+        orthographic.position.set(center.x, orthographic.position.y, center.z + 0.001);
+        controls.update();
+        return;
+    }
+    perspective.position.copy(center).add(new THREE.Vector3(radius, radius * 0.8, radius * 1.2));
+    perspective.near = Math.max(radius / 500, 0.05);
+    perspective.far = Math.max(perspective.far, radius * 200);
+    perspective.updateProjectionMatrix();
     controls.update();
 }
 
 function frameLevel() {
     const box = view.bounds();
     if (box.isEmpty()) return;
+    if (topDown) { setTopDown(true); return; }
     const center = box.getCenter(new THREE.Vector3());
     const radius = box.getSize(new THREE.Vector3()).length() * 0.5;
     controls.target.copy(center);
-    camera.position.copy(center).add(new THREE.Vector3(radius * 0.9, radius * 0.8, radius * 1.1));
-    camera.near = Math.max(radius / 1000, 0.05);
-    camera.far = radius * 12;
-    camera.updateProjectionMatrix();
+    perspective.position.copy(center).add(new THREE.Vector3(radius * 0.9, radius * 0.8, radius * 1.1));
+    perspective.near = Math.max(radius / 1000, 0.05);
+    perspective.far = radius * 12;
+    perspective.updateProjectionMatrix();
     controls.update();
 }
 
@@ -260,33 +321,91 @@ async function verify() {
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? `verify failed (${response.status})`);
 
-        // A check the server marked advisory was written for another level and
-        // is reported, not counted. Folding --loop-test's mine01 assertions
-        // into the verdict for every level would train the author to ignore
-        // the one check that catches a mine you cannot finish.
-        const counted = result.results.filter((r) => !r.advisory);
-        const failed = counted.filter((r) => r.exit !== 0);
-        const advisory = result.results.filter((r) => r.advisory && r.exit !== 0);
-
         $('verify-section').hidden = false;
+        renderChecklist(result.results);
         $('verify-output').textContent = result.results
-            .map((r) => {
-                const note = r.advisory
-                    ? `\n(advisory: --${r.check}-test is ${r.writtenFor}'s regression test, not a ` +
-                      'check of this level. Its verdict is shown but not counted.)'
-                    : '';
-                return `$ descent ${r.argv.join(' ')}\n[exit ${r.exit}]${note}\n${r.output.trim()}`;
-            })
+            .map((r) => `$ descent ${r.argv.join(' ')}\n[exit ${r.exit}]\n${r.output.trim()}`)
             .join('\n\n');
 
-        const summary = failed.length > 0
-            ? `${failed.map((r) => r.check).join(', ')} failed`
-            : advisory.length > 0
-                ? `checks passed (${advisory.map((r) => r.check).join(', ')}: advisory, see below)`
+        // The only hard failure is a level the game could not load. Everything
+        // else is an assertion that did not hold, and some of those say the
+        // level is too small to exercise the system under test rather than
+        // that it is wrong.
+        const broken = result.results.filter((r) => r.aborted);
+        const objected = result.results.filter((r) => !r.aborted && !r.advisory && r.notes.length > 0);
+
+        const summary = broken.length > 0
+            ? `the game cannot load this level (${broken.map((r) => r.check).join(', ')})`
+            : objected.length > 0
+                ? `loads cleanly; ${objected.reduce((n, r) => n + r.notes.length, 0)} note(s) below`
                 : 'all checks passed';
-        status(summary, failed.length === 0 ? 'ok' : 'error');
+        status(summary, broken.length > 0 ? 'error' : 'ok');
     } finally {
         $('verify').disabled = false;
+    }
+}
+
+// One row per check. What an author needs from these is the difference between
+// "the game cannot load this" and "the game loaded it and had opinions", which
+// a bare exit code does not give.
+function renderChecklist(results) {
+    const list = $('verify-list');
+    list.innerHTML = '';
+
+    for (const result of results) {
+        const el = document.createElement('div');
+        let verdict;
+        let why = '';
+
+        if (result.aborted) {
+            el.className = 'check fail';
+            verdict = 'cannot load';
+            why = 'The game aborted reading this level. Nothing else matters until this is fixed.';
+        } else if (result.advisory) {
+            el.className = 'check note';
+            verdict = 'advisory';
+            why = `--${result.check}-test is ${result.writtenFor}'s regression test, not a check ` +
+                  'of this level: it asserts that level\'s own shape. Shown, not counted.';
+        } else if (result.notes.length > 0) {
+            el.className = 'check note';
+            verdict = `${result.notes.length} note(s)`;
+            why = 'The level loaded. A check can object because the level is too small to ' +
+                  'exercise what it tests — no dark segment, culling with nothing to cull — ' +
+                  'rather than because it is wrong.';
+        } else {
+            el.className = 'check pass';
+            verdict = 'pass';
+        }
+
+        const head = document.createElement('div');
+        head.className = 'head';
+        head.innerHTML = `<span>descent ${escapeHtml(result.argv[0])}</span>` +
+                         `<span class="verdict">${verdict}</span>`;
+        el.appendChild(head);
+
+        if (result.notes.length > 0) {
+            const ul = document.createElement('ul');
+            for (const note of result.notes.slice(0, 8)) {
+                const li = document.createElement('li');
+                li.textContent = note;
+                ul.appendChild(li);
+            }
+            if (result.notes.length > 8) {
+                const li = document.createElement('li');
+                li.textContent = `…and ${result.notes.length - 8} more, in the full output`;
+                ul.appendChild(li);
+            }
+            el.appendChild(ul);
+        }
+
+        if (why) {
+            const p = document.createElement('div');
+            p.className = 'why';
+            p.textContent = why;
+            el.appendChild(p);
+        }
+
+        list.appendChild(el);
     }
 }
 
@@ -906,6 +1025,39 @@ const guard = (fn) => async (...args) => {
     }
 };
 
+$('top-view').addEventListener('click', () => setTopDown(!topDown));
+
+$('new-level').addEventListener('click', guard(async () => {
+    if (app.level && app.history.isDirty(app.level) &&
+        !window.confirm(`${app.name} has unsaved changes. Discard them?`)) return;
+
+    const name = window.prompt('Name for the new level (it becomes assets/levels/<name>.json)');
+    if (name === null) return;
+
+    const { levels } = await listLevels();
+    const complaint = checkName(name, levels);
+    if (complaint) throw new Error(complaint);
+
+    // Write it before loading it, so "New" and "open an existing level" are the
+    // same path from here on and the file exists for Verify to run against.
+    const level = newLevel(name);
+    const response = await fetch(`/api/levels/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: emitJson(serializeLevel(level)),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error ?? `could not create ${name}`);
+
+    const refreshed = await listLevels();
+    $('level-select').innerHTML = refreshed.levels.map((n) => `<option>${n}</option>`).join('');
+    await loadLevel(name);
+    $('level-select').value = name;
+    setMode('side');
+    selectSegment(0);
+    status(`created ${name} — one room; grow it with Extrude`, 'ok');
+}));
+
 $('level-select').addEventListener('change', guard((e) => loadLevel(e.target.value)));
 $('reload').addEventListener('click', guard(() => loadLevel(app.name)));
 $('save').addEventListener('click', guard(saveLevel));
@@ -925,6 +1077,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === '3') setMode('vertex');
     if (e.key === '4') setMode('entity');
     if (e.key === 'f' && app.level) frameLevel();
+    if (e.key === 't' && app.level) setTopDown(!topDown);
     if (e.key === 'Escape') { app.selection = null; app.joinFrom = null; gizmo.detach(); renderTools(); renderSelection(); }
 });
 

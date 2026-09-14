@@ -39,8 +39,21 @@ lighting is something a browser cannot do; structure is what this owns.
 
 ## State
 
-E0 (viewer), E1 (validation parity), E2 (round trip and server), E3 (geometry
-editing) and E4 (entities) are done. E5 adds authoring quality of life.
+E0–E5 are done: the editor views, validates, round-trips, edits geometry,
+places entities, and creates a level from nothing.
+
+## Making a level (E5)
+
+**New…** writes a starter level into `assets/levels/` and opens it: one
+segment, eight vertices, six walls, a player start inside it, and one light so
+the room is not simply black. Everything else is grown from it with Extrude.
+
+It is deliberately not a template with rooms in it. A starter level that
+guesses at a layout is a layout the author has to delete first.
+
+**Top** (or `T`) is the automap's view — straight down, orthographic, rotation
+locked. It is the view that makes "this corridor doubles back over that room"
+obvious, which is why the game's automap uses it.
 
 ## Editing (E3)
 
@@ -106,6 +119,7 @@ one keystroke away.
 | `src/validate.js` | every structural rule, plus two the game does not check |
 | `src/ops.js` | extrude, join, delete and the rest of the structural edits |
 | `src/entities.js` | lights, robots, pickups, doors, the exit, the start |
+| `src/create.js` | the starter level, and what a level may be called |
 | `src/obj.js` | just enough OBJ to draw the shipped models |
 | `src/history.js` | undo and redo, by snapshot |
 | `src/view.js` | the only module that imports three.js |
@@ -114,6 +128,7 @@ one keystroke away.
 | `tests/conformance.mjs` | the editor's validator against the game's |
 | `tests/ops.mjs` | the structural edits, checked for shape and not just legality |
 | `tests/entities.mjs` | entity placement, and the segment-resolution rule |
+| `tests/create.mjs` | the starter level, and that it can be grown |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
 ## Verification
@@ -122,6 +137,7 @@ one keystroke away.
 node tools/editor/tests/conformance.mjs   # the validator, against the game's
 node tools/editor/tests/ops.mjs           # the structural edits
 node tools/editor/tests/entities.mjs      # placement and segment resolution
+node tools/editor/tests/create.mjs        # the starter level
 ```
 
 Both need a Linux debug build (`cmake --preset linux && cmake --build --preset
@@ -166,14 +182,25 @@ project that deliberately has none, for a function that is seventy lines.
 prints what it said. The editor's own checks are the fast feedback; the game
 is the answer.
 
-One of those three is reported but **not counted**. Despite its name,
-`--loop-test` is `mine01`'s regression test rather than a general playability
-check: `src/game/loop_test.cpp` asserts the level has exactly three keyed doors
-and a gunner. Run against anything else it neither skips (it skips only when
-there are no doors or no exit) nor passes, so its verdict says nothing about
-whether the level is any good. Counting it would train the author to ignore the
-one check that catches a mine you cannot finish, so the panel shows it under an
-"advisory" note and leaves it out of the headline.
+The panel reports each check as a row rather than as a wall of text, because
+two very different things hide behind a non-zero exit and the difference is the
+one an author needs:
+
+* **cannot load** — the game aborted. The level is broken and nothing else
+  matters until it is fixed.
+* **N note(s)** — the level loaded and the check had objections. Some of those
+  mean the level is *too small to exercise what the check tests* rather than
+  that it is wrong: a one-room mine trips "no segment is dark" and "portal
+  culling is doing nothing" no matter how correct it is.
+* **advisory** — the check was written for another level. `--loop-test` is
+  `mine01`'s regression test rather than a general playability check:
+  `src/game/loop_test.cpp` asserts the level has exactly three keyed doors and
+  a gunner, and it skips only when there are no doors or no exit, so an
+  editor-built level is neither skipped nor passing. Counting it would train
+  the author to ignore the one check that catches a mine you cannot finish.
+
+Only "cannot load" counts against the headline. The full output is one click
+away underneath.
 
 ### Two checks the game does not make
 

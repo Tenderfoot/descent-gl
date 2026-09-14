@@ -132,12 +132,15 @@ tools/editor/serve.py        # then open http://127.0.0.1:8080
 
 It draws the mine with the game's own triangulation, checks every structural
 rule the loader checks (and two it does not), and saves byte-exactly, so
-opening a level and saving it is a no-op. **Verify** in the panel runs the real
-binary over the saved file and prints what it said. See
-`tools/editor/README.md`.
+opening a level and saving it is a no-op. **New** starts a mine from one room;
+extrude grows it; **Verify** runs the real binary over the saved file and
+reports what it said. See `tools/editor/README.md`.
 
 ```
 node tools/editor/tests/conformance.mjs   # the editor's validator vs the game's
+node tools/editor/tests/ops.mjs           # extrude, join, delete
+node tools/editor/tests/entities.mjs      # lights, robots, pickups, doors
+node tools/editor/tests/create.mjs        # starting a level from nothing
 ```
 
 ## Credits

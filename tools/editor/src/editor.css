@@ -127,3 +127,20 @@ pre {
     border: 1px solid var(--line); border-radius: 4px;
 }
 .field input[type="color"] { padding: 2px; height: 26px; }
+
+.checklist { display: grid; gap: 6px; margin-bottom: 10px; }
+.check { padding: 6px 8px; background: #21252c; border-left: 2px solid var(--line); border-radius: 0 3px 3px 0; }
+.check.pass { border-left-color: var(--ok); }
+.check.fail { border-left-color: var(--error); }
+.check.note { border-left-color: var(--warn); }
+.check .head { display: flex; justify-content: space-between; gap: 8px; }
+.check .verdict { color: var(--dim); font-size: 11px; white-space: nowrap; }
+.check.pass .verdict { color: var(--ok); }
+.check.fail .verdict { color: var(--error); }
+.check.note .verdict { color: var(--warn); }
+.check ul { margin: 6px 0 0; padding-left: 16px; color: var(--dim); font-size: 12px; }
+.check li { margin-bottom: 2px; }
+.check .why { margin-top: 5px; color: var(--dim); font-size: 11px; font-style: italic; }
+
+details { color: var(--dim); }
+details summary { cursor: pointer; padding: 4px 0; font-size: 12px; }

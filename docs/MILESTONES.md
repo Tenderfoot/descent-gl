@@ -1242,3 +1242,49 @@ note without counting it, because folding it in would train the author to
 ignore the one check that catches a mine you cannot finish. The general part of
 its output — that the placed key is seen, collected and has an effect — is
 asserted in `tests/entities.mjs` instead.
+
+---
+
+## E5 — The level editor: authoring from nothing ✅
+
+**New**, the top-down view, and a Verify panel that reads like a checklist.
+`tools/editor/src/create.js`. Still no change to the game.
+
+A tool that can only edit the two levels already in the repository is not an
+authoring tool, and until this milestone that is what it was.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| A new level has nothing wrong with it | ✅ 1 segment, 8 vertices, 12 wall triangles, V−E+F = 2 |
+| It can be extruded from all six sides | ✅ every one valid |
+| It round-trips through the writer | ✅ |
+| Level names | ✅ refuses existing, empty, a path, a space, a leading dash, 65 chars |
+| The game loads one made from scratch and grown once | ✅ no abort |
+| …and only objects that it is too small | ✅ the three `--world-test` size complaints, nothing structural |
+| Authored end to end in the browser | ✅ New → extrude → Save (1953 bytes) → Verify "loads cleanly" |
+| Top-down view | ✅ orthographic, rotation locked |
+| `tests/create.mjs` | ✅ 21 assertions |
+| All four suites | ✅ conformance 36, ops 25, entities 30, create 21 |
+| No console or page errors | ✅ |
+
+### Reading the game's verdict
+
+The panel now reports each check as a row, because two very different things
+hide behind a non-zero exit and the difference is the one an author needs:
+**cannot load** (the game aborted — broken), **N notes** (it loaded and
+objected), and **advisory** (the check was written for another level).
+
+Only an abort counts against the headline. A correct one-room mine trips
+`--world-test`'s "no segment is dark" and "portal culling is doing nothing"; a
+correct five-room mine trips `--loop-test`'s assertions about `mine01`'s three
+keyed doors. A panel that cried failure at every correct small level would
+teach the author to ignore the checks — and one of those checks is the only
+thing that catches a mine you cannot finish.
+
+### The editor is done
+
+E0 viewer, E1 validation parity, E2 round trip, E3 geometry, E4 entities,
+E5 authoring. 112 assertions across four suites, all of them checked against
+the real binary where the binary has an opinion.

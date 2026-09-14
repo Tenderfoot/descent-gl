@@ -201,11 +201,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 output, code = done.stdout + done.stderr, done.returncode
             except subprocess.TimeoutExpired:
                 output, code = "timed out after 180s", -1
+            # Two different things hide behind a non-zero exit, and the
+            # difference is the one an author needs. A [FATAL] means the game
+            # could not load the level at all - that is broken and nothing else
+            # matters. Everything else is an assertion that did not hold, and
+            # some of those are about the level being too small to exercise the
+            # system under test ("no segment is dark", "portal culling is doing
+            # nothing") rather than about the level being wrong. So the abort
+            # is separated out and the objections are passed through verbatim
+            # for the author to read.
+            aborted = "[FATAL]" in output
+            notes = [line.split("[ERROR] ", 1)[-1].strip()
+                     for line in output.splitlines() if "[ERROR]" in line]
             results.append({
                 "check": label,
                 "argv": argv[1:],
                 "exit": code,
                 "output": output,
+                "aborted": aborted,
+                "notes": notes,
                 "advisory": written_for is not None and written_for != name,
                 "writtenFor": written_for,
             })

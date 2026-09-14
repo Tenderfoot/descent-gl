@@ -23,6 +23,7 @@
       <h1>descent level editor</h1>
       <div class="row">
         <select id="level-select" title="Levels in assets/levels/"></select>
+        <button id="new-level" title="Create a new level in assets/levels/">New…</button>
         <button id="reload" title="Discard changes and re-read the file">Reload</button>
       </div>
       <div class="row">
@@ -32,6 +33,7 @@
       <div class="row">
         <button id="undo" title="Ctrl+Z">Undo</button>
         <button id="redo" title="Ctrl+Shift+Z">Redo</button>
+        <button id="top-view" title="Top-down orthographic view, like the automap">Top</button>
       </div>
       <p id="status" class="status"></p>
     </header>
@@ -67,7 +69,8 @@
 
     <section id="verify-section" hidden>
       <h2>Game report</h2>
-      <pre id="verify-output"></pre>
+      <div id="verify-list" class="checklist"></div>
+      <details id="verify-raw"><summary>full output</summary><pre id="verify-output"></pre></details>
     </section>
   </aside>
 

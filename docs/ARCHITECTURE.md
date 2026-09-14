@@ -319,6 +319,37 @@ check that catches a mine you cannot finish. What *is* general in its output is
 still asserted in the editor's own tests: that the key the editor placed gets
 seen, collected, and has an effect.
 
+### Starting from nothing (E5)
+
+A tool that can only edit the two levels already in the repository is not an
+authoring tool. **New** writes a starter level — one segment, eight vertices,
+six walls, a start and a light — and opens it; everything else is grown with
+extrude. It is deliberately not a template with rooms in it, because a guessed
+layout is a layout the author deletes first.
+
+The starter is built by handing a plain object to the same reader a file goes
+through, so it carries the same derived data and cannot drift from what a
+loaded level is. `tests/create.mjs` asserts it is extrudable from all six
+sides, not merely valid: a starter that validates and cannot be grown is no
+use.
+
+### Reading the game's verdict
+
+The Verify panel reports each check as a row, because two very different things
+hide behind a non-zero exit:
+
+- **The game aborted.** The level is broken; nothing else matters.
+- **The game loaded it and objected.** Some objections mean the level is *too
+  small to exercise what the check tests*. A correct one-room mine trips "no
+  segment is dark" and "portal culling is doing nothing" from `--world-test`,
+  and a correct five-room mine trips `--loop-test`'s assertions about
+  `mine01`'s three keyed doors.
+
+Only an abort counts against the headline; everything else is shown and
+explained. This matters more than it sounds: a panel that cried failure at
+every correct small level would teach the author to ignore the checks, and one
+of those checks is the only thing that catches a mine you cannot finish.
+
 ### What it is not
 
 Not the renderer. No shadows, no falloff, no reversed-Z, and the colours are
