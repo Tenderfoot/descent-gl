@@ -11,6 +11,8 @@
 namespace dvk::sim {
 
 struct SolidDoors;
+struct CombatState;
+struct WeaponConfig;
 
 // How much light arrives at a point in the mine.
 //
@@ -112,6 +114,41 @@ void addIllumination(Illumination& out, const IlluminationQuery& query, const Le
 // The single-list convenience, for callers that have only one.
 Illumination illuminationAt(const IlluminationQuery& query, const Level& level,
                             const std::vector<Light>& lights, const SolidDoors* doors = nullptr);
+
+// Adds a light the simulation owns directly - a bolt in flight, a burning
+// flare, the flash off a gun - which carries no precomputed segment set to cull
+// with. Falloff plus one shadow ray is the whole answer; there are only ever a
+// handful of these near any one point, so skipping the cull costs nothing.
+void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
+                   const glm::vec3& position, float radius, float intensity,
+                   const SolidDoors* doors = nullptr);
+
+// Whether the player can be seen at all.
+//
+// Separate from Illumination because being seen is not only a question of how
+// much light falls on you. A player flying with the headlight on is carrying a
+// lamp, and the fact that a forward-facing spot barely illuminates the hull it
+// is bolted to does not make its owner hard to spot.
+struct PlayerVisibility {
+    float illumination = 0.0f;   // everything reaching the player, own fire included
+    bool headlight = false;      // carrying their own light
+    bool visible = false;
+
+    // Why they are hidden, for the debug readout and the tests.
+    bool hiddenByDarkness() const { return !visible; }
+};
+
+// Gathers the level's lights, every bolt, flare and flash the simulation owns,
+// and the headlight, and decides whether the player is visible.
+//
+// Deliberately a POINT query rather than a body one. It runs every simulation
+// step, seven-sample body coverage would cost seven times as much for an answer
+// the AI does not use, and a body straddling a shadow edge would flicker; a
+// point at the ship's centre both costs less and reads more decisively. Callers
+// wanting coverage can ask illuminationAt directly.
+PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
+                                  const WeaponConfig& weapons, const glm::vec3& position,
+                                  int segment, const SolidDoors* doors = nullptr);
 
 // The sample points a query uses, exposed so the debug overlay can draw the
 // same ones the answer came from. Returns how many of `out` were filled.

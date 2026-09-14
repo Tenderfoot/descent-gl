@@ -500,6 +500,32 @@ ray/triangle over every wall triangle in the level — a genuinely different
 method, no portals and no graph — and requires the two verdicts to agree on
 every point-light pair.
 
+### Being seen
+
+`playerVisibility` is the rule the AI acts on, and it is not the same thing as
+the illumination above.
+
+It gathers the level's lights, then every light the **simulation itself** owns
+— bolts in flight, burning flares, the flash off a gun — through `addLooseLight`,
+which skips the segment-set cull because these carry no set to cull with.
+Falloff plus one shadow ray is the whole answer, and there are only ever a
+handful near any one point.
+
+Two things separate it from a plain illumination reading:
+
+- **The headlight counts.** A player flying with the lamp on is carrying a light
+  source, and the fact that a forward-facing spot barely illuminates the hull it
+  is bolted to does not make its owner hard to spot. `visible` is true whenever
+  the headlight is on, whatever is falling on the ship.
+- **It is a point query, not a body one.** It runs every simulation step; seven
+  sample points would cost seven times as much for coverage the AI does not use,
+  and a hull straddling a shadow edge would flicker. Callers wanting coverage
+  ask `illuminationAt` directly.
+
+Both are measured: `--light-test` checks that 34 000 visibility queries allocate
+nothing, because the stack `Light` it builds per loose light costs nothing only
+while its segment vector is left alone.
+
 ---
 
 ## Reversed-Z with an infinite far plane
@@ -1316,6 +1342,39 @@ is visible right now. Seeing the player sets it to 1; losing sight decays it
 over about three seconds. A robot therefore keeps hunting for a moment after you
 break line of sight, instead of forgetting you the instant a wall gets between
 you. Being *hit* also sets it — a hit is a noise.
+
+### Darkness hides you, but only until something gives you away
+
+Line of sight is necessary but not sufficient. A robot that has **never seen the
+player** cannot pick them out of an unlit stretch of mine; one that is **already
+on to them** keeps hunting whether or not the player is standing in the light:
+
+```cpp
+const bool alreadyOnToThem = robot.awareness > 0.0f;
+if (canSee && (visibility.visible || alreadyOnToThem)) { robot.awareness = 1.0f; ... }
+```
+
+That asymmetry is the whole mechanic, and it falls out of `awareness` already
+being a decaying value rather than a boolean. Going dark does not call a robot
+off. You have to break line of sight and wait the three seconds out; once you
+have, the dark hides you from it again exactly as it did before it ever saw you.
+
+`canSee` itself is untouched — still pure line of sight — because the firing and
+mode-transition checks downstream are about an engaged robot and must keep
+working in the dark.
+
+Three things give the position away, and **none of them is a special case**:
+
+| What | Why it works |
+| --- | --- |
+| The headlight | `playerVisibility` counts it as a light the player carries |
+| Firing | The muzzle flash is a light at the player's own position |
+| Hitting a robot | `stepCombat` already sets that robot's awareness on damage |
+
+So there is no sniping out of the dark, and no rule had to be written saying so.
+
+The query is asked **once per step**, not once per robot: it is a property of
+where the player is standing, identical for every robot looking at them.
 
 ### Retreat is what sells it
 

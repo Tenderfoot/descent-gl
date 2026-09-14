@@ -1503,3 +1503,48 @@ draw-path allocation after warm-up. It is **pre-existing** — `main` at the sam
 150 frames shows the same thing at frames 57, 59 and 134 — and it is unrelated
 to this change, which adds nothing inside the measured `beginFrame`→`resolve`
 region.
+
+---
+
+## Darkness hides the player ✅
+
+Robots can no longer pick the player out of an unlit stretch of mine. Line of
+sight is still necessary but no longer sufficient: a robot that has never seen
+the player needs them visible to acquire them, while one already on to them
+keeps hunting whether or not the player stands in the light.
+
+`playerVisibility` in `src/sim/lighting.h` builds on the illumination query:
+level lights through the segment-set cull, plus every light the simulation owns
+— bolts, flares, muzzle flashes — through the new `addLooseLight`, which skips a
+cull it has nothing to cull with. The headlight counts as a light the player
+carries, because a forward-facing spot barely lighting its own hull does not
+make its owner hard to spot.
+
+Three things give the position away and none is a special case: the headlight,
+the muzzle flash of your own gun, and hitting a robot (which `stepCombat`
+already alerted on damage). So there is no sniping out of the dark, and no rule
+had to be written saying so.
+
+| Check | Result |
+| --- | --- |
+| A robot in line of sight of an unlit player stays idle | ✅ hiding spot measured at 0.010, well under the 0.25 threshold |
+| The same robot notices a player carrying a headlight | ✅ |
+| An alerted robot keeps engaging a player who goes dark | ✅ |
+| Firing from the dark lights the player up, and is noticed | ✅ |
+| A robot hit from the dark is alerted by the hit itself | ✅ |
+| Awareness runs out once the player is out of sight | ✅ 1.00 → 0.00 over five seconds, robot pinned so only awareness moves |
+| Once it has forgotten you, the dark hides you again | ✅ |
+| Headlight beats darkness; a bolt alongside beats darkness | ✅ 0.240 → 2.554 with a bolt |
+| `playerVisibility` allocates nothing | ✅ 34 000 queries, 0 allocations |
+| Sim step allocations after warm-up | ✅ none on 0 of 120 frames, both configs |
+| Step rate with the query running every step | ✅ 119.9 / 120 in both configs |
+| Debug and Release builds | ✅ both clean, no warnings |
+| Debug and Release headless suites | ✅ all nine pass in both |
+| A normal run still plays | ✅ 5 robot alerts, 86 robot shots, 12 player hits over 150 frames |
+| `--resize-test` (Release, software GL) | ✅ 74.8 steps/s, clamp-bound as expected |
+
+Two existing `--robots-test` cases had to be told the player is not hiding:
+they relocate the player into a robot's own (unlit) segment to test what a robot
+*does* once engaged, not whether it notices. `Rig::revealPlayer()` turns the
+headlight on rather than reaching past the rule into `awareness`, so the real
+visibility path is still exercised.

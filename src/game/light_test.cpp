@@ -4,6 +4,8 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/body.h"
+#include "sim/combat.h"
+#include "sim/weapons.h"
 #include "sim/lighting.h"
 
 #include <glm/geometric.hpp>
@@ -298,6 +300,68 @@ int runLightTest(const char* levelPath) {
         ok &= expect(consistent, "lit fraction and value agree about darkness");
     }
 
+    // --- what the robots ask ----------------------------------------------
+    //
+    // playerVisibility is the rule the AI acts on, so it is checked as a rule
+    // and not only as arithmetic: the headlight has to beat darkness, a bolt
+    // going off next to the player has to beat darkness, and neither may be
+    // needed somewhere already lit.
+    log::info("player visibility:");
+    {
+        sim::CombatState combat;
+        const sim::WeaponConfig weapons;
+
+        int darkSegment = -1;
+        int litSegment = -1;
+        for (int si = 0; si < n && (darkSegment < 0 || litSegment < 0); ++si) {
+            const glm::vec3 p = level.segments[static_cast<size_t>(si)].center;
+            const sim::PlayerVisibility v = sim::playerVisibility(level, combat, weapons, p, si);
+            if (!v.visible && darkSegment < 0) darkSegment = si;
+            if (v.visible && litSegment < 0) litSegment = si;
+        }
+        ok &= expect(darkSegment >= 0 && litSegment >= 0,
+                     "the level has both a dark and a lit place to stand");
+
+        if (darkSegment >= 0 && litSegment >= 0) {
+            const glm::vec3 dark = level.segments[static_cast<size_t>(darkSegment)].center;
+            const glm::vec3 lit = level.segments[static_cast<size_t>(litSegment)].center;
+
+            const sim::PlayerVisibility hidden =
+                sim::playerVisibility(level, combat, weapons, dark, darkSegment);
+            ok &= expect(!hidden.visible, "a player in an unlit segment is not visible");
+            ok &= expect(!hidden.headlight, "and is not carrying a light");
+
+            combat.player.headlightOn = true;
+            const sim::PlayerVisibility lamp =
+                sim::playerVisibility(level, combat, weapons, dark, darkSegment);
+            ok &= expect(lamp.visible && lamp.headlight,
+                         "the headlight makes them visible in the same spot");
+            combat.player.headlightOn = false;
+
+            // A bolt in flight, right beside them. The headlight is off, so the
+            // only thing that can light them is the loose light.
+            const int slot = combat.projectiles.spawn();
+            sim::Projectile& bolt = combat.projectiles.items[static_cast<size_t>(slot)];
+            bolt.position = dark + glm::vec3(1.0f, 0.0f, 0.0f);
+            bolt.segment = darkSegment;
+            bolt.lightRadius = 18.0f;
+            bolt.lightIntensity = 2.4f;
+            const sim::PlayerVisibility byBolt =
+                sim::playerVisibility(level, combat, weapons, dark, darkSegment);
+            log::info("  dark {:.3f}, with a bolt alongside {:.3f}", hidden.illumination,
+                      byBolt.illumination);
+            ok &= expect(byBolt.illumination > hidden.illumination,
+                         "a bolt alongside the player adds light");
+            ok &= expect(byBolt.visible, "and gives their position away");
+            combat.projectiles.items[static_cast<size_t>(slot)].alive = false;
+
+            const sim::PlayerVisibility open =
+                sim::playerVisibility(level, combat, weapons, lit, litSegment);
+            ok &= expect(open.visible && !open.headlight,
+                         "a player in a lit segment is visible with no light of their own");
+        }
+    }
+
     // --- the query allocates nothing --------------------------------------
     //
     // CLAUDE.md forbids per-frame heap allocation in the sim step, and this is
@@ -325,6 +389,36 @@ int runLightTest(const char* levelPath) {
         log::info("  {} queries over {} segments: {} allocation(s), total {:.1f}", 1000 * n, n,
                   allocations, total);
         ok &= expect(allocations == 0, "1000 sweeps of the level allocate nothing");
+
+        // playerVisibility runs every simulation step, and builds a stack Light
+        // for each loose light it gathers. That costs nothing only as long as
+        // the light's segment vector is left alone, which is easy to break by
+        // accident, so it is measured rather than assumed.
+        sim::CombatState combat;
+        const sim::WeaponConfig weapons;
+        const int slot = combat.projectiles.spawn();
+        sim::Projectile& bolt = combat.projectiles.items[static_cast<size_t>(slot)];
+        bolt.position = level.segments[0].center;
+        bolt.segment = 0;
+        bolt.lightRadius = 18.0f;
+        bolt.lightIntensity = 2.4f;
+
+        sim::PlayerVisibility warmV =
+            sim::playerVisibility(level, combat, weapons, level.segments[0].center, 0);
+        (void)warmV;
+
+        alloc::Scope visScope;
+        int seen = 0;
+        for (int i = 0; i < 1000; ++i) {
+            for (int si = 0; si < n; ++si) {
+                const glm::vec3 p = level.segments[static_cast<size_t>(si)].center;
+                seen += sim::playerVisibility(level, combat, weapons, p, si).visible ? 1 : 0;
+            }
+        }
+        const uint64_t visAllocations = visScope.count();
+        log::info("  {} visibility queries: {} allocation(s), {} visible", 1000 * n,
+                  visAllocations, seen);
+        ok &= expect(visAllocations == 0, "1000 sweeps of playerVisibility allocate nothing");
     }
 
     log::info("light test: {}", ok ? "PASS" : "FAIL");
