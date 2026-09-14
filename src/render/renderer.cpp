@@ -13,6 +13,8 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 
 namespace dvk::gl {
 
@@ -1067,6 +1069,130 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     depthPrepass(rs, walk);
     lightPasses(rs, walk);
     unlitPass(rs, level, walk);
+}
+
+void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
+    mapLines_.clear();
+
+    // Colours chosen so the map reads at a glance: the room you are in is warm
+    // and everything else is cold, which is the one question a player opens the
+    // map to answer.
+    constexpr glm::vec3 kWall(0.30f, 0.45f, 0.62f);
+    constexpr glm::vec3 kHere(0.95f, 0.70f, 0.25f);
+    constexpr glm::vec3 kFrontier(0.16f, 0.26f, 0.38f);
+
+    const int n = std::min(map.segmentCount, level.segmentCount());
+    for (int si = 0; si < n; ++si) {
+        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        const Segment& seg = level.segments[static_cast<size_t>(si)];
+        const bool here = si == map.shipSegment;
+
+        for (int side = 0; side < SideCount; ++side) {
+            const SideData& sd = seg.sides[static_cast<size_t>(side)];
+
+            // A wall is drawn as its outline; a portal is drawn as nothing at
+            // all, so a corridor reads as a gap rather than a line to bump into.
+            // The exception is a portal into somewhere unvisited: a faint
+            // outline there marks the way on without giving away what is beyond.
+            glm::vec3 color = kWall;
+            if (sd.isPortal()) {
+                const int nb = sd.neighbour;
+                const bool known = nb >= 0 && nb < AutomapData::kMaxSegments &&
+                                   map.visited[static_cast<size_t>(nb)];
+                if (known) continue;
+                color = kFrontier;
+            } else if (here) {
+                color = kHere;
+            }
+
+            const std::array<int, 4>& corners = kSideVertices[static_cast<size_t>(side)];
+            for (int e = 0; e < 4; ++e) {
+                const glm::vec3& a =
+                    level.vertices[static_cast<size_t>(seg.verts[static_cast<size_t>(corners[e])])];
+                const glm::vec3& b =
+                    level.vertices[static_cast<size_t>(
+                        seg.verts[static_cast<size_t>(corners[(e + 1) % 4])])];
+                mapLines_.line(a, b, color);
+            }
+        }
+    }
+
+    // The ship: a cross for where, and a stalk for which way it is pointing.
+    mapLines_.cross(map.shipPosition, 1.6f, glm::vec3(1.0f, 1.0f, 1.0f));
+    mapLines_.line(map.shipPosition, map.shipPosition + map.shipForward * 4.0f,
+                   glm::vec3(1.0f, 1.0f, 1.0f));
+
+    for (int mi = 0; mi < map.markerCount && mi < AutomapData::kMaxMarkers; ++mi) {
+        const AutomapData::Marker& marker = map.markers[static_cast<size_t>(mi)];
+        mapLines_.cross(marker.position, marker.size, marker.color);
+        if (marker.hollow) continue;
+        // A collected or destroyed marker gets a box around its cross, so the
+        // two states are distinguishable without colour, which is already
+        // carrying the key's identity.
+        const float h = marker.size * 0.7f;
+        const glm::vec3 c = marker.position;
+        const glm::vec3 x(h, 0.0f, 0.0f), y(0.0f, h, 0.0f);
+        mapLines_.line(c - x - y, c + x - y, marker.color);
+        mapLines_.line(c + x - y, c + x + y, marker.color);
+        mapLines_.line(c + x + y, c - x + y, marker.color);
+        mapLines_.line(c - x + y, c - x - y, marker.color);
+    }
+
+    mapLines_.upload();
+}
+
+void Renderer::drawAutomap(const AutomapData& map, const Level& level, const HudData& hud) {
+    buildAutomapLines(map, level);
+    buildHud(hud);
+
+    // Frame the visited part of the mine rather than the whole level, so the
+    // map stays legible early on instead of showing one lit room in the corner
+    // of an empty box.
+    glm::vec3 lo(std::numeric_limits<float>::max());
+    glm::vec3 hi(std::numeric_limits<float>::lowest());
+    const int n = std::min(map.segmentCount, level.segmentCount());
+    for (int si = 0; si < n; ++si) {
+        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        const Segment& seg = level.segments[static_cast<size_t>(si)];
+        for (int v = 0; v < 8; ++v) {
+            const glm::vec3& p = level.vertices[static_cast<size_t>(seg.verts[static_cast<size_t>(v)])];
+            lo = glm::min(lo, p);
+            hi = glm::max(hi, p);
+        }
+    }
+    if (lo.x > hi.x) {   // nothing visited yet, which should not happen
+        lo = hi = map.shipPosition;
+    }
+
+    const glm::vec3 focus = (lo + hi) * 0.5f;
+    const float radius = std::max(glm::length(hi - lo) * 0.5f, 4.0f);
+    const float distance = radius * 1.7f / std::max(map.zoom, 0.2f);
+
+    const float cp = std::cos(map.pitch);
+    const glm::vec3 eye = focus + glm::vec3(std::cos(map.yaw) * cp, std::sin(map.pitch),
+                                            std::sin(map.yaw) * cp) * distance;
+
+    const float aspect = target_.height() > 0
+                             ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
+                             : 1.0f;
+
+    CameraBlock cam;
+    cam.view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
+    // The project's own reversed-Z projection, not a second convention: the
+    // depth test is still GL_GEQUAL and the clear is still 0.
+    cam.proj = infiniteReversedZ(kFovY, aspect, kZNear);
+    glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
+
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_GEQUAL);
+
+    if (!mapLines_.empty()) {
+        debugLineShader_->bind();
+        mapLines_.draw();
+    }
+
 }
 
 void Renderer::resolve() {

@@ -11,6 +11,13 @@ namespace dvk {
 //   --resize-test       drive a scripted sequence of window resizes, an
 //                       iconify and a restore, exercising the framebuffer
 //                       callback and render-target rebuild
+//   --automap           start with the automap open (Tab at runtime), so a
+//                       screenshot can show it without flying the level first.
+//   --reveal            draw the automap as if every segment had been visited.
+//                       A rendering check for the map itself, in the same family
+//                       as --wireframe-volumes and --stencil-view: it changes
+//                       nothing in the simulation and the game still only
+//                       records the rooms actually flown through.
 //   --chase             start in the chase camera (F1 at runtime), so a
 //                       screenshot can show the ship without a keypress
 //   --flight-test       run the flight model headlessly and report the
@@ -61,6 +68,8 @@ struct Options {
     std::string level;
     bool resizeTest = false;
     bool chase = false;
+    bool automap = false;
+    bool reveal = false;
     bool flightTest = false;
     bool worldTest = false;
     bool collisionTest = false;

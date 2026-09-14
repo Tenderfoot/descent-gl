@@ -767,9 +767,48 @@ and drawn per occluder with the model matrix the prepass used.
 
 ---
 
-## M8 — Polish and performance ⬜
+## M8 — Polish and performance 🟡 In progress
 
-Not started.
+Landing in pieces. The automap is done; muzzle flash and hit feedback,
+performance instrumentation, asset validation and the README follow.
+
+### The automap ✅
+
+`Tab` draws the segment graph as lines from an orbit camera the mouse drives,
+showing only what the player has earned the right to see. The simulation keeps
+running behind it.
+
+Discovery is recorded in `GameState` and nothing reads it back, so a level plays
+out identically whether the map is opened or not.
+
+| Check | Result |
+| --- | --- |
+| Only the start segment is known at the start | ✅ `visitedCount == 1`, and it is `level.start.segment` |
+| Every other segment stays unknown | ✅ 33 of 34 on `mine01` |
+| Visiting N segments marks exactly N | ✅ walked 6, `visitedCount == 6` |
+| A key in an unvisited room is not on the map | ✅ not `seen` until the room is entered |
+| The reactor is not on the map from the start | ✅ needs a real line of sight |
+| Sighting the reactor records its position | ✅ within 1.0 u of the reactor, at 20.0 48.0 70.0 |
+| The map draws the whole graph | ✅ `--reveal` screenshot, 34 segments, three keys and the reactor marked |
+| The map draws only the start room at the start | ✅ `--automap` screenshot: one room, frontier portals faint |
+| The simulation keeps running while it is open | ✅ 92 sim steps over 40 frames with the map up |
+| Debug run, GL errors fatal | ✅ no GL error or fatal lines |
+| Loop, world, weapons, robots, collision, flight on both levels | ✅ PASS (loop SKIPPED on `test01`) |
+| `--resize-test` | ✅ completes, 0 frames skipped while minimized |
+
+Two notes on what these numbers are worth. The step rates in the container are
+software-rendering numbers and the full-size ones are bounded by the loop's
+0.25 s frame clamp, not by the simulation — 119.4/120 at 640x360 is the real
+check. And the reveal screenshot proves the map *renders* the graph; the loop
+test, not the screenshot, is what proves it only reveals what was found.
+
+### Housekeeping done on the way
+
+`src/game/bindings.h` now holds the discrete keys too — F1, F3, H, F, Tab,
+Escape and the weapon-select base. They had been GLFW constants spelled out in
+`main.cpp`, which made CLAUDE.md's "nothing else in the project names a GLFW key
+code for gameplay" false as written. There is now no `GLFW_KEY_` anywhere in
+`main.cpp`.
 
 ---
 

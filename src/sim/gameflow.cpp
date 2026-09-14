@@ -85,6 +85,21 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
 
     state.elapsed += dt;
 
+    // --- what the player has found ---------------------------------------
+    //
+    // Purely a record for the automap; nothing below reads it back.
+    if (player.segment >= 0 && player.segment < kMaxFlowSegments &&
+        !state.visited[static_cast<size_t>(player.segment)]) {
+        state.visited[static_cast<size_t>(player.segment)] = true;
+        ++state.visitedCount;
+
+        // A pickup is on the map once the player has been in the room with it,
+        // which means a key noticed and left behind can be flown back to.
+        for (size_t pi = 0; pi < level.pickups.size() && pi < kMaxPickups; ++pi) {
+            if (level.pickups[pi].segment == player.segment) state.seen[pi] = true;
+        }
+    }
+
     // --- doors -----------------------------------------------------------
     for (size_t di = 0; di < level.doors.size() && di < kMaxDoors; ++di) {
         const Door& door = level.doors[di];
@@ -173,6 +188,31 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         if (!def.isReactor) continue;
         reactorFound = true;
         if (robot.alive) state.reactorAlive = true;
+
+        // The map marks the reactor once the player has actually laid eyes on
+        // it, which is a stronger claim than "has been in its room" and wants a
+        // real line of sight. Tested with the same query the robots use, against
+        // the doors as they stand this step, so a reactor behind a shut door is
+        // not revealed through it.
+        //
+        // Only worth doing until it succeeds once, so this is at most a handful
+        // of rays per level rather than per step.
+        if (!state.reactorSeen && robot.alive) {
+            SolidDoors solid;
+            buildSolidDoors(level, state, solid);
+            const glm::vec3 toReactor = robot.body.position - player.position;
+            const float distance = glm::length(toReactor);
+            if (distance > 1.0e-4f) {
+                const RayHit hit = raycast(level, player.position, toReactor / distance, distance,
+                                           player.segment, &solid);
+                if (!hit.hit || hit.distance >= distance - robot.body.radius) {
+                    state.reactorSeen = true;
+                    state.reactorPosition = robot.body.position;
+                    log::info("reactor sighted at {:.1f}s", state.elapsed);
+                }
+            }
+        }
+        if (state.reactorSeen && robot.alive) state.reactorPosition = robot.body.position;
     }
     if (!reactorFound) state.reactorAlive = false;
 

@@ -18,6 +18,11 @@ Options Options::parse(int argc, char** argv) {
             o.screenshot = argv[++i];
         } else if (a == "--resize-test") {
             o.resizeTest = true;
+        } else if (a == "--automap") {
+            o.automap = true;
+        } else if (a == "--reveal") {
+            o.reveal = true;
+            o.automap = true;
         } else if (a == "--chase") {
             o.chase = true;
         } else if (a == "--flight-test") {

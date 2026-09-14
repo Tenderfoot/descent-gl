@@ -860,6 +860,56 @@ shows the game.
 
 ---
 
+## The automap (M8)
+
+`Tab`. The segment graph drawn as lines, in the same reversed-Z projection the
+scene uses, from an orbit camera the mouse drives. The simulation is untouched
+while it is open: the ship keeps flying, robots keep hunting, the countdown keeps
+running. Opening the map is not a pause, and reading it while something is
+shooting at you is the cost of looking.
+
+It reuses `DebugLines` rather than introducing a mesh path, because that is
+exactly what it needs — a per-frame line list that keeps its capacity and stops
+allocating after the first few frames. `mapLines_` is a second instance, kept
+apart from the scene's `debugLines_` so `--debug-lines` and the map cannot
+overwrite each other.
+
+### What it draws, and what it refuses to
+
+A wall side is drawn as its outline. A portal to a **visited** segment is drawn
+as nothing at all, so a corridor reads as a gap rather than as a line to bump
+into. A portal to an **unvisited** one gets a faint outline: a frontier marker
+that says there is a way on without saying what is through it.
+
+`GameState` records the knowledge, and the rules are deliberately mean:
+
+- **`visited`** is segments the ship has actually been inside — not segments it
+  has *seen* down a corridor, which would hand the player the layout of a room
+  they glanced into.
+- **`seen`** marks a pickup whose segment has been visited, so a key noticed and
+  left behind can be flown back to.
+- **`reactorSeen`** needs a real line of sight, tested with the same `raycast`
+  the robots use and against the doors as they stand that step, so a reactor
+  behind a shut door is not revealed through it. It runs only until it succeeds
+  once — a handful of rays per level, not per step.
+
+None of it feeds back into the simulation. A level plays out identically whether
+the map is ever opened or not, which is what makes it safe for `stepGame` to
+write and for the renderer to read.
+
+### Framing
+
+The orbit camera frames the **visited** bounding box rather than the level's, so
+the map stays legible early on instead of showing one lit room in the corner of
+an empty box. It grows as the player explores.
+
+`--reveal` draws every segment and every marker as though found. It is a
+rendering check for the map itself — the same family as `--wireframe-volumes`
+and `--stencil-view` — and it touches only what the renderer is handed, never
+`GameState`.
+
+---
+
 ## Robots
 
 `src/sim/robots.h`. Three types from `assets/config/robots.json`, placed in the

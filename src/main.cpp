@@ -175,6 +175,8 @@ int main(int argc, char** argv) {
     // F3 brings the debug panels back. Off by default, because from M7 the HUD
     // is what the player reads and the panels are for tuning.
     bool showDebugUi = !opts.noUi && opts.debugUi;
+    dvk::gl::AutomapData automap;
+    automap.open = opts.automap;
 
     dvk::PortalWalk walk;
     dvk::LightFlood flood;
@@ -280,7 +282,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (input.pressed(GLFW_KEY_ESCAPE)) {
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Capture))) {
             input.setMouseCaptured(window.handle(), !input.mouseCaptured());
         }
         // Any key restarts from an end screen. Checked before the toggles
@@ -292,20 +294,33 @@ int main(int argc, char** argv) {
                 prev = cur;
                 accumulator = 0.0;
             }
-        } else if (input.pressed(GLFW_KEY_F3)) {
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
             showDebugUi = !showDebugUi;
-        } else if (input.pressed(GLFW_KEY_H)) {
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
             // Refuses to come on with no energy left, which is the whole point
             // of it costing any.
             cur.combat.player.headlightOn =
                 !cur.combat.player.headlightOn && cur.combat.player.energy > 0.0f;
         }
-        if (input.pressed(GLFW_KEY_F1)) {
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Chase))) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
         }
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
+            automap.open = !automap.open;
+        }
 
-        const glm::vec2 mouseDelta = input.consumeMouseDelta();
+        glm::vec2 mouseDelta = input.consumeMouseDelta();
+        // With the map open the mouse orbits it instead of steering. The
+        // simulation is untouched either way: the ship keeps flying, robots keep
+        // hunting, and the countdown keeps running - opening the map is not a
+        // pause, and reading it while something is shooting at you is the cost
+        // of looking.
+        if (automap.open) {
+            automap.yaw += mouseDelta.x * 0.005f;
+            automap.pitch = std::clamp(automap.pitch - mouseDelta.y * 0.005f, -1.45f, 1.45f);
+            mouseDelta = glm::vec2(0.0f);
+        }
         bool consumedMouse = false;
         while (accumulator >= kSimStep) {
             prev = cur;
@@ -335,9 +350,9 @@ int main(int argc, char** argv) {
             if (!consumedMouse) {
                 fire.primary = input.mouseDown(GLFW_MOUSE_BUTTON_LEFT);
                 fire.secondary = input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
-                fire.flare = input.pressed(GLFW_KEY_F);
+                fire.flare = input.pressed(dvk::keyFor(dvk::Toggle::Flare));
                 for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
-                    if (input.pressed(GLFW_KEY_1 + w)) fire.selectWeapon = w;
+                    if (input.pressed(dvk::kWeaponSelectBase + w)) fire.selectWeapon = w;
                 }
                 if (opts.autofire >= 0) {
                     if (opts.autofire >= dvk::sim::WeaponCount) {
@@ -520,7 +535,72 @@ int main(int argc, char** argv) {
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.robotsTotal = cur.game.robotsAtStart;
 
-        renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+        if (automap.open) {
+            automap.segmentCount = level.segmentCount();
+            automap.visitedCount =
+                opts.reveal ? level.segmentCount() : cur.game.visitedCount;
+            for (int si = 0; si < automap.segmentCount &&
+                             si < dvk::gl::AutomapData::kMaxSegments; ++si) {
+                automap.visited[static_cast<size_t>(si)] =
+                    opts.reveal || cur.game.visited[static_cast<size_t>(si)];
+            }
+            automap.shipPosition = rs.shipPos;
+            automap.shipForward = shipForward;
+            automap.shipSegment = rs.shipSegment;
+
+            automap.markerCount = 0;
+            const auto addMarker = [&](const glm::vec3& p, const glm::vec3& color, float size,
+                                       bool hollow) {
+                if (automap.markerCount >= dvk::gl::AutomapData::kMaxMarkers) return;
+                dvk::gl::AutomapData::Marker& m =
+                    automap.markers[static_cast<size_t>(automap.markerCount++)];
+                m.position = p;
+                m.color = color;
+                m.size = size;
+                m.hollow = hollow;
+            };
+
+            // Keys the player has laid eyes on, whether or not they picked them
+            // up. Anything else on the map would be telling them where to go.
+            for (int pi = 0; pi < rs.pickupCount; ++pi) {
+                const dvk::Pickup& pickup = level.pickups[static_cast<size_t>(pi)];
+                if (pickup.kind < dvk::PickupKind::KeyBlue) continue;
+                if (!opts.reveal && !cur.game.seen[static_cast<size_t>(pi)]) continue;
+                const bool collected = cur.game.collected[static_cast<size_t>(pi)];
+                glm::vec3 color(1.0f);
+                switch (pickup.kind) {
+                    case dvk::PickupKind::KeyBlue: color = glm::vec3(0.35f, 0.55f, 1.0f); break;
+                    case dvk::PickupKind::KeyYellow: color = glm::vec3(1.0f, 0.9f, 0.3f); break;
+                    case dvk::PickupKind::KeyRed: color = glm::vec3(1.0f, 0.35f, 0.3f); break;
+                    default: break;
+                }
+                addMarker(pickup.position, color, 1.8f, !collected);
+            }
+
+            if (cur.game.reactorSeen || opts.reveal) {
+                // Green once it is gone, so a glance says whether the job is
+                // done and the map is now an escape route.
+                const glm::vec3 color = cur.game.reactorAlive ? glm::vec3(1.0f, 0.45f, 0.2f)
+                                                              : glm::vec3(0.4f, 1.0f, 0.5f);
+                glm::vec3 at = cur.game.reactorPosition;
+                if (opts.reveal && !cur.game.reactorSeen) {
+                    for (int ri = 0; ri < cur.robots.count; ++ri) {
+                        const dvk::sim::Robot& r = cur.robots.robots[static_cast<size_t>(ri)];
+                        if (robotConfig.types[static_cast<size_t>(r.type)].isReactor) {
+                            at = r.body.position;
+                        }
+                    }
+                }
+                addMarker(at, color, 3.0f, false);
+            }
+            if (cur.game.exitOpen && level.exitTrigger.present) {
+                addMarker(level.exitTrigger.position, glm::vec3(0.5f, 1.0f, 0.7f), 3.0f, false);
+            }
+
+            renderer.drawAutomap(automap, level, hud);
+        } else {
+            renderer.drawScene(rs, level, walk, dynamicLights, weapons.shadowBudget, hud);
+        }
         renderer.resolve();
 
         ImGui_ImplOpenGL3_NewFrame();

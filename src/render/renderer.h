@@ -13,6 +13,7 @@
 #include "render/texture_array.h"
 
 #include <glm/mat4x4.hpp>
+#include <array>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -72,6 +73,40 @@ struct HudData {
     int robotsTotal = 0;
 };
 
+// The automap, gathered by the game layer for the same reason `HudData` is: the
+// renderer draws what it is handed and never reaches into `GameState`.
+//
+// Everything here is by value. The map is drawn from the segment graph the
+// renderer already has, so all the game layer has to supply is which parts of it
+// the player has earned the right to see.
+struct AutomapData {
+    static constexpr int kMaxSegments = 128;
+    static constexpr int kMaxMarkers = 16;
+
+    struct Marker {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        bool hollow = false;   // seen but not yet collected
+    };
+
+    bool open = false;
+    float yaw = 0.6f;
+    float pitch = 0.5f;
+    float zoom = 1.0f;
+
+    int segmentCount = 0;
+    int visitedCount = 0;
+    std::array<bool, kMaxSegments> visited{};
+
+    glm::vec3 shipPosition{0.0f};
+    glm::vec3 shipForward{0.0f, 0.0f, -1.0f};
+    int shipSegment = 0;
+
+    std::array<Marker, kMaxMarkers> markers{};
+    int markerCount = 0;
+};
+
 class Renderer {
 public:
     static constexpr GLsizei kSamples = 4;
@@ -86,6 +121,10 @@ public:
     void drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,
                    const std::vector<Light>& dynamicLights, int shadowBudget,
                    const HudData& hud);
+
+    // Draws the automap instead of the mine. The simulation is still running
+    // behind it - this replaces the view, not the frame.
+    void drawAutomap(const AutomapData& map, const Level& level, const HudData& hud);
 
     // Rebuilds the debug line list for this frame. Call before drawScene.
     // Everything here is a toggle because the mine is dark and these lines are
@@ -176,6 +215,7 @@ private:
     void buildDoors(const RenderState& rs, const Level& level);
     void buildHud(const HudData& hud);
     void hudPass();
+    void buildAutomapLines(const AutomapData& map, const Level& level);
 
     void stencilPass(ShadowVolumes::Range range);
     void visualiseStencil();
@@ -237,6 +277,7 @@ private:
     Billboards billboards_;
     std::unique_ptr<Shader> billboardShader_;
     Hud hud_;
+    DebugLines mapLines_;   // separate from debugLines_, which the scene owns
     std::unique_ptr<Shader> hudShader_;
 
     // Two sliding halves per door, plus one occluder each so a shut door casts

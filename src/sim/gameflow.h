@@ -3,6 +3,8 @@
 #include "game/level.h"
 #include "sim/body.h"
 
+#include <glm/vec3.hpp>
+
 #include <array>
 #include <cstdint>
 
@@ -74,6 +76,20 @@ struct GameState {
     std::array<DoorState, kMaxDoors> doors{};
     std::array<bool, kMaxPickups> collected{};
     std::array<bool, 3> keys{};     // blue, yellow, red
+
+    // What the player has found, for the automap. Knowledge, not world state:
+    // nothing here feeds back into the simulation, and a level plays out
+    // identically whether the map is ever opened or not.
+    //
+    // `visited` is segments the ship has actually been inside - not segments it
+    // has seen down a corridor, which would hand the player the layout of a room
+    // they only glanced into. `seen` is a pickup whose segment has been visited,
+    // so the map can show a key the player passed and left behind.
+    std::array<bool, kMaxFlowSegments> visited{};
+    std::array<bool, kMaxPickups> seen{};
+    int visitedCount = 0;
+    bool reactorSeen = false;
+    glm::vec3 reactorPosition{0.0f};   // last known, valid once reactorSeen
 
     DoorField doorField;
 };
