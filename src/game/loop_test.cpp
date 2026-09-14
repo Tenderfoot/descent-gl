@@ -213,12 +213,24 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
         rebuildLightSegments(rig.level, probe, flood, &rig.game.doorField);
         const bool litThroughGap = std::find(probe.segments.begin(), probe.segments.end(),
                                              door.neighbour) != probe.segments.end();
+        sim::SolidDoors crackedDoors;
+        sim::buildSolidDoors(rig.level, rig.game, crackedDoors);
+        const glm::vec3 shotFrom = door.center + door.normal * 8.0f;
+        const sim::RayHit crackedShot = sim::sweepSphere(
+            rig.level, shotFrom, -door.normal,
+            rig.weapons.weapons[static_cast<size_t>(sim::WeaponLaser)].radius, 9.0f,
+            door.segment, &crackedDoors);
+        const bool shotThroughGap = !crackedShot.hit;
         ok &= expect(seeThrough, "a door that has started opening is see-through");
         ok &= expect(stillBlocks, "a door that has started opening still blocks a body");
         ok &= expect(litThroughGap, "light reaches through a door that has started opening");
-        log::info("cracked door at {:.2f}: see-through {}, passable {}, lit through {}",
+        ok &= expect(shotThroughGap,
+                     "a projectile passes through a door that has started opening");
+        log::info("cracked door at {:.2f}: see-through {}, passable {}, lit through {}, shot "
+                  "through {}",
                   rig.game.doors[0].openness, seeThrough ? "yes" : "NO",
-                  stillBlocks ? "no" : "YES", litThroughGap ? "yes" : "NO");
+                  stillBlocks ? "no" : "YES", litThroughGap ? "yes" : "NO",
+                  shotThroughGap ? "yes" : "NO");
 
         // And once the level's own lights are rebuilt against the field, a
         // level light behind a shut door stays out of the room in front.

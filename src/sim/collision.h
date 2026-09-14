@@ -46,19 +46,19 @@ struct ContactLog {
     }
 };
 
-// The triangles of every door that is currently shut, in world space.
+// The triangles of every door that still blocks a body, in world space.
 //
 // A door is a portal in the segment graph, so it contributes nothing to the
-// static wall list. While it is closed it has to stop bodies, rays and bolts
-// anyway, and it has to do so from both sides. Rebuilt once per step and handed
-// to everything that asks a geometric question, so collision, line of sight and
-// projectiles cannot disagree about whether a door is shut.
+// static wall list. The face remains in this set until a body can pass, while
+// `opaque` becomes false at the first crack so rays and projectiles agree with
+// portal visibility. It has to work from both sides.
 struct SolidDoors {
     struct Face {
         std::array<glm::vec3, 3> p{};
         glm::vec3 normal{0.0f};
         int segmentA = -1;
         int segmentB = -1;
+        bool opaque = true;
     };
     static constexpr int kCapacity = 64;
     std::array<Face, kCapacity> faces{};
@@ -76,9 +76,14 @@ struct SolidDoors {
     }
 };
 
-// True if a shut door lies between two neighbouring segments. `doors` may be
-// null, in which case nothing is shut.
+// True if a door that still blocks bodies lies between two neighbouring
+// segments. `doors` may be null, in which case nothing is blocked.
 bool doorShut(const SolidDoors* doors, int segment, int neighbour);
+
+// True while the door is fully closed. Sight rays and projectile sweeps use
+// this instead of the body threshold: once the next room is visible through a
+// moving door, a shot can travel into it too.
+bool doorOpaque(const SolidDoors* doors, int segment, int neighbour);
 
 struct CollisionConfig {
     // How many times the push-out is repeated per step. Corners need more than

@@ -66,6 +66,7 @@ void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out
             face.normal = door.normal;
             face.segmentA = door.segment;
             face.segmentB = door.neighbour;
+            face.opaque = state.doors[di].openness <= 0.0f;
         }
     }
 }

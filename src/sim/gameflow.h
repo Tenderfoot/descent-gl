@@ -123,10 +123,10 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
 // nearly open are not passable.
 bool sidePassable(const GameState& state, int segment, int side);
 
-// The world-space faces of every door that is currently shut, using the same
-// threshold as the DoorField. Rebuilt once per step and handed to collision,
-// line of sight and projectiles alike, so none of them can disagree with the
-// portal walk and the light flood about whether a door is in the way.
+// The world-space faces of every door that still blocks a body. Each face also
+// records whether the door is fully opaque, so line of sight and projectiles
+// can open at the first crack with the portal walk and light flood while body
+// collision keeps its larger clearance threshold.
 void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out);
 
 } // namespace dvk::sim
