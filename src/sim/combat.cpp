@@ -274,6 +274,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     player.flareCooldown = std::max(0.0f, player.flareCooldown - dt);
     player.hurtTimer = std::max(0.0f, player.hurtTimer - dt);
     player.recoilTimer = std::max(0.0f, player.recoilTimer - dt);
+    player.beamCueTimer = std::max(0.0f, player.beamCueTimer - dt);
 
     // --- resources -------------------------------------------------------
     if (player.headlightOn) {
@@ -295,7 +296,17 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     // --- firing ----------------------------------------------------------
     const auto fire = [&](int weaponId) {
         const WeaponDef& def = cfg.weapons[static_cast<size_t>(weaponId)];
-        if (player.cooldown[static_cast<size_t>(weaponId)] > 0.0f) return;
+        const WeaponFire mode = weaponFire(weaponId);
+
+        // A continuous weapon is metered by dt instead of gated by a cooldown:
+        // it damages and drains for every step the trigger is down, so its
+        // numbers are per second and mean the same thing at any frame rate.
+        // Everything else waits out its fire interval and pays per shot.
+        const float meter = mode == WeaponFire::Continuous ? dt : 1.0f;
+        if (mode != WeaponFire::Continuous &&
+            player.cooldown[static_cast<size_t>(weaponId)] > 0.0f) {
+            return;
+        }
 
         float damage = def.damage;
         glm::vec3 color = def.color;
@@ -314,8 +325,9 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             player.emptyClickTimer = kEmptyClickInterval;
             emitLocal(events, Cue::WeaponEmpty);
         };
+        const float energyCost = def.energyCost * meter;
         if (def.energyCost > 0.0f) {
-            if (player.energy < def.energyCost) {
+            if (player.energy < energyCost) {
                 click();
                 return;
             }
@@ -329,12 +341,19 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             return;
         }
 
-        const int slot = state.projectiles.spawn();
-        if (slot < 0) return;
+        // A projectile weapon with a full pool has nothing to fire and must
+        // not be charged for it. A hitscan weapon cannot run out of anything.
+        int slot = -1;
+        if (mode == WeaponFire::Projectile) {
+            slot = state.projectiles.spawn();
+            if (slot < 0) return;
+        }
 
-        if (def.energyCost > 0.0f) player.energy -= def.energyCost;
+        if (def.energyCost > 0.0f) player.energy -= energyCost;
         if (def.ammoCost > 0 && ammo) *ammo -= def.ammoCost;
-        player.cooldown[static_cast<size_t>(weaponId)] = def.fireInterval;
+        if (mode != WeaponFire::Continuous) {
+            player.cooldown[static_cast<size_t>(weaponId)] = def.fireInterval;
+        }
 
         // Alternating wingtips, from the two points the ship model's widest
         // vertices sit at. See kShipFirePoints.
@@ -357,14 +376,100 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         // ms, which at any real frame rate is as likely to be missed entirely
         // as seen. This is long enough to land on a frame and still be gone
         // before it reads as a light source.
-        spawnEffect(state, origin, ship.segment, color, def.radius * 2.5f, kMuzzleFlashTime,
-                    def.lightRadius * 1.5f, def.lightIntensity * 2.5f);
+        const auto muzzleFlash = [&]() {
+            spawnEffect(state, origin, ship.segment, color, def.radius * 2.5f, kMuzzleFlashTime,
+                        def.lightRadius * 1.5f, def.lightIntensity * 2.5f);
+        };
 
         // At the listener, not at the wingtip it actually came from. See the
         // note on SoundEvent::atListener.
-        static constexpr std::array<Cue, WeaponCount> kFireCues{
-            {Cue::LaserFire, Cue::VulcanFire, Cue::ConcussionFire, Cue::HomingFire}};
-        emitLocal(events, kFireCues[static_cast<size_t>(weaponId)]);
+        static constexpr std::array<Cue, WeaponCount> kFireCues{{Cue::LaserFire, Cue::VulcanFire,
+                                                                Cue::ConcussionFire,
+                                                                Cue::HomingFire, Cue::RailgunFire,
+                                                                Cue::LightningFire}};
+        // The lightning gun traces 120 times a second and must not be heard or
+        // seen to flash 120 times a second. One crackle, one flash and one
+        // impact light per fireInterval; the beam itself is drawn every step,
+        // so what the player sees is a steady arc that pulses.
+        const bool audible =
+            mode != WeaponFire::Continuous || player.beamCueTimer <= 0.0f;
+        if (audible) {
+            if (mode == WeaponFire::Continuous) player.beamCueTimer = def.fireInterval;
+            emitLocal(events, kFireCues[static_cast<size_t>(weaponId)]);
+        }
+
+        if (audible) muzzleFlash();
+
+        // --- hitscan ------------------------------------------------------
+        //
+        // No projectile at all: the trace runs now and the beam is only the
+        // record of where it went. A railgun modelled as a very fast bolt would
+        // still be a bolt, and would still have to be swept step by step
+        // against the mine; this is the thing the shared trace exists for.
+        if (mode != WeaponFire::Projectile) {
+            const glm::vec3 shotDir = spreadDirection(forward, right, up, def.spread);
+            CombatTraceParams params;   // a ray, not a sweep: it has no width in flight
+            params.owner = -1;
+            const CombatHit hit = traceCombatRay(level, state, ship, robots, origin, shotDir,
+                                                 def.range, ship.segment, params, doors);
+
+            const glm::vec3 end = hit.kind == CombatHit::Kind::None
+                                      ? origin + shotDir * def.range
+                                      : hit.point;
+            const int beamSlot = state.beams.spawn();
+            if (beamSlot >= 0) {
+                Beam& beam = state.beams.items[static_cast<size_t>(beamSlot)];
+                beam.start = origin;
+                beam.end = end;
+                beam.color = color;
+                beam.segment = ship.segment;
+                beam.width = def.beamWidth;
+                beam.lifetime = def.beamTime;
+            }
+
+            // Metered for a continuous weapon, whole for an instant one. The
+            // impulse is metered the same way, so the lightning gun pushes
+            // steadily rather than flicking its target once a step.
+            const float shot = damage * meter;
+            const float shove = def.impactImpulse * meter;
+
+            switch (hit.kind) {
+                case CombatHit::Kind::Robot: {
+                    Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
+                    robot.health -= shot;
+                    robot.awareness = 1.0f;
+                    robot.lastKnown = ship.position;
+                    robot.hasLastKnown = true;
+                    applyImpulse(robot.body, shotDir, shove, robot.mass);
+                    if (audible) {
+                        spawnEffect(state, hit.point, hit.segment, color, 1.7f, 0.22f, 11.0f, 2.8f);
+                        emit(events, Cue::RobotHit, hit.point, hit.segment);
+                    }
+                    break;
+                }
+                case CombatHit::Kind::Object:
+                    state.objects.health[static_cast<size_t>(hit.index)] -= shot;
+                    if (audible) {
+                        spawnEffect(state, hit.point, hit.segment, color, 1.6f, 0.2f, 10.0f, 2.6f);
+                        emit(events, Cue::WallImpact, hit.point, hit.segment);
+                    }
+                    break;
+                case CombatHit::Kind::Wall:
+                    if (audible) {
+                        // Half the weapon's own light, in line with what a bolt
+                        // impact throws. At full strength a railgun hitting a
+                        // wall three metres away whites out the screen.
+                        spawnEffect(state, end - shotDir * 0.2f, hit.segment, color, 1.3f, 0.18f,
+                                    def.lightRadius * 0.5f, def.lightIntensity * 0.55f);
+                        emit(events, Cue::WallImpact, end, hit.segment);
+                    }
+                    break;
+                case CombatHit::Kind::Player:
+                case CombatHit::Kind::None:
+                    break;
+            }
+            return;
+        }
 
         if (weaponId == WeaponConcussion || weaponId == WeaponHoming) {
             player.recoilTimer = kRecoilTime;
@@ -573,6 +678,13 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         if (!f.alive) continue;
         f.age += dt;
         if (f.age >= f.lifetime) f.alive = false;
+    }
+
+    // --- beams -----------------------------------------------------------
+    for (Beam& b : state.beams.items) {
+        if (!b.alive) continue;
+        b.age += dt;
+        if (b.age >= b.lifetime) b.alive = false;
     }
 
     // --- effects ---------------------------------------------------------

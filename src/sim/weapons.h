@@ -7,10 +7,18 @@
 
 namespace dvk::sim {
 
-enum WeaponId : int { WeaponLaser = 0, WeaponVulcan, WeaponConcussion, WeaponHoming, WeaponCount };
+enum WeaponId : int {
+    WeaponLaser = 0,
+    WeaponVulcan,
+    WeaponConcussion,
+    WeaponHoming,
+    WeaponRailgun,
+    WeaponLightning,
+    WeaponCount,
+};
 
-inline constexpr std::array<const char*, WeaponCount> kWeaponNames{"laser", "vulcan",
-                                                                  "concussion", "homing"};
+inline constexpr std::array<const char*, WeaponCount> kWeaponNames{
+    "laser", "vulcan", "concussion", "homing", "railgun", "lightning"};
 
 // Which trigger a weapon answers to. Written out per weapon rather than
 // inferred from the enum's order: "id <= WeaponVulcan" happened to be true
@@ -22,6 +30,8 @@ constexpr WeaponSlot weaponSlot(int weaponId) {
     switch (static_cast<WeaponId>(weaponId)) {
         case WeaponLaser:
         case WeaponVulcan:
+        case WeaponRailgun:
+        case WeaponLightning:
             return WeaponSlot::Primary;
         case WeaponConcussion:
         case WeaponHoming:
@@ -30,6 +40,34 @@ constexpr WeaponSlot weaponSlot(int weaponId) {
             break;
     }
     return WeaponSlot::Primary;
+}
+
+// How a weapon delivers its damage. Structural rather than tunable, so it is a
+// function of the id and not a field anyone can set to a nonsense combination.
+//
+//   Projectile   spawns a bolt that travels and is swept against the world.
+//   Instant      one trace per trigger pull, at fireInterval. Damage and
+//                energy are per shot.
+//   Continuous   one trace every step the trigger is held. Damage and energy
+//                are per SECOND and are multiplied by dt; fireInterval is the
+//                gap between its sound cues, not a rate limit on damage.
+enum class WeaponFire : uint8_t { Projectile, Instant, Continuous };
+
+constexpr WeaponFire weaponFire(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+        case WeaponVulcan:
+        case WeaponConcussion:
+        case WeaponHoming:
+            return WeaponFire::Projectile;
+        case WeaponRailgun:
+            return WeaponFire::Instant;
+        case WeaponLightning:
+            return WeaponFire::Continuous;
+        case WeaponCount:
+            break;
+    }
+    return WeaponFire::Projectile;
 }
 
 // Laser has four upgrade levels. Each changes damage and colour, and the colour
@@ -57,6 +95,12 @@ struct WeaponDef {
     // change in units/s at mass 1 - see sim/body.h.
     float impactImpulse = 0.0f;
     float splashImpulse = 0.0f;
+    // Hitscan only: how far the trace reaches, and what its tracer looks like.
+    // A beam is drawn from the muzzle to whatever the trace found, so range is
+    // visible as well as felt.
+    float range = 0.0f;            // units
+    float beamWidth = 0.12f;       // units, half the drawn thickness
+    float beamTime = 0.10f;        // seconds the tracer lingers
     // Homing only.
     float turnRate = 0.0f;         // rad/s
     float seekCone = 0.0f;         // radians, half-angle it will acquire within

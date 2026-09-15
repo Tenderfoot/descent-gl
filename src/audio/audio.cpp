@@ -24,6 +24,8 @@ constexpr std::array<CueDef, static_cast<size_t>(Cue::Count)> kCues{{
     {"vulcan.wav", 0.45f, 0.11f},         // VulcanFire
     {"concussion.wav", 0.85f, 0.04f},     // ConcussionFire
     {"homing.wav", 0.85f, 0.04f},         // HomingFire
+    {"railgun.wav", 0.90f, 0.03f},        // RailgunFire
+    {"lightning.wav", 0.55f, 0.10f},      // LightningFire
     {"flare.wav", 0.40f, 0.05f},          // FlareThrow
     {"empty.wav", 0.35f, 0.02f},          // WeaponEmpty
     {"select.wav", 0.30f, 0.00f},         // WeaponSelect

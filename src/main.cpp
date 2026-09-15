@@ -1449,7 +1449,8 @@ int main(int argc, char** argv) {
         ImGui::SetNextWindowPos(ImVec2(420, 300), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("weapons")) {
-            ImGui::TextDisabled("1-4 select, left mouse fires, right mouse launches, F throws a flare");
+            ImGui::TextDisabled(
+                "1-6 select, left mouse fires, right mouse launches, F throws a flare");
             for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
                 dvk::sim::WeaponDef& def = weapons.weapons[static_cast<size_t>(w)];
                 ImGui::PushID(w);
@@ -1468,6 +1469,11 @@ int main(int argc, char** argv) {
                         ImGui::SliderFloat("splash damage", &def.splashDamage, 0.0f, 60.0f, "%.1f");
                         ImGui::SliderFloat("splash impulse", &def.splashImpulse, 0.0f, 150.0f,
                                            "%.1f");
+                    }
+                    if (dvk::sim::weaponFire(w) != dvk::sim::WeaponFire::Projectile) {
+                        ImGui::SliderFloat("range", &def.range, 5.0f, 400.0f, "%.0f u");
+                        ImGui::SliderFloat("beam width", &def.beamWidth, 0.02f, 0.6f, "%.3f");
+                        ImGui::SliderFloat("beam time", &def.beamTime, 0.02f, 0.5f, "%.3f s");
                     }
                     if (w == dvk::sim::WeaponHoming) {
                         ImGui::SliderFloat("turn rate", &def.turnRate, 0.0f, 8.0f, "%.2f rad/s");

@@ -64,6 +64,18 @@ struct RenderState {
     std::array<Flash, sim::kMaxEffects> flashes{};
     int flashCount = 0;
 
+    // Hitscan tracers. Not interpolated: a beam is struck at one instant and
+    // lives for a tenth of a second, so blending it between two steps would
+    // smear it rather than smooth it.
+    struct BeamView {
+        glm::vec3 start{0.0f};
+        glm::vec3 end{0.0f};
+        glm::vec3 color{1.0f};
+        float width = 0.12f;
+    };
+    std::array<BeamView, sim::kMaxBeams> beams{};
+    int beamCount = 0;
+
     // Which level objects are still standing, so a destroyed target stops
     // being drawn and stops casting.
     std::array<bool, sim::kMaxObjects> objectAlive{};
@@ -137,6 +149,19 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         bolt.color = glm::vec3(1.0f, 0.72f, 0.36f) * std::min(1.0f, remaining / 4.0f);
         bolt.size = 0.7f;
         r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
+    }
+
+    for (const sim::Beam& beam : b.combat.beams.items) {
+        if (!beam.alive) continue;
+        RenderState::BeamView view;
+        view.start = beam.start;
+        view.end = beam.end;
+        // Fades over its short life, so a railgun tracer hangs for a moment
+        // and then is gone rather than blinking out.
+        const float k = beam.lifetime > 0.0f ? beam.age / beam.lifetime : 1.0f;
+        view.color = beam.color * std::max(0.0f, 1.0f - k);
+        view.width = beam.width;
+        r.beams[static_cast<size_t>(r.beamCount++)] = view;
     }
 
     for (const sim::Effect& e : b.combat.effects.items) {

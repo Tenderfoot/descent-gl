@@ -152,6 +152,19 @@ void Renderer::setLevel(const Level& level) {
 
     // Reserves, not resizes: these are rebuilt every frame. A second, larger
     // mine grows them once here rather than during a draw.
+    // The unlit pass's worst case, so its buffer never grows mid-frame: every
+    // bolt, landed flare, effect, pickup, beam and robot eye at once. Debris
+    // and drops ride the bolt list and are already counted by it.
+    size_t eyes = 0;
+    if (robotConfig_) {
+        for (const sim::RobotDef& def : robotConfig_->types) {
+            eyes = std::max(eyes, def.eyes.size());
+        }
+    }
+    billboards_.reserveQuads(RenderState{}.bolts.size() + RenderState{}.flashes.size() +
+                             RenderState{}.pickups.size() + RenderState{}.beams.size() +
+                             static_cast<size_t>(sim::kMaxRobots) * eyes);
+
     lit_.reserve(level.segments.size());
     ranges_.reserve(level.lights.size() + 1);
     lightStats_.reserve(level.lights.size() + 1);
@@ -739,6 +752,14 @@ void Renderer::buildBillboards(const RenderState& rs) {
     for (int i = 0; i < rs.flashCount; ++i) {
         const RenderState::Flash& f = rs.flashes[static_cast<size_t>(i)];
         billboards_.add(f.position, right, up, f.size, f.color * f.fade);
+    }
+
+    // Hitscan tracers, into the same buffer as the sprites so the unlit pass
+    // keeps to one draw.
+    const glm::vec3 eye = eyePos(rs);
+    for (int i = 0; i < rs.beamCount; ++i) {
+        const RenderState::BeamView& beam = rs.beams[static_cast<size_t>(i)];
+        billboards_.addBeam(beam.start, beam.end, eye, beam.width, beam.color);
     }
 
     // Pickups. Emissive so they can be found in a dark corridor, and pulsing

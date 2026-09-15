@@ -107,14 +107,25 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.state.player.headlightOn = false;
         rig.run(1, controls);
 
-        const int fired = playerBolts(rig);
+        // A projectile weapon is counted by what it put in the pool; a hitscan
+        // weapon leaves a beam instead, because the damage has already landed
+        // by the time anything is drawn.
+        const sim::WeaponFire mode = sim::weaponFire(w);
+        const auto shotsFired = [&]() {
+            return mode == sim::WeaponFire::Projectile ? playerBolts(rig)
+                                                       : rig.state.beams.count();
+        };
+        const int fired = shotsFired();
         ok &= expect(fired == 1, "one shot on the first step");
 
-        // A second step inside the cooldown must not produce another.
+        // A second step inside the cooldown must not produce another. A
+        // continuous weapon has no cooldown - firing every step is the point of
+        // it - so what is checked there is that it keeps going.
         rig.run(1, controls);
-        const bool withinCooldown = def.fireInterval > kStep * 1.5f;
-        if (withinCooldown) {
-            ok &= expect(playerBolts(rig) == 1,
+        if (mode == sim::WeaponFire::Continuous) {
+            ok &= expect(rig.state.beams.count() >= 1, "a held beam keeps firing");
+        } else if (def.fireInterval > kStep * 1.5f) {
+            ok &= expect(shotsFired() == 1,
                          "no second shot while the weapon is still cooling down");
         }
 
@@ -132,8 +143,12 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
             ok &= expect(rig.state.player.homingAmmo < homingBefore, "homing spent ammo");
         }
 
-        log::info("{:11} fires: {} bolt(s), speed {:.0f}, damage {:.1f}",
-                  sim::kWeaponNames[static_cast<size_t>(w)], fired, def.speed, def.damage);
+        log::info("{:11} fires: {} {}, {} {:.0f}, damage {:.1f}{}",
+                  sim::kWeaponNames[static_cast<size_t>(w)], fired,
+                  mode == sim::WeaponFire::Projectile ? "bolt(s)" : "beam(s)",
+                  mode == sim::WeaponFire::Projectile ? "speed" : "range",
+                  mode == sim::WeaponFire::Projectile ? def.speed : def.range, def.damage,
+                  mode == sim::WeaponFire::Continuous ? "/s" : "");
     }
 
     // --- primary and secondary selections are independent -----------------
@@ -604,6 +619,81 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         ok &= expect(rig.state.player.hurtTimer == 0.0f, "the flinch faded out");
         log::info("damage flinch: {:.0f} shields lost, faded in {:.2f}s", before -
                   rig.state.player.shields, sim::kHurtFlashTime);
+    }
+
+    // --- a hitscan shot never leaves the mine --------------------------------
+    //
+    // The projectile equivalent of this is the no-tunnelling case: a bolt fast
+    // enough to cross a wall in one step must still be stopped by it. A trace
+    // has no step to cross, so the question becomes whether it stops at all.
+    // The mine is closed, so a 300-unit ray fired from anywhere in any
+    // direction must end on something. A ray that runs to full range has left
+    // the world.
+    {
+        rig.reset();
+        const sim::WeaponDef& rail = rig.cfg.weapons[sim::WeaponRailgun];
+
+        std::array<glm::vec3, 26> dirs{};
+        size_t made = 0;
+        for (int x = -1; x <= 1; ++x) {
+            for (int y = -1; y <= 1; ++y) {
+                for (int z = -1; z <= 1; ++z) {
+                    if (x == 0 && y == 0 && z == 0) continue;
+                    dirs[made++] = glm::normalize(glm::vec3(x, y, z));
+                }
+            }
+        }
+
+        int escaped = 0;
+        float longest = 0.0f;
+        for (int si = 0; si < rig.level.segmentCount(); ++si) {
+            const glm::vec3 from = rig.level.segments[static_cast<size_t>(si)].center;
+            for (const glm::vec3& dir : dirs) {
+                const sim::CombatHit hit = sim::traceCombatRay(
+                    rig.level, rig.state, rig.ship, &rig.robots, from, dir, rail.range, si);
+                if (hit.kind == sim::CombatHit::Kind::None) {
+                    ++escaped;
+                    continue;
+                }
+                longest = std::max(longest, hit.distance);
+            }
+        }
+
+        ok &= expect(escaped == 0, "no hitscan shot ran past the end of the mine");
+        log::info("hitscan containment: {} traces at {:.0f}u range, {} escaped, longest {:.1f}u",
+                  rig.level.segmentCount() * static_cast<int>(dirs.size()), rail.range, escaped,
+                  longest);
+    }
+
+    // --- a held beam is metered per second, not per step ----------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+        rig.state.player.headlightOn = false;
+
+        const sim::WeaponDef& arc = rig.cfg.weapons[sim::WeaponLightning];
+        sim::FireControls held;
+        held.selectWeapon = sim::WeaponLightning;
+        held.primary = true;
+
+        // One second of held trigger, a step at a time. What comes off the
+        // energy bar must be the per-second number in the config, not that
+        // number once per step - which at 120 Hz would empty the bar instantly.
+        const float before = rig.state.player.energy;
+        rig.run(120, held);
+        const float spent = before - rig.state.player.energy;
+
+        ok &= expect(std::abs(spent - arc.energyCost) < arc.energyCost * 0.05f,
+                     "one second of beam costs one second of energy");
+        ok &= expect(rig.state.beams.count() > 0, "the beam is still up while held");
+
+        // And it stops the moment the trigger does.
+        rig.run(static_cast<int>(arc.beamTime / kStep) + 2, sim::FireControls{});
+        ok &= expect(rig.state.beams.count() == 0, "the beam goes out when the trigger does");
+
+        log::info("held beam: {:.1f} energy over 1.0 s against {:.1f}/s configured", spent,
+                  arc.energyCost);
     }
 
     // --- a blast does not reach through rock ---------------------------------

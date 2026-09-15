@@ -84,7 +84,7 @@ milestone rather than describing what the code should do:
 | `--level PATH` | Load a level other than the default `mine01`. |
 | `--debug-ui` | Start with the ImGui debug panels open. They are off by default from M7; F3 toggles them at runtime. |
 | `--robots-test` | Drive the robot state machine through idle, alert, chase, attack, retreat and death; check pathing crosses portals, that robot fire hurts, that deaths drop, and that no robot leaves the mine. Needs no window and no GL. |
-| `--autofire W` | Hold the trigger for weapon W (0 laser, 1 vulcan, 2 concussion, 3 homing, 4 flares), so a screenshot can show bolts in flight and the lights they carry. |
+| `--autofire W` | Hold the trigger for weapon W (0 laser, 1 vulcan, 2 concussion, 3 homing, 4 railgun, 5 lightning, 6 flares), so a screenshot can show bolts and beams in flight and the lights they carry. |
 | `--no-ui` | Hide the ImGui panels, so a screenshot shows the game rather than the debug windows. |
 | `--debug-lines` | Start with wall normals, contact points and the nose raycast drawn. Also ImGui toggles. |
 | `--wireframe-volumes` | Start with shadow volumes drawn as wireframe. Also an ImGui toggle. |
@@ -134,8 +134,8 @@ level directly unless `--start-menu` is present.
 | F1 | Toggle chase camera |
 | F3 | Toggle the ImGui debug panels |
 | Tab | Toggle the automap (mouse orbits it; the simulation keeps running) |
-| 1 / 2 / 3 / 4 | Select laser, vulcan, concussion, homing |
-| Left mouse | Fire the selected gun |
+| 1 / 2 / 3 / 4 / 5 / 6 | Select laser, vulcan, concussion, homing, railgun, lightning |
+| Left mouse | Fire the selected gun. The railgun fires one traced shot per pull; the lightning gun runs for as long as it is held. |
 | Right mouse | Launch a missile |
 | F | Throw a flare |
 | H | Toggle the headlight (off at the start) |

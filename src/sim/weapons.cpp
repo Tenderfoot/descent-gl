@@ -37,6 +37,9 @@ void readWeapon(const nlohmann::json& j, WeaponDef& w) {
     get(j, "splashDamage", w.splashDamage);
     get(j, "impactImpulse", w.impactImpulse);
     get(j, "splashImpulse", w.splashImpulse);
+    get(j, "range", w.range);
+    get(j, "beamWidth", w.beamWidth);
+    get(j, "beamTime", w.beamTime);
     get(j, "turnRate", w.turnRate);
     get(j, "seekCone", w.seekCone);
     get(j, "seekRange", w.seekRange);
@@ -59,6 +62,9 @@ nlohmann::json writeWeapon(const WeaponDef& w) {
         {"splashDamage", w.splashDamage},
         {"impactImpulse", w.impactImpulse},
         {"splashImpulse", w.splashImpulse},
+        {"range", w.range},
+        {"beamWidth", w.beamWidth},
+        {"beamTime", w.beamTime},
         {"turnRate", w.turnRate},
         {"seekCone", w.seekCone},
         {"seekRange", w.seekRange},
@@ -123,6 +129,37 @@ WeaponConfig WeaponConfig::defaults() {
     homing.turnRate = 2.6f;
     homing.seekCone = 0.9f;
     homing.seekRange = 140.0f;
+
+    // Hitscan. Neither takes ammunition: a counter would mean new PlayerState
+    // fields, new HUD branches and new pickup kinds, and energy already says
+    // the thing that matters - the headlight goes out if you keep firing.
+    WeaponDef& railgun = cfg.weapons[WeaponRailgun];
+    railgun.damage = 55.0f;
+    railgun.impactImpulse = 26.0f;
+    railgun.fireInterval = 1.15f;   // slow enough that a miss costs you
+    railgun.energyCost = 14.0f;
+    railgun.range = 300.0f;
+    railgun.color = glm::vec3(0.62f, 0.80f, 1.0f);
+    railgun.beamWidth = 0.16f;
+    railgun.beamTime = 0.14f;
+    railgun.lightRadius = 30.0f;
+    railgun.lightIntensity = 4.0f;
+
+    // Damage and energy per SECOND: weaponFire() calls this one Continuous and
+    // stepCombat multiplies both by dt. 36 a second against a drone's 26 health
+    // is most of a second on target, which is what makes it a different weapon
+    // from the railgun rather than a faster one.
+    WeaponDef& lightning = cfg.weapons[WeaponLightning];
+    lightning.damage = 36.0f;
+    lightning.impactImpulse = 30.0f;   // also per second; a steady push
+    lightning.fireInterval = 0.14f;    // the crackle's repeat, not a damage gate
+    lightning.energyCost = 11.0f;
+    lightning.range = 70.0f;           // short, so it has to be flown into range
+    lightning.color = glm::vec3(0.75f, 0.62f, 1.0f);
+    lightning.beamWidth = 0.10f;
+    lightning.beamTime = 0.05f;        // refreshed every step it is held
+    lightning.lightRadius = 20.0f;
+    lightning.lightIntensity = 2.6f;
 
     return cfg;
 }

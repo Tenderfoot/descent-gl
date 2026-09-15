@@ -94,7 +94,22 @@ struct Effect {
     float lightIntensity = 0.0f;
 };
 
+// A hitscan tracer: the line a shot took, drawn for a moment after the damage
+// has already been dealt. Held by value like every other pool, because SimState
+// is copied each step.
+struct Beam {
+    bool alive = false;
+    glm::vec3 start{0.0f};
+    glm::vec3 end{0.0f};
+    glm::vec3 color{1.0f};
+    int segment = 0;
+    float width = 0.12f;
+    float age = 0.0f;
+    float lifetime = 0.10f;
+};
+
 inline constexpr int kMaxProjectiles = 128;
+inline constexpr int kMaxBeams = 16;
 inline constexpr int kMaxFlares = 16;
 inline constexpr int kMaxEffects = 48;
 inline constexpr int kMaxObjects = 64;
@@ -124,6 +139,7 @@ struct Pool {
 using ProjectilePool = Pool<Projectile, kMaxProjectiles>;
 using FlarePool = Pool<Flare, kMaxFlares>;
 using EffectPool = Pool<Effect, kMaxEffects>;
+using BeamPool = Pool<Beam, kMaxBeams>;
 
 // The player's resources and loadout.
 struct PlayerState {
@@ -152,6 +168,10 @@ struct PlayerState {
     // screen flinches, the ship does not.
     float hurtTimer = 0.0f;     // seconds since the hull was last hit
     float recoilTimer = 0.0f;   // seconds since a missile shoved the ship
+
+    // Rate limit for the lightning gun's crackle. Its trace runs every one of
+    // the 120 steps a second; its sound must not.
+    float beamCueTimer = 0.0f;
 
     // Rate limit for the out-of-ammo click. The trigger is read every step, so
     // without this an empty gun clicks 120 times a second, which sounds like a
@@ -187,6 +207,7 @@ struct CombatState {
     ProjectilePool projectiles;
     FlarePool flares;
     EffectPool effects;
+    BeamPool beams;
     PlayerState player;
     ObjectHealth objects;
 };

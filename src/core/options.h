@@ -69,8 +69,9 @@ namespace dvk {
 //   --debug-ui          start with the ImGui debug panels open (F3 at
 //                       runtime); they are off by default from M7
 //   --autofire W        hold the trigger for weapon W (0 laser, 1 vulcan,
-//                       2 concussion, 3 homing, 4 flares), so a screenshot can
-//                       show bolts in flight and the lights they carry
+//                       2 concussion, 3 homing, 4 railgun, 5 lightning,
+//                       6 flares), so a screenshot can show bolts and beams in
+//                       flight and the lights they carry
 //   --debug-lines       start with wall normals, contact points and the nose
 //                       raycast drawn (all also ImGui toggles)
 //   --size W H          window size. Mostly for software-rendering

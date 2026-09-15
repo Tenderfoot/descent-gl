@@ -20,6 +20,11 @@ public:
     Billboards(const Billboards&) = delete;
     Billboards& operator=(const Billboards&) = delete;
 
+    // Every quad the unlit pass can ever be asked for, up front. Without it the
+    // buffer grows the first time a frame is busier than any before it - which
+    // is a heap allocation in the draw path, and the frame report says so.
+    void reserveQuads(size_t quads) { vertices_.reserve(quads * 6); }
+
     void clear() { vertices_.clear(); }
     bool empty() const { return vertices_.empty(); }
 
@@ -27,6 +32,12 @@ public:
     // camera without any per-sprite maths.
     void add(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up, float size,
              const glm::vec3& color);
+
+    // A beam between two points: a quad turned about its own axis to face the
+    // viewer. Same vertex format and same buffer as the sprites above, so a
+    // corridor full of tracers still costs the unlit pass one draw.
+    void addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye, float width,
+                 const glm::vec3& color);
 
     void upload();
     void draw() const;
