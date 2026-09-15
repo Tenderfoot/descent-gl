@@ -28,6 +28,16 @@ struct Body {
     // through it.
     glm::vec3 knockback{0.0f};
     float radius = 1.6f;
+    // How hard it is to shove, and how much of a body-to-body contact the OTHER
+    // body absorbs. Impulses divide by it, so a drone is thrown across a room
+    // by the same hit that rocks a brute.
+    //
+    // It lives here rather than on each owner because body-to-body response
+    // needs both masses at once, and until now they were in three places that
+    // never met: RobotDef::mass, FloatingLight::mass and WeaponConfig's
+    // playerMass. Those stay as the authored values; this is where the resolve
+    // reads them from.
+    float mass = 1.0f;
     // Which segment the body is in. Tracked by following portal planes rather
     // than searched for, so it costs O(portals crossed) and not O(segments).
     int segment = 0;

@@ -312,6 +312,10 @@ int main(int argc, char** argv) {
     }
 
     dvk::sim::ContactLog contacts;
+    // Rebuilt every step and never resized, so the sim step still allocates
+    // nothing. See kMaxCollisionBodies.
+    dvk::sim::BodySet bodies;
+    dvk::sim::BodyResolveStats bodyStats;
 
     // Sound. A container with no sound card is the ordinary case for this and
     // is a warning, not an error: the mixer still runs, nothing pulls from it,
@@ -737,6 +741,9 @@ int main(int argc, char** argv) {
             dvk::sim::CollisionConfig collision;
             collision.scrapeDamping = flight.wallScrape;
             cur.ship.body.radius = flight.shipRadius;
+            // WeaponConfig holds the authored number; the body is where the
+            // resolve reads it from, because body-to-body needs both masses.
+            cur.ship.body.mass = weapons.playerMass;
             // The shut-door faces for this step, built before anything asks a
             // geometric question.
             dvk::sim::buildSolidDoors(level, cur.game, solidDoors);
@@ -783,6 +790,29 @@ int main(int argc, char** argv) {
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
                                  &soundEvents, &cur.props);
             dvk::sim::stepProps(level, cur.props, static_cast<float>(kSimStep), &solidDoors);
+
+            // Bodies against each other, once everything has integrated and
+            // been put back inside the mine by its own system. This is the only
+            // place that sees the ship, the robots and the props at the same
+            // time, which body-to-body contact needs: it wants both masses, and
+            // it has to interleave with the wall resolve rather than run before
+            // or after it. The pass ends on the mine, so nothing it does can
+            // leave a body outside the world.
+            bodies.clear();
+            bodies.add(cur.ship.body);
+            for (int i = 0; i < cur.robots.count; ++i) {
+                dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(i)];
+                if (robot.alive) bodies.add(robot.body);
+            }
+            for (int i = 0; i < cur.props.floatingCount; ++i) {
+                dvk::sim::FloatingLight& ball = cur.props.floating[static_cast<size_t>(i)];
+                if (ball.alive) bodies.add(ball.body, ball.restitution);
+            }
+            const dvk::sim::SolidObjects solidObjects{cur.combat.objects.alive.data(),
+                                                      cur.combat.objects.count};
+            bodyStats = dvk::sim::resolveBodies(level, bodies, collision,
+                                                static_cast<float>(kSimStep), &solidDoors,
+                                                &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
             // In M5 zero shields respawned you on the spot. From M7 it ends
@@ -1296,6 +1326,9 @@ int main(int argc, char** argv) {
                         cur.combat.effects.count(), pl.deaths);
             ImGui::Separator();
             ImGui::Text("contacts %d in %d iterations", contacts.count, contacts.iterations);
+            ImGui::Text("bodies %d: %d body, %d object, %d wall, %d iter", bodies.count,
+                        bodyStats.bodyContacts, bodyStats.objectContacts, bodyStats.wallContacts,
+                        bodyStats.iterations);
             if (noseRay.hit) {
                 ImGui::Text("nose ray: %.2f units, segment %d, triangle %d", noseRay.distance,
                             noseRay.segment, noseRay.triangle);

@@ -52,8 +52,32 @@ struct Rig {
             sim::stepCombat(level, combat, player, orientation, weapons, fire, kStep, &robots);
             sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, nullptr,
                             nullptr, &props);
+            // The same shared body pass the game runs, so these cases see
+            // robots that can stand on each other rather than through each
+            // other. Without it the AI is exercised in a world where nothing
+            // is ever in the way, which is not the world it ships into.
+            resolveBodies();
         }
     }
+
+    // Ship, robots and props in one set, exactly as main.cpp builds it.
+    void resolveBodies() {
+        sim::CollisionConfig collision;
+        bodies.clear();
+        bodies.add(player);
+        for (int i = 0; i < robots.count; ++i) {
+            sim::Robot& robot = robots.robots[static_cast<size_t>(i)];
+            if (robot.alive) bodies.add(robot.body);
+        }
+        for (int i = 0; i < props.floatingCount; ++i) {
+            sim::FloatingLight& ball = props.floating[static_cast<size_t>(i)];
+            if (ball.alive) bodies.add(ball.body, ball.restitution);
+        }
+        const sim::SolidObjects solids{combat.objects.alive.data(), combat.objects.count};
+        sim::resolveBodies(level, bodies, collision, kStep, nullptr, &solids);
+    }
+
+    sim::BodySet bodies;
 
     // A robot can no longer pick the player out of an unlit stretch of mine, and
     // several cases below deliberately stand the player in one - they are about

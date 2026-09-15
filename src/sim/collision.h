@@ -109,6 +109,87 @@ struct CollisionConfig {
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
                      ContactLog* log, const SolidDoors* doors = nullptr);
 
+// --- bodies against each other ------------------------------------------
+
+// Everything in the mine that can be stood on by something else, for one step.
+//
+// A body-to-body resolve cannot be done a body at a time: it needs both masses
+// at once, and - more importantly - it has to be INTERLEAVED with the wall
+// resolve rather than sequenced before it. Pushing two ships apart and then
+// pushing each out of the walls is not enough, because the wall correction can
+// put them back inside each other; and doing it the other way round pushes one
+// of them through a wall, which is the failure this file exists to prevent.
+// So the loop below alternates, bounded, and always ends on the mine.
+struct BodyEntry {
+    Body* body = nullptr;
+    // How much it comes off another body. Zero is the sliding response the ship
+    // and the robots have against walls; a floating light wants its own number.
+    float restitution = 0.0f;
+};
+
+// Sized for the ship, every robot and every floating light at once, with room
+// to spare. Deliberately not `std::vector`: this is rebuilt every step and the
+// sim step does not allocate.
+inline constexpr int kMaxCollisionBodies = 48;
+
+struct BodySet {
+    std::array<BodyEntry, kMaxCollisionBodies> entries{};
+    int count = 0;
+
+    void clear() { count = 0; }
+    bool add(Body& body, float restitution = 0.0f) {
+        if (count >= kMaxCollisionBodies) return false;
+        entries[static_cast<size_t>(count)].body = &body;
+        entries[static_cast<size_t>(count)].restitution = restitution;
+        ++count;
+        return true;
+    }
+};
+
+// Which of the level's objects are solid this step.
+//
+// `Level::objects` is one list with two owners. An entry whose type names a
+// robot is spawned as a robot and stepped by stepRobots; its proxy must NOT be
+// solid, or every robot's spawn point becomes an invisible box that ships bounce
+// off for no visible reason. That exact bug already happened once to gunfire -
+// see `initObjects` - and this is the same trap one layer down.
+//
+// A raw pointer and a count rather than the ObjectHealth it comes from, so that
+// collision does not have to know what combat is. It doubles as the destroyed
+// check: shoot a crate and you can fly through where it stood.
+struct SolidObjects {
+    const bool* alive = nullptr;
+    int count = 0;
+
+    bool solid(size_t index) const {
+        return alive && index < static_cast<size_t>(count) && alive[index];
+    }
+};
+
+struct BodyResolveStats {
+    int iterations = 0;
+    int bodyContacts = 0;     // body against body
+    int objectContacts = 0;   // body against a level object's proxy
+    int wallContacts = 0;     // corrections the mine had to make afterwards
+};
+
+// Separates everything in `set` from everything else, and from the mine.
+//
+// Order within one iteration is fixed - pairs by slot index, then the level's
+// objects, then the walls - because sequential resolution is order dependent
+// and this project's fixed timestep is meant to be reproducible. Two runs of
+// the same setup must land on the same numbers.
+//
+// The WALL PASS IS LAST on every iteration, so whatever the bodies did to each
+// other, the mine has the final say on where they ended up. A body outside the
+// mine is worse than two bodies overlapping: it tunnels projectiles, it walks
+// robots through rock, and it makes doors stop blocking.
+//
+// Allocates nothing.
+BodyResolveStats resolveBodies(const Level& level, BodySet& set, const CollisionConfig& cfg,
+                               float dt, const SolidDoors* doors = nullptr,
+                               const SolidObjects* objects = nullptr);
+
 // --- queries ------------------------------------------------------------
 
 struct RayHit {

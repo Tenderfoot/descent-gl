@@ -323,6 +323,7 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.body.position = obj.position;
         robot.body.segment = obj.segment;
         robot.body.radius = def.radius;
+        robot.body.mass = def.mass;
         robot.orientation = obj.orientation;
         robot.health = obj.health > 0.0f ? obj.health : def.health;
         robot.mass = def.mass;
@@ -421,6 +422,7 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
             d.body.position = robot.body.position;
             d.body.segment = robot.body.segment;
             d.body.radius = 0.4f;
+            d.body.mass = 0.2f;
             d.body.velocity =
                 glm::vec3(randSigned(), randSigned(), randSigned()) * 18.0f + robot.body.velocity;
             d.color = def.color;
