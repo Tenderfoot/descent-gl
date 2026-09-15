@@ -8,7 +8,7 @@
 namespace dvk::gl {
 
 TextureArray::TextureArray(int size, const std::vector<std::vector<uint8_t>>& layers,
-                           const char* label)
+                           const char* label, Wrap wrap)
     : layers_(static_cast<int>(layers.size())) {
     if (layers.empty()) log::fatal("texture array '{}' has no layers", label);
 
@@ -30,8 +30,9 @@ TextureArray::TextureArray(int size, const std::vector<std::vector<uint8_t>>& la
     }
     glGenerateTextureMipmap(id_);
 
-    glTextureParameteri(id_, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTextureParameteri(id_, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    const GLint mode = wrap == Wrap::Repeat ? GL_REPEAT : GL_CLAMP_TO_EDGE;
+    glTextureParameteri(id_, GL_TEXTURE_WRAP_S, mode);
+    glTextureParameteri(id_, GL_TEXTURE_WRAP_T, mode);
     glTextureParameteri(id_, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTextureParameteri(id_, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 

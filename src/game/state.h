@@ -104,8 +104,13 @@ struct RenderState {
     // Pickups still on the floor, as emissive markers.
     struct PickupView {
         glm::vec3 position{0.0f};
+        // Multiplies the sprite where there is one, so the white key template
+        // comes out blue, yellow or red; the whole colour where there is not.
         glm::vec3 color{1.0f};
         float size = 1.0f;
+        // A layer of the pickup sprite array, or -1 for the procedural glow
+        // the kinds with no art still use. See render/sprites.h.
+        int sprite = -1;
         bool present = false;
     };
     std::array<PickupView, sim::kMaxPickups> pickups{};

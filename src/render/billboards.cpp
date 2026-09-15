@@ -22,6 +22,10 @@ Billboards::Billboards() {
     glEnableVertexArrayAttrib(vao_, 2);
     glVertexArrayAttribFormat(vao_, 2, 2, GL_FLOAT, GL_FALSE, offsetof(Vertex, u));
     glVertexArrayAttribBinding(vao_, 2, 0);
+
+    glEnableVertexArrayAttrib(vao_, 3);
+    glVertexArrayAttribFormat(vao_, 3, 1, GL_FLOAT, GL_FALSE, offsetof(Vertex, layer));
+    glVertexArrayAttribBinding(vao_, 3, 0);
 }
 
 Billboards::~Billboards() {
@@ -29,15 +33,15 @@ Billboards::~Billboards() {
     if (vao_) glDeleteVertexArrays(1, &vao_);
 }
 
-void Billboards::add(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
-                     float size, const glm::vec3& color) {
+void Billboards::quad(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                      float size, const glm::vec3& color, float layer) {
     const glm::vec3 r = right * size;
     const glm::vec3 u = up * size;
 
-    const Vertex bl{center - r - u, color, 0.0f, 0.0f};
-    const Vertex br{center + r - u, color, 1.0f, 0.0f};
-    const Vertex tr{center + r + u, color, 1.0f, 1.0f};
-    const Vertex tl{center - r + u, color, 0.0f, 1.0f};
+    const Vertex bl{center - r - u, color, 0.0f, 0.0f, layer};
+    const Vertex br{center + r - u, color, 1.0f, 0.0f, layer};
+    const Vertex tr{center + r + u, color, 1.0f, 1.0f, layer};
+    const Vertex tl{center - r + u, color, 0.0f, 1.0f, layer};
 
     vertices_.push_back(bl);
     vertices_.push_back(br);
@@ -45,6 +49,16 @@ void Billboards::add(const glm::vec3& center, const glm::vec3& right, const glm:
     vertices_.push_back(bl);
     vertices_.push_back(tr);
     vertices_.push_back(tl);
+}
+
+void Billboards::add(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                     float size, const glm::vec3& color) {
+    quad(center, right, up, size, color, kNoTexture);
+}
+
+void Billboards::addSprite(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                           float size, const glm::vec3& tint, int layer) {
+    quad(center, right, up, size, tint, static_cast<float>(layer));
 }
 
 void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye,
@@ -74,10 +88,10 @@ void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm
     }
     const glm::vec3 w = side * (width / sideLength);
 
-    const Vertex bl{start - w, color, 0.0f, 0.0f};
-    const Vertex br{start + w, color, 1.0f, 0.0f};
-    const Vertex tr{end + w, color, 1.0f, 1.0f};
-    const Vertex tl{end - w, color, 0.0f, 1.0f};
+    const Vertex bl{start - w, color, 0.0f, 0.0f, kNoTexture};
+    const Vertex br{start + w, color, 1.0f, 0.0f, kNoTexture};
+    const Vertex tr{end + w, color, 1.0f, 1.0f, kNoTexture};
+    const Vertex tl{end - w, color, 0.0f, 1.0f, kNoTexture};
 
     vertices_.push_back(bl);
     vertices_.push_back(br);
