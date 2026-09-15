@@ -731,8 +731,10 @@ int main(int argc, char** argv) {
                         fire.flare = true;
                     } else {
                         fire.selectWeapon = opts.autofire;
-                        fire.primary = opts.autofire <= dvk::sim::WeaponVulcan;
-                        fire.secondary = opts.autofire >= dvk::sim::WeaponConcussion;
+                        fire.primary =
+                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Primary;
+                        fire.secondary =
+                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Secondary;
                     }
                 }
             }

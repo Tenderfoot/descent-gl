@@ -24,6 +24,28 @@ namespace dvk::sim {
 
 enum class ProjectileKind : uint8_t { Laser, Vulcan, Concussion, Homing, Flare };
 
+// Which projectile a weapon launches.
+//
+// Written out rather than cast from the weapon id. The two enums only look
+// parallel: Flare sits at index 4 and has no weapon behind it at all, so a cast
+// silently mislabels the first weapon added after Homing - and a hitscan weapon
+// launches nothing, which no cast can express.
+constexpr ProjectileKind projectileFor(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+            return ProjectileKind::Laser;
+        case WeaponVulcan:
+            return ProjectileKind::Vulcan;
+        case WeaponConcussion:
+            return ProjectileKind::Concussion;
+        case WeaponHoming:
+            return ProjectileKind::Homing;
+        case WeaponCount:
+            break;
+    }
+    return ProjectileKind::Laser;
+}
+
 struct Projectile {
     bool alive = false;
     ProjectileKind kind = ProjectileKind::Laser;
@@ -170,6 +192,48 @@ struct CombatState {
 struct RobotState;
 struct RobotConfig;
 struct SolidDoors;
+
+// --- the combat trace ----------------------------------------------------
+
+// What a shot ran into first. Kind::None means it reached its full length
+// without touching anything.
+struct CombatHit {
+    enum class Kind : uint8_t { None, Wall, Robot, Object, Player };
+
+    Kind kind = Kind::None;
+    float distance = 0.0f;
+    glm::vec3 point{0.0f};
+    glm::vec3 normal{0.0f};   // walls and doors only, out of the surface
+    int segment = -1;         // the segment the hit is in
+    int index = -1;           // robot slot for Robot, Level::objects index for Object
+};
+
+struct CombatTraceParams {
+    // Above zero sweeps a sphere of this radius instead of casting a ray, so a
+    // fast projectile cannot pass through a thin wall between two steps.
+    float radius = 0.0f;
+    // Who fired: -1 is the player, anything else is that robot's slot. A shot
+    // never hits its own side - the player's fire passes through the player,
+    // and no robot's fire touches any robot, because a corridor of them
+    // shooting each other is a brawl the player only watches.
+    int owner = -1;
+    // False traces geometry alone. Flares are thrown, not fired: they land on
+    // the floor rather than sticking into whatever they crossed.
+    bool hitBodies = true;
+};
+
+// The nearest of wall, shut door, robot, destructible object and player along
+// `direction` from `origin`, walking the segment graph as it goes.
+//
+// This is the one place that answers "what is in front of me". The projectile
+// loop, the hitscan weapons and any future robot hitscan all ask it, rather
+// than each growing its own copy of the sphere test - which is how the three
+// copies this replaced came to disagree about which target wins a tie.
+CombatHit traceCombatRay(const Level& level, const CombatState& state, const Body& ship,
+                         const RobotState* robots, const glm::vec3& origin,
+                         const glm::vec3& direction, float maxDistance, int segment,
+                         const CombatTraceParams& params = {},
+                         const SolidDoors* doors = nullptr);
 
 // Sets up object health from the level's objects. An object whose type names
 // a robot definition is not scenery: the simulation owns it as a robot, so it

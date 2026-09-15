@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <glm/vec3.hpp>
 #include <string>
 
@@ -10,6 +11,26 @@ enum WeaponId : int { WeaponLaser = 0, WeaponVulcan, WeaponConcussion, WeaponHom
 
 inline constexpr std::array<const char*, WeaponCount> kWeaponNames{"laser", "vulcan",
                                                                   "concussion", "homing"};
+
+// Which trigger a weapon answers to. Written out per weapon rather than
+// inferred from the enum's order: "id <= WeaponVulcan" happened to be true
+// while the guns were declared guns-first, and would silently reclassify every
+// weapon added after it.
+enum class WeaponSlot : uint8_t { Primary, Secondary };
+
+constexpr WeaponSlot weaponSlot(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+        case WeaponVulcan:
+            return WeaponSlot::Primary;
+        case WeaponConcussion:
+        case WeaponHoming:
+            return WeaponSlot::Secondary;
+        case WeaponCount:
+            break;
+    }
+    return WeaponSlot::Primary;
+}
 
 // Laser has four upgrade levels. Each changes damage and colour, and the colour
 // is the readable part: in a mine with no ambient light, what your own fire

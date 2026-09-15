@@ -95,8 +95,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         sim::FireControls controls;
         controls.selectWeapon = w;
-        controls.primary = w <= sim::WeaponVulcan;
-        controls.secondary = w >= sim::WeaponConcussion;
+        controls.primary = sim::weaponSlot(w) == sim::WeaponSlot::Primary;
+        controls.secondary = sim::weaponSlot(w) == sim::WeaponSlot::Secondary;
 
         const float energyBefore = rig.state.player.energy;
         const int vulcanBefore = rig.state.player.vulcanAmmo;
@@ -483,8 +483,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         sim::FireControls controls;
         controls.selectWeapon = w;
-        controls.primary = w <= sim::WeaponVulcan;
-        controls.secondary = w >= sim::WeaponConcussion;
+        controls.primary = sim::weaponSlot(w) == sim::WeaponSlot::Primary;
+        controls.secondary = sim::weaponSlot(w) == sim::WeaponSlot::Secondary;
         rig.run(1, controls);
 
         int lit = 0;
