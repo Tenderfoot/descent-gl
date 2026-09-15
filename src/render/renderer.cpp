@@ -163,6 +163,7 @@ void Renderer::setLevel(const Level& level) {
     }
     billboards_.reserveQuads(RenderState{}.bolts.size() + RenderState{}.flashes.size() +
                              RenderState{}.pickups.size() + RenderState{}.beams.size() +
+                             RenderState{}.props.size() * 2 +
                              static_cast<size_t>(sim::kMaxRobots) * eyes);
 
     lit_.reserve(level.segments.size());
@@ -770,9 +771,20 @@ void Renderer::buildBillboards(const RenderState& rs) {
         billboards_.add(f.position, right, up, f.size, f.color * f.fade);
     }
 
+    // Floating balls and swinging lamps. Emissive, because that is what they
+    // are: the light is the object. The cord a lamp hangs from is a very thin
+    // beam, which is all a cord is.
+    const glm::vec3 eye = eyePos(rs);
+    for (int i = 0; i < rs.propCount; ++i) {
+        const RenderState::PropView& prop = rs.props[static_cast<size_t>(i)];
+        billboards_.add(prop.position, right, up, prop.size, prop.color);
+        if (prop.corded) {
+            billboards_.addBeam(prop.anchor, prop.position, eye, 0.05f, prop.color * 0.28f);
+        }
+    }
+
     // Hitscan tracers, into the same buffer as the sprites so the unlit pass
     // keeps to one draw.
-    const glm::vec3 eye = eyePos(rs);
     for (int i = 0; i < rs.beamCount; ++i) {
         const RenderState::BeamView& beam = rs.beams[static_cast<size_t>(i)];
         billboards_.addBeam(beam.start, beam.end, eye, beam.width, beam.color);

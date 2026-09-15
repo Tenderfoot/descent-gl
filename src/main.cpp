@@ -743,7 +743,7 @@ int main(int argc, char** argv) {
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
                                  fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
-                                 &soundEvents);
+                                 &soundEvents, &cur.props);
             if (!consumedMouse) {
                 pendingFlare = false;
                 pendingWeaponSelection = -1;
@@ -751,6 +751,7 @@ int main(int argc, char** argv) {
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
                                  &soundEvents);
+            dvk::sim::stepProps(level, cur.props, static_cast<float>(kSimStep), &solidDoors);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
             // In M5 zero shields respawned you on the spot. From M7 it ends
@@ -945,6 +946,34 @@ int main(int argc, char** argv) {
             l.segments.clear();
             dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
         };
+
+        // The floating balls and the swinging lamps. Both move every frame, so
+        // both are dynamic lights with their segment sets rebuilt each frame -
+        // the same path the bolts take, which is what makes a swinging spot
+        // sweep real stencil shadows across the room it hangs in.
+        for (int i = 0; i < cur.props.floatingCount; ++i) {
+            const dvk::sim::FloatingLight& ball = cur.props.floating[static_cast<size_t>(i)];
+            if (!ball.alive) continue;
+            addPointLight(ball.body.position, ball.body.segment, ball.color, ball.lightRadius,
+                          ball.lightIntensity);
+        }
+        for (int i = 0; i < cur.props.swingingCount; ++i) {
+            const dvk::sim::SwingingLight& lamp = cur.props.swinging[static_cast<size_t>(i)];
+            if (!lamp.alive) continue;
+            if (lamp.lightIntensity <= 0.0f || lamp.lightRadius <= 0.0f) continue;
+            dvk::Light& l = nextLight();
+            l.type = dvk::LightType::Spot;
+            l.position = lamp.position;
+            l.direction = lamp.direction;
+            l.coneDegrees = lamp.coneDegrees;
+            l.segment = lamp.segment;
+            l.color = lamp.color;
+            l.intensity = lamp.lightIntensity;
+            l.radius = lamp.lightRadius;
+            l.castsShadows = true;
+            l.segments.clear();
+            dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
+        }
 
         for (const dvk::sim::Projectile& p : cur.combat.projectiles.items) {
             if (!p.alive) continue;

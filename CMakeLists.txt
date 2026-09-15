@@ -70,6 +70,7 @@ add_executable(descent
     src/sim/flight_test.cpp
     src/sim/gameflow.cpp
     src/sim/lighting.cpp
+    src/sim/props.cpp
     src/sim/robots.cpp
     src/sim/ship.cpp
     src/sim/weapons.cpp

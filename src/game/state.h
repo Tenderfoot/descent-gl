@@ -2,6 +2,7 @@
 
 #include "sim/combat.h"
 #include "sim/gameflow.h"
+#include "sim/props.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 
@@ -27,6 +28,7 @@ struct SimState {
     // vector here would allocate in the simulation loop.
     sim::CombatState combat;
     sim::RobotState robots;
+    sim::PropState props;
     sim::GameState game;
 };
 
@@ -111,6 +113,21 @@ struct RenderState {
     // How far each door has slid open, so the renderer can place the slabs.
     std::array<float, sim::kMaxDoors> doorOpenness{};
     int doorCount = 0;
+
+    // Floating lights and swinging lamps, as the unlit pass draws them. The
+    // lights themselves go into the dynamic light list; these are the visible
+    // fixtures.
+    struct PropView {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        // Swinging lamps only: where the cord is anchored, so the renderer can
+        // draw the cord the lamp is hanging from.
+        bool corded = false;
+        glm::vec3 anchor{0.0f};
+    };
+    std::array<PropView, sim::kMaxFloatingLights + sim::kMaxSwingingLights> props{};
+    int propCount = 0;
 
     // The mine coming apart during the countdown: a world-space offset added
     // to the camera, and a multiplier on every static light so they flicker.
@@ -228,6 +245,30 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         r.doorOpenness[static_cast<size_t>(i)] =
             glm::mix(a.game.doors[static_cast<size_t>(i)].openness,
                      b.game.doors[static_cast<size_t>(i)].openness, t);
+    }
+
+    for (int i = 0; i < b.props.floatingCount; ++i) {
+        const sim::FloatingLight& ball = b.props.floating[static_cast<size_t>(i)];
+        if (!ball.alive) continue;
+        const sim::FloatingLight& was = a.props.floating[static_cast<size_t>(i)];
+        RenderState::PropView view;
+        view.position = was.alive ? glm::mix(was.body.position, ball.body.position, t)
+                                  : ball.body.position;
+        view.color = ball.color;
+        view.size = ball.body.radius * 1.5f;
+        r.props[static_cast<size_t>(r.propCount++)] = view;
+    }
+    for (int i = 0; i < b.props.swingingCount; ++i) {
+        const sim::SwingingLight& lamp = b.props.swinging[static_cast<size_t>(i)];
+        if (!lamp.alive) continue;
+        const sim::SwingingLight& was = a.props.swinging[static_cast<size_t>(i)];
+        RenderState::PropView view;
+        view.position = was.alive ? glm::mix(was.position, lamp.position, t) : lamp.position;
+        view.color = lamp.color;
+        view.size = 0.9f;
+        view.corded = true;
+        view.anchor = lamp.anchor;
+        r.props[static_cast<size_t>(r.propCount++)] = view;
     }
 
     r.shipDisabled = b.ship.disabled;

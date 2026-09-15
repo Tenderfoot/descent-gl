@@ -4,6 +4,7 @@
 #include "game/level.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
+#include "sim/props.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
@@ -26,6 +27,7 @@ struct Rig {
     sim::RobotConfig robotCfg;
     sim::CombatState state;
     sim::RobotState robots;
+    sim::PropState props;
     sim::Body ship;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
 
@@ -33,6 +35,7 @@ struct Rig {
         state = sim::CombatState{};
         sim::initObjects(level, robotCfg, state.objects);
         sim::spawnRobots(level, robotCfg, robots);
+        sim::spawnProps(level, props);
         ship = sim::Body{};
         ship.position = level.start.position;
         ship.segment = level.start.segment;
@@ -49,8 +52,10 @@ struct Rig {
         for (int i = 0; i < steps; ++i) {
             // Robots are stepped too, so a target shot at here behaves the
             // way it does in the game rather than sitting still for the test.
-            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep, &robots);
+            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep, &robots,
+                            nullptr, nullptr, &props);
             sim::stepRobots(level, robotCfg, cfg, robots, state, ship, kStep);
+            sim::stepProps(level, props, kStep);
         }
     }
 
@@ -730,6 +735,53 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         log::info("held beam: {:.1f} energy over 1.0 s against {:.1f}/s configured", spent,
                   arc.energyCost);
+    }
+
+    // --- shooting a floating light moves it ----------------------------------
+    //
+    // Both delivery paths, because they reach the prop through different code:
+    // the railgun through the hitscan branch, the concussion through the
+    // projectile loop. Both are nose-mounted. The laser is not - it alternates
+    // wingtips 1.75 units off the centreline, which is wider than a 1.1-radius
+    // ball, so aiming a laser dead at one of these and missing is correct.
+    {
+        for (const int weapon : {sim::WeaponRailgun, sim::WeaponConcussion}) {
+            rig.reset();
+            for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+            rig.robots.count = 0;
+
+            if (rig.props.floatingCount == 0) {
+                log::info("floating light: SKIPPED, this level has none");
+                break;
+            }
+
+            sim::FloatingLight& ball = rig.props.floating[0];
+            rig.ship.position = ball.body.position + glm::vec3(0.0f, 0.0f, 12.0f);
+            rig.ship.segment = ball.body.segment;
+            rig.aimAt(ball.body.position);
+
+            const glm::vec3 restingAt = ball.body.position;
+            const glm::vec3 fromShip = glm::normalize(ball.body.position - rig.ship.position);
+
+            sim::FireControls shoot;
+            shoot.selectWeapon = weapon;
+            shoot.primary = sim::weaponSlot(weapon) == sim::WeaponSlot::Primary;
+            shoot.secondary = sim::weaponSlot(weapon) == sim::WeaponSlot::Secondary;
+            rig.run(1, shoot);
+            // Long enough for a missile to cross the gap and land.
+            rig.run(60, sim::FireControls{});
+
+            const glm::vec3 moved = ball.body.position - restingAt;
+            const char* name = sim::kWeaponNames[static_cast<size_t>(weapon)];
+            ok &= expect(glm::length(moved) > 0.5f, "shooting a floating light moves it");
+            ok &= expect(glm::dot(glm::normalize(moved), fromShip) > 0.0f,
+                         "it moves away from the shot, not towards it");
+            // It is a light, not a target: shooting it never takes it away.
+            ok &= expect(ball.alive, "shooting a floating light does not destroy it");
+
+            log::info("floating light: {} moved it {:.2f}u away in 0.5 s", name,
+                      glm::length(moved));
+        }
     }
 
     // --- a blast does not reach through rock ---------------------------------

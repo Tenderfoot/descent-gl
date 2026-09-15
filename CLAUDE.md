@@ -73,7 +73,7 @@ milestone rather than describing what the code should do:
 | `--validate-assets` | Run every shipped model and level through the M2 and M3 validators, print one line each, and exit non-zero on any failure. Needs no window and no GL. Also runs at every startup. |
 | `--reveal` | Draw the automap as if every segment had been visited and every key and the reactor had been found. A rendering check for the map, in the same family as `--wireframe-volumes`; it changes nothing in the simulation, which still records only the rooms actually flown through. Implies `--automap`. |
 | `--flight-test` | Run the flight model headlessly, report spin-up, coast-down and swipe-to-turn against their targets, and exit non-zero if any is out of range. Needs no window and no GL. |
-| `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
+| `--world-test` | Load and validate the level, then report portal visibility, light reach and brightness from every segment. Also drives the level's moving props: every floating light is shoved at 150 u/s in all 26 directions and must bounce and stay inside the mine, and every swinging lamp must reach its authored amplitude with its cord length held. Exits non-zero if the cull is a no-op, a light misses its own segment, or no segment is dark. Needs no window and no GL. |
 | `--segment N` | Start in segment N's centre rather than at the player start, so a screenshot can be taken anywhere in the mine without flying there. |
 | `--size W H` | Window size. Mostly for software-rendering verification: at full size a shadowed frame can be slower than the loop's 0.25 s frame clamp, and the reported step rate is then bounded by the clamp rather than by the simulation. |
 | `--collision-test` | Fly the ship into every wall from all 26 face, edge and corner directions at max speed and check it never escapes; cross-check the ray and sweep queries against an independent method; walk every portal both ways. Exits non-zero on any failure. Needs no window and no GL. |
@@ -159,6 +159,10 @@ into simulation controls; gameplay call sites identify actions, not GLFW codes.
 - **`src/audio`** WAV loading, mixing, 3D positioning, the device. The only
   place that includes `miniaudio.h`, and it does so through `audio/device.cpp`.
   Knows nothing about GL.
+- **`sim::PropState`** (`src/sim/props.h`) is simulation state for things that
+  move but are not ships: the floating lights and the swinging lamps. Kept
+  apart from `Level::objects`, which is authoring data and assumes nothing ever
+  leaves the position it was placed at.
 - **Level data lives in `src/game/level.h`** and is read by both `sim` and
   `render`. It is data, not logic, so both may depend on it; the rule that
   matters is that `sim` never touches GL.

@@ -232,20 +232,22 @@ struct CombatState {
 struct RobotState;
 struct RobotConfig;
 struct SolidDoors;
+struct PropState;
 
 // --- the combat trace ----------------------------------------------------
 
 // What a shot ran into first. Kind::None means it reached its full length
 // without touching anything.
 struct CombatHit {
-    enum class Kind : uint8_t { None, Wall, Robot, Object, Player };
+    enum class Kind : uint8_t { None, Wall, Robot, Object, Player, Prop };
 
     Kind kind = Kind::None;
     float distance = 0.0f;
     glm::vec3 point{0.0f};
     glm::vec3 normal{0.0f};   // walls and doors only, out of the surface
     int segment = -1;         // the segment the hit is in
-    int index = -1;           // robot slot for Robot, Level::objects index for Object
+    int index = -1;           // robot slot for Robot, Level::objects index for Object,
+                              // floating-light slot for Prop
 };
 
 struct CombatTraceParams {
@@ -272,8 +274,8 @@ struct CombatTraceParams {
 CombatHit traceCombatRay(const Level& level, const CombatState& state, const Body& ship,
                          const RobotState* robots, const glm::vec3& origin,
                          const glm::vec3& direction, float maxDistance, int segment,
-                         const CombatTraceParams& params = {},
-                         const SolidDoors* doors = nullptr);
+                         const CombatTraceParams& params = {}, const SolidDoors* doors = nullptr,
+                         const PropState* props = nullptr);
 
 // Sets up object health from the level's objects. An object whose type names
 // a robot definition is not scenery: the simulation owns it as a robot, so it
@@ -291,7 +293,8 @@ void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& ou
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
-                const SolidDoors* doors = nullptr, EventQueue* events = nullptr);
+                const SolidDoors* doors = nullptr, EventQueue* events = nullptr,
+                PropState* props = nullptr);
 
 // A short-lived additive billboard with a light: a muzzle flash, an impact, an
 // explosion. Public because robots fire too, and a robot's muzzle flash is the

@@ -85,25 +85,6 @@ float firstWallHit(const Level& level, const glm::vec3& origin, const glm::vec3&
 // surface (validated in M3), so a ray from an interior point crosses it an odd
 // number of times. Three directions and a majority vote, because a single ray
 // that grazes an edge can double-count it.
-bool insideMine(const Level& level, const glm::vec3& p) {
-    // Deliberately irrational-looking directions: a ray down an axis lies in
-    // the plane of a grid-aligned wall far too often.
-    static const std::array<glm::vec3, 3> kProbes{{
-        glm::normalize(glm::vec3(0.5773f, 0.3313f, 0.7454f)),
-        glm::normalize(glm::vec3(-0.8112f, 0.4231f, 0.4037f)),
-        glm::normalize(glm::vec3(0.2671f, -0.8923f, 0.3629f)),
-    }};
-
-    int votes = 0;
-    for (const glm::vec3& dir : kProbes) {
-        int crossings = 0;
-        for (const WallTriangle& w : level.walls) {
-            if (sim::rayTriangleDistance(p, dir, w.p[0], w.p[1], w.p[2]) > 1e-4f) ++crossings;
-        }
-        if (crossings % 2 == 1) ++votes;
-    }
-    return votes >= 2;
-}
 
 } // namespace
 
