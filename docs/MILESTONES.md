@@ -1782,14 +1782,6 @@ swinging spot sweeps real stencil shadows.
 | Sound set | ✅ 26 clips load, up from 24; `make-sounds.py --check` reports 0 files differ |
 | Rendered run | ✅ railgun beam visible in flight with its impact; floating light and swinging lamp lit and drawn |
 
-Two allocation findings are **pre-existing and not fixed here**. The frame
-report shows a draw-path allocation on roughly one frame in sixty in busy
-scenes; it reproduces on `--autofire 1`, a weapon none of this touches, and
-comes from a dynamic `Light`'s segment list allocating the first time that slot
-is used. The sim-step allocation that appears alongside it is the log line
-`stepGameFlow` writes when the player dies. `Billboards::reserveQuads` removed
-the one source that would have been new.
-
 Two pre-existing failures were fixed first, in their own commit, because the
 Linux verification path did not work at all: the build did not compile under
 GCC, and `--weapons-test` failed on a case whose damage had always come from
