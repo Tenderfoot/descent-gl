@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace dvk {
 
@@ -521,6 +522,15 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.reset();
         ok &= expect(rig.state.player.hurtTimer == 0.0f, "no flinch before anything lands");
 
+        // The rig steps robots, and this case parks the ship in the open for
+        // most of a second. Sixteen of them notice, open fire, and keep
+        // re-arming the flinch right through the window this is trying to watch
+        // it fade in - so the fade is measured with the mine to itself. The
+        // missile below still delivers its damage through the ordinary path,
+        // which is what the case is actually about.
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+
         // Take a hit the way the game delivers one: a concussion missile into
         // the wall the ship is facing, close enough that its own splash comes
         // back. No special-cased damage call, so this also proves the flinch is
@@ -528,9 +538,30 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.state.player.headlightOn = false;
         const glm::vec3 centre = rig.level.segments[static_cast<size_t>(rig.ship.segment)].center;
         rig.ship.position = centre;
-        // Down and a little sideways: glm::quatLookAt is degenerate when the
-        // look direction is the up vector, and straight down is exactly that.
-        rig.aimAt(centre + glm::vec3(0.35f, -1.0f, 0.0f));
+
+        // At the nearest side of this room that is actually solid. Aiming
+        // straight down looks like the obvious way to drop a missile at your
+        // own feet, but the start segment's floor is a portal: the missile
+        // leaves the room and detonates far enough away that none of its splash
+        // comes back, and the case then only ever registered damage because a
+        // robot somewhere else was shooting.
+        const Segment& room = rig.level.segments[static_cast<size_t>(rig.ship.segment)];
+        glm::vec3 aim = centre;
+        float nearest = std::numeric_limits<float>::max();
+        for (int side = 0; side < SideCount; ++side) {
+            if (room.sides[static_cast<size_t>(side)].isPortal()) continue;
+            const std::array<glm::vec3, 4> corner = rig.level.sideCorners(rig.ship.segment, side);
+            const glm::vec3 face = (corner[0] + corner[1] + corner[2] + corner[3]) * 0.25f;
+            const float d = glm::length(face - centre);
+            if (d < nearest) {
+                nearest = d;
+                aim = face;
+            }
+        }
+        // glm::quatLookAt is degenerate when the look direction is the up
+        // vector, so a floor or ceiling gets nudged off the axis.
+        if (std::abs(glm::normalize(aim - centre).y) > 0.95f) aim.x += 0.35f;
+        rig.aimAt(aim);
 
         const float before = rig.state.player.shields;
         rig.held = sim::FireControls{};

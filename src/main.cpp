@@ -181,11 +181,17 @@ int main(int argc, char** argv) {
     // level that places it is first loaded.
     dvk::validateAssets();
 
+    // The explicit std::filesystem::path around the override is not decoration:
+    // libstdc++ refuses a conditional whose arms are path and std::string, so
+    // without it the Linux build - the one an agent verifies milestones on -
+    // does not compile.
     const std::filesystem::path settingsPath =
-        opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath() : opts.settingsPath;
+        opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath()
+                                  : std::filesystem::path(opts.settingsPath);
     dvk::PlayerSettings settings = dvk::loadPlayerSettings(settingsPath);
     const std::filesystem::path progressPath =
-        opts.progressPath.empty() ? dvk::defaultPlayerProgressPath() : opts.progressPath;
+        opts.progressPath.empty() ? dvk::defaultPlayerProgressPath()
+                                  : std::filesystem::path(opts.progressPath);
     dvk::PlayerProgress progress = dvk::loadPlayerProgress(progressPath);
     if (opts.volumeOverride) settings.masterVolume = opts.volume;
     if (opts.sizeOverride) {
