@@ -50,6 +50,7 @@ add_executable(descent
     src/game/world_test.cpp
     src/render/debug.cpp
     src/render/billboards.cpp
+    src/render/comm_clip.cpp
     src/render/debug_lines.cpp
     src/render/font.cpp
     src/render/gpu_timer.cpp

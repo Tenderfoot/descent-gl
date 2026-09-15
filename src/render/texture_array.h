@@ -18,6 +18,8 @@ public:
 
     TextureArray(int size, const std::vector<std::vector<uint8_t>>& layers, const char* label,
                  Wrap wrap = Wrap::Repeat);
+    TextureArray(int width, int height, const std::vector<std::vector<uint8_t>>& layers,
+                 const char* label, Wrap wrap = Wrap::Repeat);
     ~TextureArray();
     TextureArray(const TextureArray&) = delete;
     TextureArray& operator=(const TextureArray&) = delete;

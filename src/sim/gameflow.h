@@ -70,6 +70,11 @@ enum class GamePhase : uint8_t {
 inline constexpr int kMaxDoors = 32;
 inline constexpr int kMaxPickups = 96;
 
+struct CommState {
+    bool active = true;       // the level-opening transmission
+    float elapsed = 0.0f;     // simulation time, so playback is deterministic
+};
+
 struct GameState {
     GamePhase phase = GamePhase::Playing;
     float countdown = 0.0f;         // seconds left once the reactor is gone
@@ -80,6 +85,7 @@ struct GameState {
     bool reactorAlive = false;
     bool exitOpen = false;
     const char* endReason = "";
+    CommState comm;
 
     std::array<DoorState, kMaxDoors> doors{};
     std::array<bool, kMaxPickups> collected{};
@@ -104,6 +110,7 @@ struct GameState {
 
 struct GameConfig {
     float countdownSeconds = 45.0f;
+    float commSeconds = 4.5f;
     float shieldPickup = 25.0f;
     float energyPickup = 30.0f;
     int concussionPickup = 3;

@@ -63,6 +63,9 @@ namespace dvk {
 //                       keys against doors, a shut door against light, the
 //                       reactor, the countdown, the exit and every pickup.
 //                       Needs no window and no GL.
+//   --comm-test         decode and validate every frame of the HUD comm clip,
+//                       check deterministic playback timing, then exit.
+//   --comm              keep the comm panel visible for screenshot checks.
 //   --level PATH        load a level other than the default mine01
 //   --no-ui             hide both the HUD and the debug panels, so a
 //                       screenshot shows only the game
@@ -94,6 +97,8 @@ struct Options {
     bool weaponsTest = false;
     bool robotsTest = false;
     bool loopTest = false;
+    bool commTest = false;
+    bool comm = false;
     bool lightTest = false;
     bool headlight = false;
     bool soundTest = false;

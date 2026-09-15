@@ -30,6 +30,9 @@ public:
     void rect(float x, float y, float w, float h, const glm::vec4& color);
     // A bar with its own frame, `fill` in 0..1.
     void bar(float x, float y, float w, float h, float fill, const glm::vec4& color);
+    // One layer from the optional HUD image texture array. Layer selection is
+    // encoded into UVs so the existing compact vertex format stays unchanged.
+    void image(float x, float y, float w, float h, int layer, const glm::vec4& color);
     void text(std::string_view text, float x, float y, float scale, const glm::vec4& color);
     float textWidth(std::string_view text, float scale) const;
 
