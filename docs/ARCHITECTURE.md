@@ -1390,10 +1390,32 @@ all have matching ceilings, and the settings rows begin below the subtitle, so
 ### Player input actions and rebinding
 
 `src/game/input_actions.h` is the stable vocabulary between devices, settings
-and gameplay. Its 24 actions cover the six flight axes, primary and secondary
-fire, flare, headlight, automap, four weapon selections, chase camera, mute and
-pause. Each action has a stable JSON name, a player-facing label and a default
-keyboard or mouse binding. The simulation still receives only
+and gameplay. Its 25 actions cover the six flight axes, primary and secondary
+fire, flare, headlight, automap, four weapon selections, the missile cycle,
+chase camera, mute and pause. Each action has a stable JSON name, a
+player-facing label and a default keyboard or mouse binding.
+
+The weapon controls are not one key per weapon. The four primaries have a key
+each - `1` laser, `2` vulcan, `3` lightning, `4` railgun, in the order a player
+reaches for them rather than the order `WeaponId` declares them - and the two
+missiles share `G`, which steps to the next one. `kWeaponSelectActions` pairs
+each action with the gun it selects rather than indexing a weapon list by the
+action's position, so the two orders can differ without a cast quietly
+selecting the wrong gun; `--weapons-test` checks the pairing covers every
+weapon exactly once, which is what keeps a newly added gun from being
+unreachable.
+
+The cycle itself is `stepCombat`'s, not the input layer's: `FireControls`
+carries a one-shot `cycleSecondary` and the simulation resolves it against the
+selection it holds, through `sim::nextSecondaryWeapon`. A selection that is not
+in the cycle at all - a primary, or a corrupt save - lands on the first missile
+rather than leaving a gun on the right trigger.
+
+Actions are named for what they select (`selectLightning`) and not for the key
+they sit on. A positional name would have made an old settings file's `weapon3`
+select a different gun after the keys were reorganised; with weapon-named
+actions the superseded entries are simply unknown, so a file written before the
+change gets the new defaults. `--settings-test` covers that case. The simulation still receives only
 `sim::ShipControls`; `src/game/bindings.h` translates the current bindings at
 the edge of the fixed step.
 
@@ -1406,7 +1428,7 @@ separate conflict dialog.
 
 The controls screen is a window over the action list rather than a fixed page.
 At 1600×900 it shows seven actions plus reset and back; at 640×360 it shows
-three plus those two permanent rows. The cursor traverses all 24 actions and
+three plus those two permanent rows. The cursor traverses all 25 actions and
 the window follows it. Confirming or clicking an action enters capture mode,
 where the next keyboard or mouse press becomes the binding and Escape cancels.
 Gameplay shortcuts are suppressed for the capture frame, so binding the old

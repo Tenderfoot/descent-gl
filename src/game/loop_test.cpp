@@ -387,6 +387,35 @@ bool verifyPlayerMenu() {
                      menu.editedSettings().bindings[PlayerAction::Back] ==
                          InputBinding{InputDevice::Keyboard, 87},
                  "rebinding swaps an existing conflict");
+    // The weapon keys as a player finds them: read off the controls screen
+    // rather than out of the defaults table, because the screen is where
+    // anyone goes looking for which key fires what.
+    {
+        const auto rowValue = [&](PlayerAction wanted) {
+            MenuInput step;
+            step.next = true;
+            // The list is a window over the actions, so walk the cursor to the
+            // row instead of assuming it is on screen.
+            for (size_t i = 0; i < kPlayerActionCount; ++i) {
+                const MenuView rows = menu.view(1600, 900);
+                for (int b = 0; b < rows.buttonCount; ++b) {
+                    const MenuButtonView& row = rows.buttons[static_cast<size_t>(b)];
+                    if (row.actionIndex == static_cast<int>(wanted) && row.selected) {
+                        return std::string(row.value.data());
+                    }
+                }
+                menu.update(step, 1600, 900);
+            }
+            return std::string("not shown");
+        };
+        const bool weaponKeys = rowValue(PlayerAction::SelectLaser) == "1" &&
+                                rowValue(PlayerAction::SelectVulcan) == "2" &&
+                                rowValue(PlayerAction::SelectLightning) == "3" &&
+                                rowValue(PlayerAction::SelectRailgun) == "4" &&
+                                rowValue(PlayerAction::CycleSecondary) == "G";
+        ok &= expect(weaponKeys, "controls list the four primaries on 1-4 and the missiles on G");
+    }
+
     view = menu.view(640, 360);
     bool controlsFit = true;
     for (int i = 0; i < view.buttonCount; ++i) {
