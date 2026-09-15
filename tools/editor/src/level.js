@@ -9,7 +9,7 @@
 // silently deletes the prose at the top of mine01.json the first time the
 // in-game light editor's Save button is pressed.
 
-import { DEFAULTS, KEY_NAMES, PICKUP_NAMES, SIDE_COUNT } from './format.js';
+import { BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES, SIDE_COUNT } from './format.js';
 import { findSegment, rebuildDerived } from './geometry.js';
 
 const vec3 = (j) => {
@@ -40,6 +40,8 @@ export function parseLevel(json, path = '<memory>') {
         objects: [],
         doors: [],
         pickups: [],
+        floatingLights: [],
+        swingingLights: [],
         exitTrigger: null,
         start: null,
     };
@@ -107,6 +109,43 @@ export function parseLevel(json, path = '<memory>') {
         });
     }
 
+    for (const fj of j.floatingLights ?? []) {
+        level.floatingLights.push({
+            keyOrder: Object.keys(fj),
+            position: vec3(fj.position),
+            radius: fj.radius ?? DEFAULTS.ballRadius,
+            color: fj.color ? vec3(fj.color) : BALL_COLOR.slice(),
+            lightRadius: fj.lightRadius ?? DEFAULTS.ballLightRadius,
+            lightIntensity: fj.lightIntensity ?? DEFAULTS.ballLightIntensity,
+            restitution: fj.restitution ?? DEFAULTS.ballRestitution,
+            mass: fj.mass ?? DEFAULTS.ballMass,
+            drift: fj.drift ?? DEFAULTS.ballDrift,
+            segment: fj.segment ?? -1,
+        });
+    }
+
+    // The file calls a swinging light's point `anchor`, because that is what it
+    // is: the lamp hangs a cord's length below it. Inside the editor it is
+    // `position` like every other entity's, so selecting, dragging, segment
+    // resolution and validation are written once rather than once per kind.
+    // serializeLevel puts the name back.
+    for (const sj of j.swingingLights ?? []) {
+        level.swingingLights.push({
+            keyOrder: Object.keys(sj),
+            position: vec3(sj.anchor),
+            cordLength: sj.cordLength ?? DEFAULTS.lampCordLength,
+            amplitude: sj.amplitude ?? DEFAULTS.lampAmplitude,
+            rate: sj.rate ?? DEFAULTS.lampRate,
+            phase: sj.phase ?? DEFAULTS.lampPhase,
+            swingAxis: sj.swingAxis ? vec3(sj.swingAxis) : [1, 0, 0],
+            color: sj.color ? vec3(sj.color) : LAMP_COLOR.slice(),
+            lightRadius: sj.lightRadius ?? DEFAULTS.lampLightRadius,
+            lightIntensity: sj.lightIntensity ?? DEFAULTS.lampLightIntensity,
+            coneDegrees: sj.coneDegrees ?? DEFAULTS.lampCone,
+            segment: sj.segment ?? -1,
+        });
+    }
+
     if (j.exit) {
         level.exitTrigger = {
             keyOrder: Object.keys(j.exit),
@@ -153,6 +192,8 @@ export function resolveSegments(level) {
     level.lights.forEach(fix);
     level.pickups.forEach(fix);
     level.objects.forEach(fix);
+    level.floatingLights.forEach(fix);
+    level.swingingLights.forEach(fix);
     if (level.exitTrigger) fix(level.exitTrigger);
 }
 
@@ -219,6 +260,36 @@ export function serializeLevel(level) {
             oj.segment = o.segment;
             return reorder(oj, o.keyOrder);
         });
+    }
+
+    if (level.floatingLights.length) {
+        j.floatingLights = level.floatingLights.map((b) => reorder({
+            position: b.position.slice(),
+            segment: b.segment,
+            radius: b.radius,
+            color: b.color.slice(),
+            lightRadius: b.lightRadius,
+            lightIntensity: b.lightIntensity,
+            restitution: b.restitution,
+            mass: b.mass,
+            drift: b.drift,
+        }, b.keyOrder));
+    }
+
+    if (level.swingingLights.length) {
+        j.swingingLights = level.swingingLights.map((l) => reorder({
+            anchor: l.position.slice(),
+            segment: l.segment,
+            cordLength: l.cordLength,
+            amplitude: l.amplitude,
+            rate: l.rate,
+            phase: l.phase,
+            swingAxis: l.swingAxis.slice(),
+            color: l.color.slice(),
+            lightRadius: l.lightRadius,
+            lightIntensity: l.lightIntensity,
+            coneDegrees: l.coneDegrees,
+        }, l.keyOrder));
     }
 
     if (level.pickups.length) {

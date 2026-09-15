@@ -2230,11 +2230,18 @@
   ],
   "floatingLights": [
     {
-      "comment": "a lamp in a cage, loose in the big room. Shooting it moves it.",
-      "position": [14.5, 14.0, 26.0],
+      "position": [
+        14.5,
+        14.0,
+        26.0
+      ],
       "segment": 2,
       "radius": 1.1,
-      "color": [1.0, 0.82, 0.5],
+      "color": [
+        1.0,
+        0.82,
+        0.5
+      ],
       "lightRadius": 26.0,
       "lightIntensity": 2.6,
       "restitution": 0.72,
@@ -2242,10 +2249,18 @@
       "drift": 1.4
     },
     {
-      "position": [30.5, 12.4, 49.8],
+      "position": [
+        30.5,
+        12.4,
+        49.8
+      ],
       "segment": 5,
       "radius": 1.0,
-      "color": [0.55, 0.85, 1.0],
+      "color": [
+        0.55,
+        0.85,
+        1.0
+      ],
       "lightRadius": 22.0,
       "lightIntensity": 2.2,
       "restitution": 0.8,
@@ -2255,15 +2270,26 @@
   ],
   "swingingLights": [
     {
-      "comment": "hung from the ceiling of the big room, swinging along x.",
-      "anchor": [9.5, 27.1, 30.6],
+      "anchor": [
+        9.5,
+        27.1,
+        30.6
+      ],
       "segment": 2,
       "cordLength": 8.0,
       "amplitude": 0.55,
       "rate": 1.3,
       "phase": 0.0,
-      "swingAxis": [1.0, 0.0, 0.0],
-      "color": [1.0, 0.95, 0.82],
+      "swingAxis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "color": [
+        1.0,
+        0.95,
+        0.82
+      ],
       "lightRadius": 34.0,
       "lightIntensity": 3.2,
       "coneDegrees": 62.0

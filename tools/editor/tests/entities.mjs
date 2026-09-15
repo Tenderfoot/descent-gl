@@ -20,9 +20,10 @@ import { parseLevel, serializeLevel } from '../src/level.js';
 import { parseObj } from '../src/obj.js';
 import { extrudeSide } from '../src/ops.js';
 import {
-    addDoor, addLight, addObject, addPickup, availableKeys, moveEntity, removeEntity,
-    rewireDoors, segmentCentre, setExit,
+    addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
+    ceilingAnchor, lampPosition, moveEntity, removeEntity, rewireDoors, segmentCentre, setExit,
 } from '../src/entities.js';
+import { MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS } from '../src/format.js';
 import { validateLevel } from '../src/validate.js';
 
 const GAME = process.env.DESCENT_BIN ?? 'build/Debug/descent';
@@ -36,6 +37,90 @@ const report = (ok, label, detail = '') => {
 const fresh = (file = 'tools/editor/testdata/base.json') =>
     parseLevel(fs.readFileSync(file, 'utf8'), file);
 const clean = (level) => validateLevel(level).findings.filter((f) => f.severity === 'error');
+
+// --- the two kinds that move -------------------------------------------------
+//
+// A floating light and a swinging lamp are the only entities whose authored
+// point is not where the thing ends up: a lamp's is its ANCHOR, and the lamp
+// hangs a cord below it. That rename, and the cord's reach, are what these
+// cover.
+
+{
+    const level = fresh();
+    const index = addFloatingLight(level, segmentCentre(level, 2));
+    report(level.floatingLights[index].segment === 2 && clean(level).length === 0,
+           'a floating light placed in a segment knows which segment it is in',
+           `segment = ${level.floatingLights[index].segment}`);
+
+    // The rule this whole module exists for, on the new kind.
+    const room = extrudeSide(level, 2, 1);
+    moveEntity(level, 'ball', index, segmentCentre(level, room));
+    report(level.floatingLights[index].segment === room,
+           'and dragging it into a new room re-resolves its segment',
+           `segment = ${level.floatingLights[index].segment}, expected ${room}`);
+}
+
+{
+    const level = fresh();
+    const { position, cordLength } = ceilingAnchor(level, 2);
+    const index = addSwingingLight(level, position, cordLength);
+    const lamp = level.swingingLights[index];
+    report(lamp.segment === 2 && clean(level).length === 0,
+           'a swinging light hung from a ceiling validates',
+           clean(level).map((f) => f.message).join('; '));
+
+    // The cord is the part the game is fatal about, so the default placement
+    // has to hang clear of the floor by construction rather than by luck.
+    const lowest = lampPosition(lamp, 0);
+    report(findSegment(level, lowest, lamp.segment) >= 0,
+           'and its default cord hangs clear of the floor',
+           `cord ${lamp.cordLength.toFixed(2)}u puts the lamp at y ${lowest[1].toFixed(2)}`);
+
+    // A cord longer than the room is an error, and it is the same rule the
+    // game aborts on.
+    lamp.cordLength = 500;
+    const errors = clean(level);
+    report(errors.some((f) => f.rule === 'lamp-cord-outside'),
+           'and a cord longer than the mine is an error',
+           errors.map((f) => f.rule).join(', '));
+}
+
+{
+    const level = fresh();
+    for (let i = 0; i < MAX_FLOATING_LIGHTS; ++i) addFloatingLight(level, segmentCentre(level, 2));
+    let refused = false;
+    try { addFloatingLight(level, segmentCentre(level, 2)); } catch { refused = true; }
+    report(refused, `a ninth floating light is refused, matching the game's cap of ${MAX_FLOATING_LIGHTS}`);
+
+    const { position } = ceilingAnchor(level, 2);
+    for (let i = 0; i < MAX_SWINGING_LIGHTS; ++i) addSwingingLight(level, position, 2);
+    refused = false;
+    try { addSwingingLight(level, position, 2); } catch { refused = true; }
+    report(refused, `and so is a ninth swinging light, against its cap of ${MAX_SWINGING_LIGHTS}`);
+}
+
+{
+    // The rename has to survive a round trip in both directions, or the editor
+    // writes a file the game reads as a lamp in a different place.
+    const level = fresh();
+    addFloatingLight(level, segmentCentre(level, 2));
+    const { position, cordLength } = ceilingAnchor(level, 1);
+    addSwingingLight(level, position, cordLength);
+    level.swingingLights[0].swingAxis = [0, 0, 1];
+    level.swingingLights[0].phase = 1.2;
+
+    const text = emitJson(serializeLevel(level));
+    report(text === emitJson(serializeLevel(parseLevel(text, 'props'))),
+           'a level with both moving kinds round-trips through the writer');
+    report(/"anchor"/.test(text) && !/"swingingLights"[\s\S]*?"position"/.test(text),
+           'and a swinging light is written as an anchor, the name the game reads');
+
+    const reloaded = parseLevel(text, 'props');
+    const back = reloaded.swingingLights[0];
+    report(back.position.every((v, i) => Math.abs(v - position[i]) < 1e-9) &&
+           back.swingAxis[2] === 1 && Math.abs(back.phase - 1.2) < 1e-9,
+           'and comes back with its anchor, axis and phase intact');
+}
 
 // --- the OBJ parser against the game's own counts ---------------------------
 
@@ -198,10 +283,17 @@ for (const [name, triangles] of Object.entries(MODEL_TRIANGLES)) {
     addPickup(level, PICKUP_NAMES.indexOf('key_blue'), segmentCentre(level, 1));
     addDoor(level, 0, 2, KEY_NAMES.indexOf('blue'));
     setExit(level, segmentCentre(level, 2));
+    // Both moving kinds, so the --world-test below drives them for real: it
+    // shoves every floating light at 150 u/s in all 26 directions and swings
+    // every lamp through a full period, against a level this file wrote.
+    addFloatingLight(level, segmentCentre(level, room));
+    const ceiling = ceilingAnchor(level, room);
+    addSwingingLight(level, ceiling.position, ceiling.cordLength);
 
     const errors = clean(level);
     report(errors.length === 0,
-           'a level with a new room, light, robot, reactor, key, door and exit validates',
+           'a level with a new room, light, robot, reactor, key, door, exit and moving lights '
+           + 'validates',
            errors.map((f) => f.message).join('; '));
 
     const text = emitJson(serializeLevel(level));
@@ -258,7 +350,13 @@ for (const [name, triangles] of Object.entries(MODEL_TRIANGLES)) {
         const mineOnly = loop.split('\n')
             .filter((l) => /FAILED/.test(l))
             .map((l) => l.replace(/^.*FAILED: /, ''));
-        report(mineOnly.every((f) => /three keyed doors|a gunner/.test(f)),
+        // Four of --loop-test's assertions cannot be met by a level this
+        // small, and none of them says anything about the editor: two are
+        // written for mine01's contents, one wants the level to be one of the
+        // shipped ones, and the pickup cue needs a non-key pickup, which this
+        // level deliberately does not have - it places a key, and a key raises
+        // KeyPickup instead. Anything ELSE it objects to is the editor's fault.
+        report(mineOnly.every((f) => /three keyed doors|a gunner|listed first|pickup cue/.test(f)),
                'and the only things it objects to are the ones written for mine01',
                mineOnly.join(' | ') || '(none)');
         fs.rmSync(tmp, { recursive: true, force: true });

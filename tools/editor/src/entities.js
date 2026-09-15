@@ -8,14 +8,23 @@
 // that lights the wrong room, or a pickup the player cannot reach. Everything
 // here that moves something re-resolves it.
 
-import { DEFAULTS, KEY_NAMES, PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES } from './format.js';
-import { findSegment } from './geometry.js';
+import {
+    BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS,
+    PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM,
+} from './format.js';
+import { findSegment, sideCorners } from './geometry.js';
 
 // The lists an entity kind lives in, so the UI can be written once.
 export const ENTITY_LISTS = {
     light: 'lights',
     pickup: 'pickups',
     object: 'objects',
+    // The two kinds that move once the level is running. A swinging light's
+    // `position` is its ANCHOR - the point the cord hangs from - which is what
+    // the author places and drags; the lamp itself is derived from it. See
+    // parseLevel for why it is not called `anchor` in here.
+    ball: 'floatingLights',
+    lamp: 'swingingLights',
 };
 
 export function entityList(level, kind) {
@@ -71,6 +80,96 @@ export function addObject(level, type, position) {
         health: DEFAULTS.objectHealth,
     }));
     return level.objects.length - 1;
+}
+
+// Where a new lamp goes when the author has not aimed: hung from the middle of
+// the segment's ceiling, on a cord short enough to hang clear of its floor.
+//
+// A lamp dropped at the segment centre on the default cord would often be
+// fine and sometimes be through the floor, and the game is fatal on the
+// second case. Deriving both from the room means placing one always works.
+export function ceilingAnchor(level, si) {
+    const centre = level.segments[si].center;
+    const top = sideCorners(level, si, SIDE_TOP);
+    const bottom = sideCorners(level, si, SIDE_BOTTOM);
+    const mid = (corners) => [0, 1, 2].map(
+        (k) => (corners[0][k] + corners[1][k] + corners[2][k] + corners[3][k]) / 4);
+
+    const ceiling = mid(top);
+    const floor = mid(bottom);
+    // Just under the ceiling rather than in it: an anchor exactly on a face is
+    // the case findSegment is entitled to answer -1 for.
+    const position = [ceiling[0], ceiling[1] - 0.4, ceiling[2]];
+    const drop = Math.max(1.0, position[1] - floor[1]);
+    return { position: findSegment(level, position, si) >= 0 ? position : centre.slice(),
+             cordLength: Math.min(DEFAULTS.lampCordLength, drop * 0.6) };
+}
+
+// Both prop kinds are capped in the simulation: past the cap the game warns and
+// ignores the rest, which is a level that silently loses the thing you just
+// placed. Refusing here means finding out while placing it.
+export function addFloatingLight(level, position) {
+    if (level.floatingLights.length >= MAX_FLOATING_LIGHTS) {
+        throw new Error(`a level may have at most ${MAX_FLOATING_LIGHTS} floating lights`);
+    }
+    level.floatingLights.push(place(level, {
+        keyOrder: null,
+        position: position.slice(),
+        radius: DEFAULTS.ballRadius,
+        color: BALL_COLOR.slice(),
+        lightRadius: DEFAULTS.ballLightRadius,
+        lightIntensity: DEFAULTS.ballLightIntensity,
+        restitution: DEFAULTS.ballRestitution,
+        mass: DEFAULTS.ballMass,
+        drift: DEFAULTS.ballDrift,
+        segment: -1,
+    }));
+    return level.floatingLights.length - 1;
+}
+
+// `position` is the anchor. A new lamp gets a cord short enough to hang clear
+// of whatever is below the point it was dropped at, because the game is fatal
+// on a cord that reaches outside the mine and the author would otherwise find
+// that out from a failed launch.
+export function addSwingingLight(level, position, cordLength = DEFAULTS.lampCordLength) {
+    if (level.swingingLights.length >= MAX_SWINGING_LIGHTS) {
+        throw new Error(`a level may have at most ${MAX_SWINGING_LIGHTS} swinging lights`);
+    }
+    level.swingingLights.push(place(level, {
+        keyOrder: null,
+        position: position.slice(),
+        cordLength,
+        amplitude: DEFAULTS.lampAmplitude,
+        rate: DEFAULTS.lampRate,
+        phase: DEFAULTS.lampPhase,
+        swingAxis: [1, 0, 0],
+        color: LAMP_COLOR.slice(),
+        lightRadius: DEFAULTS.lampLightRadius,
+        lightIntensity: DEFAULTS.lampLightIntensity,
+        coneDegrees: DEFAULTS.lampCone,
+        segment: -1,
+    }));
+    return level.swingingLights.length - 1;
+}
+
+// Where a lamp's housing sits at a given swing angle. The same construction as
+// sim::lampPosition in src/sim/props.cpp: straight down from the anchor, tilted
+// by `angle` along the swing axis, with the cord taut. The editor draws the
+// swing from this, and validate.js checks the extremes with it.
+export function lampPosition(lamp, angle) {
+    const axis = normalise(lamp.swingAxis, [1, 0, 0]);
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [
+        lamp.position[0] + axis[0] * s * lamp.cordLength,
+        lamp.position[1] - c * lamp.cordLength + axis[1] * s * lamp.cordLength,
+        lamp.position[2] + axis[2] * s * lamp.cordLength,
+    ];
+}
+
+function normalise(v, fallback) {
+    const length = Math.hypot(v[0], v[1], v[2]);
+    return length > 1e-5 ? [v[0] / length, v[1] / length, v[2] / length] : fallback.slice();
 }
 
 // A door fills a portal. The game is fatal on a door anywhere else - there
