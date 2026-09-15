@@ -16,6 +16,7 @@
 #include "game/loop_test.h"
 #include "game/robots_test.h"
 #include "game/session.h"
+#include "game/settings.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
@@ -41,8 +42,10 @@
 #include <imgui_impl_opengl3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -133,6 +136,8 @@ int main(int argc, char** argv) {
     const dvk::Options opts = dvk::Options::parse(argc, argv);
     const char* levelPath = opts.level.empty() ? kDefaultLevelPath : opts.level.c_str();
 
+    if (opts.settingsTest) return dvk::runSettingsTest();
+
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
     if (opts.flightTest) {
@@ -173,16 +178,27 @@ int main(int argc, char** argv) {
     // level that places it is first loaded.
     dvk::validateAssets();
 
+    const std::filesystem::path settingsPath =
+        opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath() : opts.settingsPath;
+    dvk::PlayerSettings settings = dvk::loadPlayerSettings(settingsPath);
+    if (opts.volumeOverride) settings.masterVolume = opts.volume;
+    if (opts.sizeOverride) {
+        settings.windowWidth = opts.width;
+        settings.windowHeight = opts.height;
+        settings.fullscreen = false;
+    }
+
     dvk::Window::Desc desc;
-    desc.width = opts.width;
-    desc.height = opts.height;
+    desc.width = settings.windowWidth;
+    desc.height = settings.windowHeight;
 #ifdef DVK_DEBUG
     desc.debugContext = true;
 #endif
     // A frame-limited run must not be pinned to the refresh rate, except under
     // --resize-test, where the window manager needs real time to deliver
     // iconify and restore.
-    desc.vsync = opts.frames < 0 || opts.resizeTest;
+    desc.vsync = settings.vsync && (opts.frames < 0 || opts.resizeTest);
+    desc.fullscreen = settings.fullscreen;
 
     dvk::Window window(desc);
     dvk::Input input;
@@ -243,10 +259,14 @@ int main(int argc, char** argv) {
     }
 
     const bool commandLineRun =
-        argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest;
+        argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest &&
+        !opts.settingsMenu;
     if (commandLineRun) {
         session.start();
         menu.hide();
+    } else if (opts.settingsMenu) {
+        menu.showMain();
+        menu.showSettings(settings);
     } else if (opts.levelSelect || opts.levelSwitchTest) {
         menu.showLevelSelect();
     } else {
@@ -261,8 +281,9 @@ int main(int argc, char** argv) {
     dvk::audio::Audio audio;
     if (!opts.noSound) {
         audio.init(kSoundDir);
-        audio.setMasterGain(opts.volume);
     }
+    audio.setMasterGain(settings.masterVolume);
+    audio.setMuted(settings.muted);
     // Filled by the simulation steps of one frame and drained once, after them.
     // Never cleared inside the step loop: a frame that runs three steps must
     // still hear all three.
@@ -372,6 +393,29 @@ int main(int argc, char** argv) {
     int minimizedFrames = 0;
     double minimizedSeconds = 0.0;
     double suspendedSeconds = 0.0;
+    dvk::PlayerSettings settingsBeforeDisplayChange = settings;
+    bool displayConfirmationPending = false;
+    double displayConfirmationDeadline = 0.0;
+
+    const auto applyRuntimeSettings = [&] {
+        audio.setMasterGain(settings.masterVolume);
+        audio.setMuted(settings.muted);
+        window.setVsync(settings.vsync && (opts.frames < 0 || opts.resizeTest));
+        window.setDisplay(settings.fullscreen, settings.windowWidth, settings.windowHeight);
+    };
+
+    const auto finishDisplayConfirmation = [&](bool keep) {
+        if (!keep) {
+            settings.fullscreen = settingsBeforeDisplayChange.fullscreen;
+            settings.windowWidth = settingsBeforeDisplayChange.windowWidth;
+            settings.windowHeight = settingsBeforeDisplayChange.windowHeight;
+            settings.vsync = settingsBeforeDisplayChange.vsync;
+            applyRuntimeSettings();
+        }
+        dvk::savePlayerSettings(settingsPath, settings);
+        displayConfirmationPending = false;
+        menu.closeSettings();
+    };
 
     if (session.advancesSimulation() && opts.frames < 0 && !opts.resizeTest) {
         input.setMouseCaptured(window.handle(), true);
@@ -415,6 +459,13 @@ int main(int argc, char** argv) {
         elapsed = std::min(elapsed, kMaxFrameTime);
         accumulator += elapsed;
 
+        if (displayConfirmationPending) {
+            const int seconds = std::max(0, static_cast<int>(std::ceil(
+                                                displayConfirmationDeadline - now)));
+            menu.setConfirmationSeconds(seconds);
+            if (now >= displayConfirmationDeadline) finishDisplayConfirmation(false);
+        }
+
         if (!window.minimized() && !simulationWasAdvancing) suspendedSeconds += elapsed;
 
         if (window.minimized()) {
@@ -430,7 +481,15 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Pause))) {
+        if (input.pressed(dvk::keyFor(dvk::Toggle::Pause)) &&
+            menu.screen() == dvk::MenuScreen::DisplayConfirmation) {
+            finishDisplayConfirmation(false);
+            accumulator = 0.0;
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Pause)) &&
+                   menu.screen() == dvk::MenuScreen::Settings) {
+            menu.closeSettings();
+            accumulator = 0.0;
+        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Pause))) {
             if (session.mode() == dvk::AppMode::Playing) {
                 session.pause();
                 menu.showPause();
@@ -464,7 +523,33 @@ int main(int argc, char** argv) {
             menu.update(menuInput, menuFramebuffer.x, menuFramebuffer.y);
         switch (menuAction) {
             case dvk::MenuAction::ChooseLevel: menu.showLevelSelect(); break;
-            case dvk::MenuAction::Back: menu.showMain(); break;
+            case dvk::MenuAction::OpenSettings: menu.showSettings(settings); break;
+            case dvk::MenuAction::ApplySettings: {
+                const dvk::PlayerSettings previous = settings;
+                settings = menu.editedSettings();
+                const bool displayChanged =
+                    settings.fullscreen != previous.fullscreen ||
+                    settings.windowWidth != previous.windowWidth ||
+                    settings.windowHeight != previous.windowHeight || settings.vsync != previous.vsync;
+                settingsBeforeDisplayChange = previous;
+                applyRuntimeSettings();
+                if (displayChanged) {
+                    displayConfirmationPending = true;
+                    displayConfirmationDeadline = now + 15.0;
+                    menu.showDisplayConfirmation(15);
+                } else {
+                    dvk::savePlayerSettings(settingsPath, settings);
+                    menu.closeSettings();
+                }
+                accumulator = 0.0;
+                break;
+            }
+            case dvk::MenuAction::KeepDisplay: finishDisplayConfirmation(true); break;
+            case dvk::MenuAction::RevertDisplay: finishDisplayConfirmation(false); break;
+            case dvk::MenuAction::Back:
+                if (menu.screen() == dvk::MenuScreen::Settings) menu.closeSettings();
+                else menu.showMain();
+                break;
             case dvk::MenuAction::Start:
                 if (menu.selectedLevel() >= 0) {
                     loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
@@ -525,6 +610,8 @@ int main(int argc, char** argv) {
             // Mute keeps the device open and the ambient channels running, so
             // unmuting is instant and does not restart the engine mid-note.
             audio.setMuted(!audio.muted());
+            settings.muted = audio.muted();
+            dvk::savePlayerSettings(settingsPath, settings);
         }
 
         if (!session.advancesSimulation()) accumulator = 0.0;
@@ -540,6 +627,9 @@ int main(int argc, char** argv) {
             automap.yaw += mouseDelta.x * 0.005f;
             automap.pitch = std::clamp(automap.pitch - mouseDelta.y * 0.005f, -1.45f, 1.45f);
             mouseDelta = glm::vec2(0.0f);
+        } else {
+            mouseDelta *= settings.mouseSensitivity;
+            if (settings.invertMouseY) mouseDelta.y = -mouseDelta.y;
         }
         bool consumedMouse = false;
         soundEvents.clear();

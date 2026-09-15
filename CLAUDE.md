@@ -95,6 +95,9 @@ milestone rather than describing what the code should do:
 | `--start-menu` | Show the player main menu even during a frame-limited or screenshot run. |
 | `--level-select` | Open the main menu on the level list, so a screenshot can show it without navigating there. Implies `--start-menu`. |
 | `--level-switch-test` | Drive the level list to a second level, load it, fly it, and report whether the switch took. Exits non-zero if the new level is not loaded and playing. Needs a window; its step rate is below 120 by construction, because the first twenty frames are spent in the menu. |
+| `--settings-menu` | Open the player settings screen, so its layout can be captured without navigating there. |
+| `--settings-test` | Exercise missing, partial, malformed, saved and reloaded player settings without a window. |
+| `--settings PATH` | Read and write player settings at a specific path instead of the platform user configuration directory. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame

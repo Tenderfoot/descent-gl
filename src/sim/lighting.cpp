@@ -40,22 +40,29 @@ float lightFalloff(float distance, float radius) {
     return window * window / (1.0f + 12.0f * t * t);
 }
 
-float lightContribution(const Light& light, const glm::vec3& point) {
-    if (light.intensity <= 0.0f) return 0.0f;
-    const glm::vec3 toLight = light.position - point;
-    const float distance = glm::length(toLight);
-    float value = lightFalloff(distance, light.radius);
-    if (value <= 0.0f) return 0.0f;
+namespace {
 
-    if (light.type == LightType::Spot) {
-        // The direction the light sees this point in, against the cone axis.
+float sourceContribution(LightType type, const glm::vec3& position, float radius, float intensity,
+                         const glm::vec3& direction, float coneDegrees, const glm::vec3& point) {
+    if (intensity <= 0.0f) return 0.0f;
+    const glm::vec3 toLight = position - point;
+    const float distance = glm::length(toLight);
+    float value = lightFalloff(distance, radius);
+    if (value <= 0.0f) return 0.0f;
+    if (type == LightType::Spot) {
         const glm::vec3 away = toLight / std::max(distance, 1e-4f) * -1.0f;
-        const float cosAngle = glm::dot(away, glm::normalize(light.direction));
-        const float outer = glm::radians(light.coneDegrees * 0.5f);
+        const float cosAngle = glm::dot(away, glm::normalize(direction));
+        const float outer = glm::radians(coneDegrees * 0.5f);
         value *= smoothstep(std::cos(outer), std::cos(outer * 0.75f), cosAngle);
-        if (value <= 0.0f) return 0.0f;
     }
-    return value * light.intensity;
+    return value * intensity;
+}
+
+}
+
+float lightContribution(const Light& light, const glm::vec3& point) {
+    return sourceContribution(light.type, light.position, light.radius, light.intensity,
+                              light.direction, light.coneDegrees, point);
 }
 
 int illuminationSamplePoints(const IlluminationQuery& query,
@@ -73,21 +80,23 @@ namespace {
 // One light at every sample point: falloff, spot cone, then one shadow ray.
 // Shared by the level's lights and by the loose ones the simulation owns, so
 // the two can never drift into answering differently.
-void accumulateLight(Illumination& out, std::array<float, kIlluminationSamples>& perSample,
-                     const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
-                     const IlluminationQuery& query, const Level& level, const Light& light,
-                     const SolidDoors* doors) {
+void accumulateSource(Illumination& out, std::array<float, kIlluminationSamples>& perSample,
+                      const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
+                      const IlluminationQuery& query, const Level& level, LightType type,
+                      const glm::vec3& position, float radius, float intensity,
+                      const glm::vec3& direction, float coneDegrees, const SolidDoors* doors) {
     bool reaches = false;
     bool visible = false;
     for (int s = 0; s < sampleCount; ++s) {
         const glm::vec3& p = samples[static_cast<size_t>(s)];
-        const float contribution = lightContribution(light, p);
+        const glm::vec3 toLight = position - p;
+        const float distance = glm::length(toLight);
+        const float contribution =
+            sourceContribution(type, position, radius, intensity, direction, coneDegrees, p);
         if (contribution <= 0.0f) continue;
         reaches = true;
 
         if (query.shadows) {
-            const glm::vec3 toLight = light.position - p;
-            const float distance = glm::length(toLight);
             if (distance > 1e-4f) {
                 ++out.raysCast;
                 const RayHit hit =
@@ -103,6 +112,15 @@ void accumulateLight(Illumination& out, std::array<float, kIlluminationSamples>&
     }
     if (reaches) ++out.lightsReaching;
     if (visible) ++out.lightsVisible;
+}
+
+void accumulateLight(Illumination& out, std::array<float, kIlluminationSamples>& perSample,
+                     const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
+                     const IlluminationQuery& query, const Level& level, const Light& light,
+                     const SolidDoors* doors) {
+    accumulateSource(out, perSample, samples, sampleCount, query, level, light.type,
+                     light.position, light.radius, light.intensity, light.direction,
+                     light.coneDegrees, doors);
 }
 
 } // namespace
@@ -144,16 +162,8 @@ void addLooseLight(Illumination& out, const IlluminationQuery& query, const Leve
     out.samples = sampleCount;
     std::array<float, kIlluminationSamples> perSample{};
 
-    // A stack Light with no segment set. Constructing one allocates nothing as
-    // long as `segments` is left alone, which is why the cull is skipped rather
-    // than faked: there is nothing to cull with, and the falloff plus one
-    // shadow ray is the whole answer anyway.
-    Light light;
-    light.type = LightType::Point;
-    light.position = position;
-    light.radius = radius;
-    light.intensity = intensity;
-    accumulateLight(out, perSample, samples, sampleCount, query, level, light, doors);
+    accumulateSource(out, perSample, samples, sampleCount, query, level, LightType::Point,
+                     position, radius, intensity, glm::vec3(0.0f, 0.0f, -1.0f), 45.0f, doors);
 
     float total = 0.0f;
     for (int s = 0; s < sampleCount; ++s) total += perSample[static_cast<size_t>(s)];

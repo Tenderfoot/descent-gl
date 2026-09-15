@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/level_list.h"
+#include "game/settings.h"
 
 #include <glm/vec2.hpp>
 
@@ -15,12 +16,18 @@ enum class MenuScreen {
     Main,
     LevelSelect,
     Pause,
+    Settings,
+    DisplayConfirmation,
     Summary,
 };
 
 enum class MenuAction {
     None,
     ChooseLevel,   // main menu "play": open the level list
+    OpenSettings,
+    ApplySettings,
+    KeepDisplay,
+    RevertDisplay,
     Start,         // start selectedLevel()
     Back,          // level list "back": return to the main menu
     Resume,
@@ -32,6 +39,8 @@ enum class MenuAction {
 struct MenuInput {
     bool previous = false;
     bool next = false;
+    bool decrease = false;
+    bool increase = false;
     bool confirm = false;
     bool pointerPressed = false;
     glm::vec2 pointer{0.0f};
@@ -53,6 +62,7 @@ struct MenuButtonView {
     const char* label = "";
     MenuRect bounds;
     bool selected = false;
+    std::array<char, 32> value{};
     // >= 0 on a level row: which level of the menu's list it starts.
     int levelIndex = -1;
 };
@@ -79,6 +89,7 @@ struct MenuView {
     int levelCount = 0;
     int firstLevelShown = 0;
     int levelsShown = 0;
+    int confirmationSeconds = 0;
 };
 
 class PlayerMenu {
@@ -97,15 +108,21 @@ public:
     void showMain();
     void showLevelSelect();
     void showPause();
+    void showSettings(const PlayerSettings& settings);
+    void showDisplayConfirmation(int seconds);
+    void closeSettings();
+    void setConfirmationSeconds(int seconds);
     void showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
                      int robotsTotal);
 
     MenuAction update(const MenuInput& input, int width, int height);
     MenuView view(int width, int height) const;
     MenuScreen screen() const { return screen_; }
+    const PlayerSettings& editedSettings() const { return editedSettings_; }
 
 private:
     int buttonCount() const;
+    void adjustSetting(int index, int direction);
 
     MenuScreen screen_ = MenuScreen::Hidden;
     int selection_ = 0;
@@ -119,6 +136,9 @@ private:
     int elapsedSeconds_ = 0;
     int robotsDestroyed_ = 0;
     int robotsTotal_ = 0;
+    MenuScreen settingsParent_ = MenuScreen::Main;
+    PlayerSettings editedSettings_;
+    int confirmationSeconds_ = 0;
 };
 
 }

@@ -1318,6 +1318,36 @@ the renderer elides what still does not fit at a word boundary. That path runs
 every frame a menu is up, so it works in `string_view` and never builds a
 `std::string`.
 
+### Persistent player settings
+
+`src/game/settings.h` owns the player-facing configuration that is independent
+of authored flight tuning: master volume, mute, mouse sensitivity, mouse-Y
+inversion, fullscreen, window size and vsync. On Windows it lives under
+`%LOCALAPPDATA%/descent-gl/settings.json`; other desktop builds use the XDG
+configuration directory when one is available. `--settings PATH` redirects it
+for automated and portable runs.
+
+The file is loaded before the window is created because fullscreen, size and
+vsync affect construction. Missing files use defaults. A malformed file emits
+a warning and uses defaults, while a partial or newer file keeps every field
+that can be read and ignores fields this build does not know. Numeric values
+are normalized before use. Saving writes a complete versioned document to a
+temporary sibling and replaces the destination only after the write succeeds.
+
+The main and pause menus both open the same settings screen, which keeps the
+screen that opened it as its return destination. Volume, mute and look settings
+take effect without rebuilding game state. Display settings go through
+`Window::setDisplay` and `Window::setVsync`; a fifteen-second confirmation owns
+the previous display values and restores them on cancel, Escape or timeout.
+Command-line `--volume` and `--size` remain authoritative for verification
+runs.
+
+Settings rows carry their rendered values in fixed-size character storage in
+`MenuView`. The renderer therefore draws the screen through the existing HUD
+batch without formatting into heap-backed strings. At small resolutions the
+eight rows reduce their height and gap together so the final row remains
+inside the panel.
+
 ### Loading a second mine
 
 Until this point the level was loaded once, before the renderer existed, and

@@ -96,6 +96,8 @@ inline MenuInput readMenuInput(const Input& input, const glm::vec2& pointer) {
     MenuInput menu;
     menu.previous = input.pressed(GLFW_KEY_UP) || input.pressed(GLFW_KEY_W);
     menu.next = input.pressed(GLFW_KEY_DOWN) || input.pressed(GLFW_KEY_S);
+    menu.decrease = input.pressed(GLFW_KEY_LEFT) || input.pressed(GLFW_KEY_A);
+    menu.increase = input.pressed(GLFW_KEY_RIGHT) || input.pressed(GLFW_KEY_D);
     menu.confirm = input.pressed(GLFW_KEY_ENTER) || input.pressed(GLFW_KEY_SPACE);
     menu.pointerPressed = input.mousePressed(GLFW_MOUSE_BUTTON_LEFT);
     menu.pointer = pointer;

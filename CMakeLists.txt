@@ -43,6 +43,7 @@ add_executable(descent
     src/game/menu.cpp
     src/game/robots_test.cpp
     src/game/session.cpp
+    src/game/settings.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp

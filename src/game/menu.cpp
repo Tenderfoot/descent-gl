@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <utility>
 
 namespace dvk {
@@ -14,13 +15,15 @@ struct ButtonDefinition {
     const char* label;
 };
 
-constexpr std::array<ButtonDefinition, 2> kMainButtons{{
+constexpr std::array<ButtonDefinition, 3> kMainButtons{{
     {MenuAction::ChooseLevel, "play"},
+    {MenuAction::OpenSettings, "settings"},
     {MenuAction::Quit, "quit"},
 }};
 
-constexpr std::array<ButtonDefinition, 4> kPauseButtons{{
+constexpr std::array<ButtonDefinition, 5> kPauseButtons{{
     {MenuAction::Resume, "resume"},
+    {MenuAction::OpenSettings, "settings"},
     {MenuAction::Restart, "restart level"},
     {MenuAction::MainMenu, "main menu"},
     {MenuAction::Quit, "quit"},
@@ -31,11 +34,39 @@ constexpr std::array<ButtonDefinition, 2> kSummaryButtons{{
     {MenuAction::MainMenu, "main menu"},
 }};
 
+constexpr std::array<ButtonDefinition, 8> kSettingsButtons{{
+    {MenuAction::None, "master volume"},
+    {MenuAction::None, "mouse sensitivity"},
+    {MenuAction::None, "invert mouse y"},
+    {MenuAction::None, "fullscreen"},
+    {MenuAction::None, "window size"},
+    {MenuAction::None, "vsync"},
+    {MenuAction::ApplySettings, "apply"},
+    {MenuAction::Back, "cancel"},
+}};
+
+constexpr std::array<ButtonDefinition, 2> kDisplayConfirmationButtons{{
+    {MenuAction::KeepDisplay, "keep changes"},
+    {MenuAction::RevertDisplay, "revert"},
+}};
+
+constexpr std::array<std::pair<int, int>, 4> kWindowSizes{{
+    {1280, 720},
+    {1600, 900},
+    {1920, 1080},
+    {2560, 1440},
+}};
+
 std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
     switch (screen) {
         case MenuScreen::Main: return {kMainButtons.data(), static_cast<int>(kMainButtons.size())};
         case MenuScreen::Pause:
             return {kPauseButtons.data(), static_cast<int>(kPauseButtons.size())};
+        case MenuScreen::Settings:
+            return {kSettingsButtons.data(), static_cast<int>(kSettingsButtons.size())};
+        case MenuScreen::DisplayConfirmation:
+            return {kDisplayConfirmationButtons.data(),
+                    static_cast<int>(kDisplayConfirmationButtons.size())};
         case MenuScreen::Summary:
             return {kSummaryButtons.data(), static_cast<int>(kSummaryButtons.size())};
         case MenuScreen::LevelSelect:   // built from the level list, not a table
@@ -94,6 +125,28 @@ void PlayerMenu::showPause() {
     selection_ = 0;
 }
 
+void PlayerMenu::showSettings(const PlayerSettings& settings) {
+    settingsParent_ = screen_ == MenuScreen::Pause ? MenuScreen::Pause : MenuScreen::Main;
+    editedSettings_ = normalizedPlayerSettings(settings);
+    screen_ = MenuScreen::Settings;
+    selection_ = 0;
+}
+
+void PlayerMenu::showDisplayConfirmation(int seconds) {
+    screen_ = MenuScreen::DisplayConfirmation;
+    selection_ = 0;
+    confirmationSeconds_ = std::max(seconds, 0);
+}
+
+void PlayerMenu::closeSettings() {
+    screen_ = settingsParent_;
+    selection_ = 0;
+}
+
+void PlayerMenu::setConfirmationSeconds(int seconds) {
+    confirmationSeconds_ = std::max(seconds, 0);
+}
+
 void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
                              int robotsTotal) {
     screen_ = MenuScreen::Summary;
@@ -111,6 +164,44 @@ void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int ro
 int PlayerMenu::buttonCount() const {
     if (screen_ == MenuScreen::LevelSelect) return static_cast<int>(levels_.size()) + 1;
     return buttonsFor(screen_).second;
+}
+
+void PlayerMenu::adjustSetting(int index, int direction) {
+    if (direction == 0) return;
+    switch (index) {
+        case 0:
+            editedSettings_.masterVolume =
+                std::clamp(editedSettings_.masterVolume + static_cast<float>(direction) * 0.05f,
+                           0.0f, 1.0f);
+            break;
+        case 1:
+            editedSettings_.mouseSensitivity =
+                std::clamp(editedSettings_.mouseSensitivity + static_cast<float>(direction) * 0.1f,
+                           0.2f, 3.0f);
+            break;
+        case 2: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
+        case 3: editedSettings_.fullscreen = !editedSettings_.fullscreen; break;
+        case 4: {
+            int closest = 0;
+            int closestDistance = 1 << 30;
+            for (int i = 0; i < static_cast<int>(kWindowSizes.size()); ++i) {
+                const auto [width, height] = kWindowSizes[static_cast<size_t>(i)];
+                const int distance = std::abs(width - editedSettings_.windowWidth) +
+                                     std::abs(height - editedSettings_.windowHeight);
+                if (distance < closestDistance) {
+                    closest = i;
+                    closestDistance = distance;
+                }
+            }
+            const int count = static_cast<int>(kWindowSizes.size());
+            closest = (closest + direction + count) % count;
+            editedSettings_.windowWidth = kWindowSizes[static_cast<size_t>(closest)].first;
+            editedSettings_.windowHeight = kWindowSizes[static_cast<size_t>(closest)].second;
+            break;
+        }
+        case 5: editedSettings_.vsync = !editedSettings_.vsync; break;
+        default: break;
+    }
 }
 
 MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
@@ -132,12 +223,21 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     if (input.previous) cursor = (cursor + count - 1) % count;
     if (input.next) cursor = (cursor + 1) % count;
 
+    if (screen_ == MenuScreen::Settings && selection_ < 6) {
+        if (input.decrease) adjustSetting(selection_, -1);
+        if (input.increase) adjustSetting(selection_, 1);
+    }
+
     const MenuView updated = view(width, height);
     if (input.pointerPressed) {
         for (int i = 0; i < updated.buttonCount; ++i) {
             const MenuButtonView& button = updated.buttons[static_cast<size_t>(i)];
             if (!button.bounds.contains(input.pointer)) continue;
             if (button.levelIndex >= 0) chosenLevel_ = button.levelIndex;
+            if (screen_ == MenuScreen::Settings && i < 6) {
+                adjustSetting(i, 1);
+                return MenuAction::None;
+            }
             return button.action;
         }
     }
@@ -146,6 +246,10 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
             if (levelSelection_ >= static_cast<int>(levels_.size())) return MenuAction::Back;
             chosenLevel_ = levelSelection_;
             return MenuAction::Start;
+        }
+        if (screen_ == MenuScreen::Settings && selection_ < 6) {
+            adjustSetting(selection_, 1);
+            return MenuAction::None;
         }
         const auto [definitions, definitionCount] = buttonsFor(screen_);
         if (selection_ < definitionCount) return definitions[selection_].action;
@@ -161,6 +265,7 @@ MenuView PlayerMenu::view(int width, int height) const {
     result.elapsedSeconds = elapsedSeconds_;
     result.robotsDestroyed = robotsDestroyed_;
     result.robotsTotal = robotsTotal_;
+    result.confirmationSeconds = confirmationSeconds_;
 
     const float screenWidth = static_cast<float>(std::max(width, 1));
     const float screenHeight = static_cast<float>(std::max(height, 1));
@@ -234,6 +339,14 @@ MenuView PlayerMenu::view(int width, int height) const {
             result.title = "paused";
             result.subtitle = "the mine is waiting";
             break;
+        case MenuScreen::Settings:
+            result.title = "settings";
+            result.subtitle = "left and right adjust";
+            break;
+        case MenuScreen::DisplayConfirmation:
+            result.title = "display changed";
+            result.subtitle = "keep these display settings?";
+            break;
         case MenuScreen::Summary:
             result.title = won_ ? "mine destroyed" : "you are dead";
             result.subtitle = won_ ? "run complete" : "run ended";
@@ -244,17 +357,54 @@ MenuView PlayerMenu::view(int width, int height) const {
 
     const auto [definitions, count] = buttonsFor(screen_);
     result.buttonCount = count;
-    const float buttonHeight = std::clamp(screenHeight * 0.065f, 42.0f, 64.0f);
-    const float blockHeight = count * buttonHeight + (count - 1) * gap;
-    const float blockCenter = screenHeight * (screen_ == MenuScreen::Summary ? 0.70f : 0.64f);
+    const bool settingsScreen = screen_ == MenuScreen::Settings;
+    const float rowGap = settingsScreen ? std::clamp(screenHeight * 0.008f, 3.0f, 10.0f) : gap;
+    const float buttonHeight =
+        settingsScreen
+            ? std::clamp((screenHeight * 0.55f - static_cast<float>(count - 1) * rowGap) /
+                             static_cast<float>(count),
+                         18.0f, 56.0f)
+            : std::clamp(screenHeight * 0.065f, 42.0f, 64.0f);
+    const float blockHeight = count * buttonHeight + (count - 1) * rowGap;
+    const float blockCenter =
+        settingsScreen ? screenHeight * 0.625f
+                       : screenHeight * (screen_ == MenuScreen::Summary ? 0.70f : 0.64f);
     const float top = blockCenter - blockHeight * 0.5f;
 
     for (int i = 0; i < count; ++i) {
         MenuButtonView& button = result.buttons[static_cast<size_t>(i)];
         button.action = definitions[i].action;
         button.label = definitions[i].label;
-        button.bounds = {left, top + i * (buttonHeight + gap), buttonWidth, buttonHeight};
+        button.bounds = {left, top + i * (buttonHeight + rowGap), buttonWidth, buttonHeight};
         button.selected = i == selection_;
+        if (screen_ != MenuScreen::Settings) continue;
+        switch (i) {
+            case 0:
+                std::snprintf(button.value.data(), button.value.size(), "%d%%",
+                              static_cast<int>(std::round(editedSettings_.masterVolume * 100.0f)));
+                break;
+            case 1:
+                std::snprintf(button.value.data(), button.value.size(), "%.1fx",
+                              editedSettings_.mouseSensitivity);
+                break;
+            case 2:
+                std::snprintf(button.value.data(), button.value.size(), "%s",
+                              editedSettings_.invertMouseY ? "on" : "off");
+                break;
+            case 3:
+                std::snprintf(button.value.data(), button.value.size(), "%s",
+                              editedSettings_.fullscreen ? "on" : "off");
+                break;
+            case 4:
+                std::snprintf(button.value.data(), button.value.size(), "%d x %d",
+                              editedSettings_.windowWidth, editedSettings_.windowHeight);
+                break;
+            case 5:
+                std::snprintf(button.value.data(), button.value.size(), "%s",
+                              editedSettings_.vsync ? "on" : "off");
+                break;
+            default: break;
+        }
     }
     return result;
 }

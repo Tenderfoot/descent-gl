@@ -50,6 +50,7 @@ Options Options::parse(int argc, char** argv) {
             o.noSound = true;
         } else if (a == "--volume" && hasNext) {
             o.volume = std::clamp(static_cast<float>(std::atof(argv[++i])), 0.0f, 1.0f);
+            o.volumeOverride = true;
         } else if (a == "--segment" && hasNext) {
             o.startSegment = std::atoi(argv[++i]);
         } else if (a == "--wireframe-volumes") {
@@ -68,6 +69,12 @@ Options Options::parse(int argc, char** argv) {
             o.levelSelect = true;
         } else if (a == "--level-switch-test") {
             o.levelSwitchTest = true;
+        } else if (a == "--settings-test") {
+            o.settingsTest = true;
+        } else if (a == "--settings-menu") {
+            o.settingsMenu = true;
+        } else if (a == "--settings" && hasNext) {
+            o.settingsPath = argv[++i];
         } else if (a == "--autofire" && hasNext) {
             o.autofire = std::atoi(argv[++i]);
         } else if (a == "--debug-lines") {
@@ -75,6 +82,7 @@ Options Options::parse(int argc, char** argv) {
         } else if (a == "--size" && i + 2 < argc) {
             o.width = std::atoi(argv[++i]);
             o.height = std::atoi(argv[++i]);
+            o.sizeOverride = true;
         } else {
             log::warn("ignoring unknown argument '{}'", a);
         }

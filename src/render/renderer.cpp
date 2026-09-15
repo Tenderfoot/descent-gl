@@ -632,6 +632,14 @@ void Renderer::buildMenu(const MenuView& menu) {
         hud_.text(stats, (width - statsWidth) * 0.5f, height * 0.45f, scale, white);
     }
 
+    if (menu.screen == MenuScreen::DisplayConfirmation) {
+        char countdown[64];
+        std::snprintf(countdown, sizeof(countdown), "reverting in %d seconds",
+                      menu.confirmationSeconds);
+        const float countdownWidth = hud_.textWidth(countdown, scale);
+        hud_.text(countdown, (width - countdownWidth) * 0.5f, height * 0.39f, scale, dim);
+    }
+
     // Only when the list is longer than the rows on screen: which slice of it
     // this is. A list that fits says nothing, because there is nothing to say.
     if (menu.screen == MenuScreen::LevelSelect && menu.levelsShown > 0 &&
@@ -656,10 +664,17 @@ void Renderer::buildMenu(const MenuView& menu) {
                       button.bounds.height, accent);
         }
         const float labelScale = scale * 0.9f;
+        const bool hasValue = button.value[0] != '\0';
         const float labelWidth = hud_.textWidth(button.label, labelScale);
-        const float labelX = button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
+        const float labelX = hasValue ? button.bounds.x + button.bounds.width * 0.06f
+                                      : button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
         const float labelY = button.bounds.y + (button.bounds.height - 7.0f * labelScale) * 0.5f;
         hud_.text(button.label, labelX, labelY, labelScale, text);
+        if (hasValue) {
+            const float valueWidth = hud_.textWidth(button.value.data(), labelScale);
+            const float valueX = button.bounds.x + button.bounds.width * 0.94f - valueWidth;
+            hud_.text(button.value.data(), valueX, labelY, labelScale, text);
+        }
     }
 }
 

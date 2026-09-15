@@ -234,4 +234,9 @@ void Audio::setMuted(bool muted) {
     }
 }
 
+void Audio::setMasterGain(float gain) {
+    unmutedGain_ = gain;
+    mixer_.setMasterGain(muted_ ? 0.0f : gain);
+}
+
 } // namespace dvk::audio

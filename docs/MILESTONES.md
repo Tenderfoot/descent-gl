@@ -1613,3 +1613,52 @@ No campaign, no progression, no unlock state: the list is flat and every level
 in the directory is playable from it. A level that fails to parse is still
 listed, under its filename, and `loadLevel` is still fatal when it is picked -
 the menu does not get to decide that a broken level is invisible.
+
+---
+
+## Player shell — Phase 3 ✅
+
+Player settings now persist independently of the authored flight model. The
+main and pause menus expose master volume, mouse sensitivity, mouse-Y
+inversion, fullscreen, window size and vsync. Applying display changes starts a
+fifteen-second confirmation; cancel, Escape and timeout restore the previous
+mode and size.
+
+The settings file is versioned JSON in the platform user configuration
+directory. It accepts partial files, preserves valid fields when another field
+has the wrong type, recovers from malformed input, clamps numeric values, and
+uses a temporary sibling plus replace for an atomic save. `--settings PATH`
+keeps automated runs away from the player's real file, `--settings-test`
+exercises persistence without a window, and `--settings-menu` exposes the
+screen directly for visual verification. Command-line volume and size remain
+run-local overrides.
+
+The milestone gate also exposed a Debug-only allocation in the recently added
+player-visibility query: constructing a temporary `Light` constructed its
+empty segment vector and MSVC's debug container bookkeeping allocated once per
+query. Loose lights now pass their source data directly through the same
+contribution path as level lights, restoring zero allocations without changing
+the lighting result.
+
+| Check | Result |
+| --- | --- |
+| Missing settings file | ✅ defaults |
+| Save and reload every field | ✅ exact round trip |
+| Partial file with a wrong-typed field | ✅ valid field kept, invalid field defaulted |
+| Malformed JSON | ✅ warning and defaults |
+| Main and pause settings entry | ✅ same screen, returns to its parent |
+| Settings layout at 1600×900 | ✅ visually verified |
+| Settings layout at 640×360 | ✅ all eight rows inside the panel |
+| Display safety | ✅ keep, explicit revert, Escape and 15-second timeout paths |
+| Debug and Release builds | ✅ clean |
+| Debug and Release headless suites | ✅ all ten pass |
+| Player-visibility allocation check | ✅ 34,000 queries, 0 allocations in both configurations |
+| Release settings-menu draw after warm-up | ✅ fixed-capacity view and HUD path |
+| Release resize test | ✅ 1,800 frames, 901 steps, 119.8 steps/s |
+| Release rendered run | ✅ 120 frames, clean exit, sim and draw allocations none |
+
+The Debug renderer still reports allocations inside its whole-frame draw
+instrumentation while the same Release path reports none. The Phase 3 menu path
+is not entered during that run, and its fixed-capacity rendering is covered
+separately; the count remains a renderer/debug-runtime diagnostic rather than a
+Phase 3 regression.

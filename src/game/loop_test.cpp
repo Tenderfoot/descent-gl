@@ -295,12 +295,16 @@ bool verifyPlayerMenu() {
     menu.showMain();
     MenuView view = menu.view(1600, 900);
     ok &= expect(view.screen == MenuScreen::Main, "the main menu is visible");
-    ok &= expect(view.buttonCount == 2, "the main menu has play and quit");
+    ok &= expect(view.buttonCount == 3, "the main menu has play, settings and quit");
 
     MenuInput keyboard;
     keyboard.next = true;
-    keyboard.confirm = true;
-    ok &= expect(menu.update(keyboard, 1600, 900) == MenuAction::Quit,
+    menu.update(keyboard, 1600, 900);
+    ok &= expect(menu.update(keyboard, 1600, 900) == MenuAction::None,
+                 "keyboard navigation reaches the last menu action");
+    MenuInput confirmLast;
+    confirmLast.confirm = true;
+    ok &= expect(menu.update(confirmLast, 1600, 900) == MenuAction::Quit,
                  "keyboard navigation selects a menu action");
 
     menu.showMain();
@@ -317,6 +321,36 @@ bool verifyPlayerMenu() {
     pointer.pointerPressed = true;
     ok &= expect(menu.update(pointer, 1600, 900) == MenuAction::Resume,
                  "pointer input activates a menu action");
+
+    PlayerSettings settings;
+    menu.showPause();
+    menu.showSettings(settings);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 8,
+                 "settings open from the pause menu");
+    ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%",
+                 "settings show their current values");
+    view = menu.view(640, 360);
+    bool settingsFit = true;
+    for (int i = 0; i < view.buttonCount; ++i) {
+        const MenuRect& bounds = view.buttons[static_cast<size_t>(i)].bounds;
+        settingsFit &= bounds.y >= 360.0f * 0.12f && bounds.y + bounds.height <= 360.0f * 0.90f;
+    }
+    ok &= expect(settingsFit, "settings stay inside the panel at the smallest supported size");
+    MenuInput decrease;
+    decrease.decrease = true;
+    menu.update(decrease, 1600, 900);
+    ok &= expect(menu.editedSettings().masterVolume == 0.75f,
+                 "left adjusts the selected setting");
+    menu.closeSettings();
+    ok &= expect(menu.screen() == MenuScreen::Pause,
+                 "closing settings returns to the menu that opened them");
+
+    menu.showDisplayConfirmation(15);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::DisplayConfirmation &&
+                     view.confirmationSeconds == 15,
+                 "display changes open a timed confirmation");
 
     menu.showSummary(true, "escaped", 42.9f, 12, 16);
     view = menu.view(1600, 900);
