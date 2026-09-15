@@ -105,6 +105,14 @@ void PlayerMenu::setSelectedLevel(int index) {
     levelSelection_ = chosenLevel_;
 }
 
+void PlayerMenu::setLevelRecord(const std::string& path, int completions, int bestSeconds) {
+    const auto found = std::find_if(levels_.begin(), levels_.end(),
+                                    [&](const LevelEntry& level) { return level.path == path; });
+    if (found == levels_.end()) return;
+    found->completions = std::max(completions, 0);
+    found->bestSeconds = bestSeconds;
+}
+
 void PlayerMenu::hide() {
     screen_ = MenuScreen::Hidden;
     selection_ = 0;
@@ -163,11 +171,12 @@ void PlayerMenu::setConfirmationSeconds(int seconds) {
 }
 
 void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
-                             int robotsTotal) {
+                             int robotsTotal, const char* recordNote) {
     screen_ = MenuScreen::Summary;
     selection_ = 0;
     won_ = won;
     reason_ = reason;
+    recordNote_ = recordNote;
     elapsedSeconds_ = std::max(0, static_cast<int>(elapsed));
     robotsDestroyed_ = robotsDestroyed;
     robotsTotal_ = robotsTotal;
@@ -312,6 +321,7 @@ MenuView PlayerMenu::view(int width, int height) const {
     result.screen = screen_;
     result.won = won_;
     result.reason = reason_;
+    result.recordNote = recordNote_;
     result.elapsedSeconds = elapsedSeconds_;
     result.robotsDestroyed = robotsDestroyed_;
     result.robotsTotal = robotsTotal_;
@@ -364,7 +374,16 @@ MenuView PlayerMenu::view(int width, int height) const {
             const int index = first + i;
             MenuButtonView& button = result.buttons[static_cast<size_t>(i)];
             button.action = MenuAction::Start;
-            button.label = levels_[static_cast<size_t>(index)].name.c_str();
+            const LevelEntry& level = levels_[static_cast<size_t>(index)];
+            button.label = level.name.c_str();
+            if (level.completions > 0) {
+                if (level.bestSeconds >= 0) {
+                    std::snprintf(button.value.data(), button.value.size(), "best %d:%02d",
+                                  level.bestSeconds / 60, level.bestSeconds % 60);
+                } else {
+                    std::snprintf(button.value.data(), button.value.size(), "%s", "complete");
+                }
+            }
             button.levelIndex = index;
             button.bounds = {left, listTop + static_cast<float>(i) * (rowHeight + gap),
                              buttonWidth, rowHeight};

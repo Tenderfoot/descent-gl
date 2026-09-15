@@ -99,6 +99,8 @@ milestone rather than describing what the code should do:
 | `--settings-test` | Exercise missing, partial, malformed, saved and reloaded player settings without a window. |
 | `--settings PATH` | Read and write player settings at a specific path instead of the platform user configuration directory. |
 | `--controls-menu` | Open the keyboard and mouse binding screen for visual verification. |
+| `--progress-test` | Exercise run records, best times, malformed data and atomic persistence without a window. |
+| `--progress PATH` | Read and write run history at a specific path instead of the platform user configuration directory. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame
@@ -196,7 +198,7 @@ runtime.
    against 120.
 4. Run every headless test: `--validate-assets --flight-test --world-test
    --collision-test --weapons-test --robots-test --loop-test --sound-test
-   --light-test`.
+   --light-test --settings-test --progress-test`.
 5. Update `docs/ARCHITECTURE.md` with whatever the milestone introduced.
 6. Add the milestone to `docs/MILESTONES.md` with what was actually verified,
    including real numbers.

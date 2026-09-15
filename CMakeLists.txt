@@ -42,6 +42,7 @@ add_executable(descent
     src/game/visibility.cpp
     src/game/loop_test.cpp
     src/game/menu.cpp
+    src/game/progress.cpp
     src/game/robots_test.cpp
     src/game/session.cpp
     src/game/settings.cpp

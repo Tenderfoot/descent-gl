@@ -111,6 +111,8 @@ struct Options {
     bool settingsTest = false;
     bool settingsMenu = false;
     bool controlsMenu = false;
+    bool progressTest = false;
+    std::string progressPath;
     std::string settingsPath;
     int width = 1600;
     int height = 900;

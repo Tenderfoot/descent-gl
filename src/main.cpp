@@ -14,6 +14,7 @@
 #include "game/collision_test.h"
 #include "game/light_test.h"
 #include "game/loop_test.h"
+#include "game/progress.h"
 #include "game/robots_test.h"
 #include "game/session.h"
 #include "game/settings.h"
@@ -49,6 +50,7 @@
 #include <iterator>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace {
 
@@ -137,6 +139,7 @@ int main(int argc, char** argv) {
     const char* levelPath = opts.level.empty() ? kDefaultLevelPath : opts.level.c_str();
 
     if (opts.settingsTest) return dvk::runSettingsTest();
+    if (opts.progressTest) return dvk::runProgressTest();
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -181,6 +184,9 @@ int main(int argc, char** argv) {
     const std::filesystem::path settingsPath =
         opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath() : opts.settingsPath;
     dvk::PlayerSettings settings = dvk::loadPlayerSettings(settingsPath);
+    const std::filesystem::path progressPath =
+        opts.progressPath.empty() ? dvk::defaultPlayerProgressPath() : opts.progressPath;
+    dvk::PlayerProgress progress = dvk::loadPlayerProgress(progressPath);
     if (opts.volumeOverride) settings.masterVolume = opts.volume;
     if (opts.sizeOverride) {
         settings.windowWidth = opts.width;
@@ -251,7 +257,15 @@ int main(int argc, char** argv) {
         cur.combat.player.headlightOn = true;
     }
     dvk::PlayerMenu menu;
-    menu.setLevels(dvk::discoverLevels(kLevelDir, levelFile));
+    std::vector<dvk::LevelEntry> levelEntries = dvk::discoverLevels(kLevelDir, levelFile);
+    for (dvk::LevelEntry& entry : levelEntries) {
+        if (const dvk::LevelRecord* record =
+                progress.find(dvk::levelProgressId(entry.path))) {
+            entry.completions = record->wins;
+            entry.bestSeconds = static_cast<int>(record->bestTime);
+        }
+    }
+    menu.setLevels(std::move(levelEntries));
     // The list opens on the level that is loaded, so confirming twice from the
     // main menu starts what a plain run has always started.
     for (int i = 0; i < static_cast<int>(menu.levels().size()); ++i) {
@@ -261,6 +275,8 @@ int main(int argc, char** argv) {
     const bool commandLineRun =
         argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest &&
         !opts.settingsMenu && !opts.controlsMenu;
+    const bool recordsProgress = !commandLineRun && !opts.levelSwitchTest && opts.frames < 0 &&
+                                 opts.screenshot.empty() && !opts.resizeTest;
     if (commandLineRun) {
         session.start();
         menu.hide();
@@ -650,6 +666,7 @@ int main(int argc, char** argv) {
             if (settings.invertMouseY) mouseDelta.y = -mouseDelta.y;
         }
         bool consumedMouse = false;
+        bool runFinished = false;
         soundEvents.clear();
         while (session.advancesSimulation() && accumulator >= kSimStep) {
             prev = cur;
@@ -716,9 +733,7 @@ int main(int argc, char** argv) {
             if (cur.game.phase == dvk::sim::GamePhase::Won ||
                 cur.game.phase == dvk::sim::GamePhase::Lost) {
                 session.finish();
-                menu.showSummary(cur.game.phase == dvk::sim::GamePhase::Won, cur.game.endReason,
-                                 cur.game.elapsed, cur.game.robotsDestroyed,
-                                 cur.game.robotsAtStart);
+                runFinished = true;
                 input.setMouseCaptured(window.handle(), false);
                 accumulator = 0.0;
             }
@@ -732,6 +747,25 @@ int main(int argc, char** argv) {
             worstSimAllocs = std::max(worstSimAllocs, simAllocCount);
             simAllocFrames += simAllocCount > 0 ? 1 : 0;
             if (simAllocCount > 0 && firstSimAllocFrame < 0) firstSimAllocFrame = frame;
+        }
+
+        if (runFinished) {
+            const char* recordNote = "";
+            if (recordsProgress) {
+                const std::string levelId = dvk::levelProgressId(levelFile);
+                const dvk::RunRecordUpdate update =
+                    dvk::recordRun(progress, levelId, cur.game.phase == dvk::sim::GamePhase::Won,
+                                   cur.game.elapsed, cur.game.robotsDestroyed);
+                dvk::savePlayerProgress(progressPath, progress);
+                if (const dvk::LevelRecord* record = progress.find(levelId)) {
+                    menu.setLevelRecord(levelFile, record->wins,
+                                        static_cast<int>(record->bestTime));
+                }
+                recordNote = dvk::runRecordNote(update);
+            }
+            menu.showSummary(cur.game.phase == dvk::sim::GamePhase::Won, cur.game.endReason,
+                             cur.game.elapsed, cur.game.robotsDestroyed, cur.game.robotsAtStart,
+                             recordNote);
         }
 
         const auto alpha = static_cast<float>(accumulator / kSimStep);

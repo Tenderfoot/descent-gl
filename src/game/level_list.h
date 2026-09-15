@@ -14,6 +14,8 @@ struct LevelEntry {
     std::string path;      // as passed to loadLevel()
     std::string name;      // the level's "name" field, or the file stem
     std::string comment;   // the level's "comment" field, may be empty
+    int completions = 0;
+    int bestSeconds = -1;
 };
 
 // Every regular file in `directory` with `extension`, sorted. Shared with the

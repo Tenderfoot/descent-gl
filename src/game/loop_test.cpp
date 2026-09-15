@@ -218,6 +218,10 @@ bool verifyLevelSelect() {
                  "the selected level's blurb is the subtitle");
     ok &= expect(std::string_view(view.subtitle).find("robots") == std::string_view::npos,
                  "only the first sentence of the blurb is kept");
+    menu.setLevelRecord(menu.levels()[1].path, 2, 83);
+    view = menu.view(kWidth, kHeight);
+    ok &= expect(std::string_view(view.buttons[1].value.data()) == "best 1:23",
+                 "completed levels show their best time");
 
     MenuInput confirm;
     confirm.confirm = true;
@@ -382,13 +386,15 @@ bool verifyPlayerMenu() {
                      view.confirmationSeconds == 15,
                  "display changes open a timed confirmation");
 
-    menu.showSummary(true, "escaped", 42.9f, 12, 16);
+    menu.showSummary(true, "escaped", 42.9f, 12, 16, "new best time");
     view = menu.view(1600, 900);
     ok &= expect(view.screen == MenuScreen::Summary && view.won,
                  "a completed run opens the victory summary");
     ok &= expect(view.elapsedSeconds == 42 && view.robotsDestroyed == 12 &&
                      view.robotsTotal == 16,
                  "the run summary carries the result statistics");
+    ok &= expect(std::string_view(view.recordNote) == "new best time",
+                 "the run summary carries a record highlight");
     log::info("player menu: {}", ok ? "PASS" : "FAIL");
     return ok;
 }

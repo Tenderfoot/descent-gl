@@ -87,6 +87,7 @@ struct MenuView {
     int buttonCount = 0;
     bool won = false;
     const char* reason = "";
+    const char* recordNote = "";
     int elapsedSeconds = 0;
     int robotsDestroyed = 0;
     int robotsTotal = 0;
@@ -107,6 +108,7 @@ public:
     // hands out pointers into them, so the strings must outlive every view.
     void setLevels(std::vector<LevelEntry> levels);
     const std::vector<LevelEntry>& levels() const { return levels_; }
+    void setLevelRecord(const std::string& path, int completions, int bestSeconds);
     // Which level the last Start was for, or -1 when the list is empty. Index
     // into levels().
     int selectedLevel() const { return chosenLevel_; }
@@ -124,7 +126,7 @@ public:
     void closeSettings();
     void setConfirmationSeconds(int seconds);
     void showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
-                     int robotsTotal);
+                     int robotsTotal, const char* recordNote = "");
 
     MenuAction update(const MenuInput& input, int width, int height);
     MenuView view(int width, int height) const;
@@ -146,6 +148,7 @@ private:
     int chosenLevel_ = -1;
     bool won_ = false;
     const char* reason_ = "";
+    const char* recordNote_ = "";
     int elapsedSeconds_ = 0;
     int robotsDestroyed_ = 0;
     int robotsTotal_ = 0;

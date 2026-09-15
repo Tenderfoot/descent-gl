@@ -630,6 +630,11 @@ void Renderer::buildMenu(const MenuView& menu) {
                       menu.robotsDestroyed, menu.robotsTotal);
         const float statsWidth = hud_.textWidth(stats, scale);
         hud_.text(stats, (width - statsWidth) * 0.5f, height * 0.45f, scale, white);
+        if (menu.recordNote[0] != '\0') {
+            const float noteWidth = hud_.textWidth(menu.recordNote, scale);
+            hud_.text(menu.recordNote, (width - noteWidth) * 0.5f, height * 0.51f, scale,
+                      accent);
+        }
     }
 
     if (menu.screen == MenuScreen::DisplayConfirmation) {

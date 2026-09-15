@@ -1373,6 +1373,24 @@ where the next keyboard or mouse press becomes the binding and Escape cancels.
 Gameplay shortcuts are suppressed for the capture frame, so binding the old
 mute or camera key cannot also trigger that action behind the menu.
 
+### Persistent run history
+
+`src/game/progress.h` stores finished-run history separately from preferences.
+Each level record contains finished runs, wins, the fastest winning time and
+the highest robot tally. The stable identity is the level filename rather than
+its player-facing `name`, so changing display copy does not erase a record.
+The progress document uses the same platform configuration directory and
+temporary-file replacement discipline as settings; `--progress PATH` redirects
+it for isolated runs.
+
+Progress loads before the level list is built. Completed rows carry their best
+time in the fixed-capacity button value, while uncompleted levels remain plain
+and equally selectable. When a session reaches Won or Lost, the app records it
+once before opening the frozen summary, saves the document and updates the
+in-memory level row. The summary highlights a first completion, faster time or
+higher robot tally. Automated command-line, frame-limited, screenshot, resize
+and level-switch runs never write player history.
+
 ### Loading a second mine
 
 Until this point the level was loaded once, before the renderer existed, and
