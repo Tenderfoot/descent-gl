@@ -297,6 +297,42 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.cfg.weapons[sim::WeaponLaser].speed = saved;
     }
 
+    // --- direct hits select a temporary HUD target ---------------------------
+    {
+        rig.reset();
+        rig.state.player.headlightOn = false;
+        if (rig.robots.count > 0) {
+            const int slot = 0;
+            for (int i = 1; i < rig.robots.count; ++i) {
+                rig.robots.robots[static_cast<size_t>(i)].alive = false;
+            }
+            sim::Robot& robot = rig.robots.robots[static_cast<size_t>(slot)];
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(robot.body.segment)].center;
+            robot.body.position = centre + glm::vec3(0.0f, 0.0f, -6.0f);
+            robot.health = 1000.0f;
+            rig.ship.position = centre + glm::vec3(0.0f, 0.0f, 7.0f);
+            rig.ship.segment = robot.body.segment;
+            rig.aimAt(robot.body.position);
+
+            sim::FireControls controls;
+            controls.selectWeapon = sim::WeaponRailgun;
+            controls.primary = true;
+            rig.run(1, controls);
+
+            ok &= expect(robot.health < 1000.0f, "the railgun directly hit its robot");
+            ok &= expect(rig.state.player.lastTargetRobot == slot &&
+                             rig.state.player.targetHudTime > 0.0f,
+                         "a direct hitscan hit selected its robot for the HUD");
+
+            controls = sim::FireControls{};
+            rig.run(static_cast<int>(sim::kTargetHudTime / kStep) + 2, controls);
+            ok &= expect(rig.state.player.lastTargetRobot < 0 &&
+                             rig.state.player.targetHudTime <= 0.0f,
+                         "the HUD target cleared after its timeout");
+        }
+    }
+
     // --- targets take damage and die ----------------------------------------
     //
     // The targets are robots from M6 on. They are stepped normally, so this is
@@ -336,6 +372,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
             const bool destroyed = !rig.robots.robots[static_cast<size_t>(slot)].alive;
             ok &= expect(destroyed, "the robot was destroyed by sustained laser fire");
+            ok &= expect(rig.state.player.lastTargetRobot == slot,
+                         "a direct projectile impact selected its robot for the HUD");
             log::info("target: {} with {:.0f} health, {:.0f} damage per shot, destroyed after "
                       "{:.2f}s",
                       def.name, health, damage, static_cast<float>(steps) * kStep);
@@ -579,6 +617,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
                                     ? rig.robots.robots[static_cast<size_t>(slot)].health
                                     : 0.0f;
             ok &= expect(after < before, "a near miss still damaged the target");
+            ok &= expect(rig.state.player.lastTargetRobot < 0,
+                         "splash damage did not select a HUD target");
             log::info("splash: near miss took the target from {:.0f} to {:.1f} health", before,
                       after);
         }

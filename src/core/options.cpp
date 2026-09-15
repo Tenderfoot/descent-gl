@@ -44,6 +44,8 @@ Options Options::parse(int argc, char** argv) {
             o.commTest = true;
         } else if (a == "--comm") {
             o.comm = true;
+        } else if (a == "--target-hud") {
+            o.targetHud = true;
         } else if (a == "--light-test") {
             o.lightTest = true;
         } else if (a == "--headlight") {
