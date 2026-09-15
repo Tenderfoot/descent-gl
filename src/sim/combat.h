@@ -105,7 +105,8 @@ using EffectPool = Pool<Effect, kMaxEffects>;
 struct PlayerState {
     float shields = 100.0f;
     float energy = 100.0f;
-    int weapon = WeaponLaser;
+    int primaryWeapon = WeaponLaser;
+    int secondaryWeapon = WeaponConcussion;
     int laserLevel = 1;                 // 1 .. kLaserLevels
     int vulcanAmmo = 2000;
     int concussionAmmo = 8;
@@ -154,7 +155,8 @@ struct FireControls {
     bool primary = false;      // left mouse
     bool secondary = false;    // right mouse
     bool flare = false;
-    int selectWeapon = -1;     // 0..3, or -1 for no change
+    // 0..1 select the primary weapon, 2..3 select the secondary weapon.
+    int selectWeapon = -1;
 };
 
 struct CombatState {

@@ -62,9 +62,11 @@ struct HudData {
     bool show = true;
     float shields = 100.0f;
     float energy = 100.0f;
-    const char* weaponName = "laser";
-    int laserLevel = 1;
-    int ammo = -1;          // -1 when the weapon runs on energy
+    const char* primaryWeaponName = "laser";
+    int primaryLaserLevel = 1;
+    int primaryAmmo = -1;          // -1 when the weapon runs on energy
+    const char* secondaryWeaponName = "concussion";
+    int secondaryAmmo = 0;
     int flares = 0;
     bool keys[3] = {false, false, false};
     float countdown = -1.0f;   // < 0 when the reactor is still standing

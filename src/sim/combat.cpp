@@ -174,10 +174,12 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     PlayerState& player = state.player;
 
     if (controls.selectWeapon >= 0 && controls.selectWeapon < WeaponCount) {
+        int& selected = controls.selectWeapon <= WeaponVulcan ? player.primaryWeapon
+                                                              : player.secondaryWeapon;
         // Only on a real change: holding a number key down would otherwise
         // re-select the same gun every step and chatter.
-        if (controls.selectWeapon != player.weapon) emitLocal(events, Cue::WeaponSelect);
-        player.weapon = controls.selectWeapon;
+        if (controls.selectWeapon != selected) emitLocal(events, Cue::WeaponSelect);
+        selected = controls.selectWeapon;
     }
 
     for (float& c : player.cooldown) c = std::max(0.0f, c - dt);
@@ -336,12 +338,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         }
     };
 
-    if (controls.primary) {
-        if (player.weapon == WeaponLaser || player.weapon == WeaponVulcan) fire(player.weapon);
-    }
-    if (controls.secondary) {
-        fire(player.weapon == WeaponHoming ? WeaponHoming : WeaponConcussion);
-    }
+    if (controls.primary) fire(player.primaryWeapon);
+    if (controls.secondary) fire(player.secondaryWeapon);
     if (controls.flare && player.flareCooldown <= 0.0f && player.flares > 0) {
         const int slot = state.projectiles.spawn();
         if (slot >= 0) {
