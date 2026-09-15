@@ -8,7 +8,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <string>
 #include <system_error>
+#include <utility>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -18,7 +20,7 @@ namespace dvk {
 
 namespace {
 
-constexpr int kSettingsVersion = 1;
+constexpr int kSettingsVersion = 2;
 
 template <typename T>
 void readIf(const nlohmann::json& source, const char* name, T& destination) {
@@ -55,6 +57,7 @@ PlayerSettings normalizedPlayerSettings(PlayerSettings settings) {
     settings.mouseSensitivity = std::clamp(settings.mouseSensitivity, 0.2f, 3.0f);
     settings.windowWidth = std::clamp(settings.windowWidth, 640, 7680);
     settings.windowHeight = std::clamp(settings.windowHeight, 360, 4320);
+    settings.bindings = normalizedInputBindings(settings.bindings);
     return settings;
 }
 
@@ -94,6 +97,21 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         readIf(source, "vsync", settings.vsync);
         readIf(source, "windowWidth", settings.windowWidth);
         readIf(source, "windowHeight", settings.windowHeight);
+        const auto bindings = source.find("bindings");
+        if (bindings != source.end() && bindings->is_object()) {
+            for (size_t i = 0; i < kPlayerActionCount; ++i) {
+                const PlayerAction action = static_cast<PlayerAction>(i);
+                const auto entry = bindings->find(playerActionName(action));
+                if (entry == bindings->end() || !entry->is_object()) continue;
+                InputBinding binding = settings.bindings[action];
+                std::string device;
+                readIf(*entry, "device", device);
+                readIf(*entry, "code", binding.code);
+                if (device == "keyboard") binding.device = InputDevice::Keyboard;
+                else if (device == "mouse") binding.device = InputDevice::Mouse;
+                settings.bindings[action] = binding;
+            }
+        }
     } catch (const nlohmann::json::exception& error) {
         log::warn("could not read settings '{}': {}; using defaults", path.string(), error.what());
         return PlayerSettings{};
@@ -112,6 +130,15 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
     }
 
     const std::filesystem::path temporary = path.string() + ".tmp";
+    nlohmann::json bindings = nlohmann::json::object();
+    for (size_t i = 0; i < kPlayerActionCount; ++i) {
+        const PlayerAction action = static_cast<PlayerAction>(i);
+        const InputBinding binding = settings.bindings[action];
+        bindings[playerActionName(action)] = {
+            {"device", binding.device == InputDevice::Keyboard ? "keyboard" : "mouse"},
+            {"code", binding.code},
+        };
+    }
     const nlohmann::json output{
         {"version", kSettingsVersion},
         {"masterVolume", settings.masterVolume},
@@ -122,6 +149,7 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"vsync", settings.vsync},
         {"windowWidth", settings.windowWidth},
         {"windowHeight", settings.windowHeight},
+        {"bindings", std::move(bindings)},
     };
     {
         std::ofstream file(temporary, std::ios::trunc);
@@ -164,6 +192,8 @@ int runSettingsTest() {
     written.vsync = false;
     written.windowWidth = 1920;
     written.windowHeight = 1080;
+    assignInputBinding(written.bindings, PlayerAction::Forward,
+                       {InputDevice::Keyboard, 265});
     ok &= expect(savePlayerSettings(path, written), "atomic save succeeds");
     const PlayerSettings loaded = loadPlayerSettings(path);
     ok &= expect(loaded.masterVolume == written.masterVolume &&
@@ -171,14 +201,22 @@ int runSettingsTest() {
                      loaded.muted && loaded.fullscreen && !loaded.vsync &&
                      loaded.windowWidth == 1920 && loaded.windowHeight == 1080,
                  "saved values round trip");
+    ok &= expect(loaded.bindings[PlayerAction::Forward] ==
+                     InputBinding{InputDevice::Keyboard, 265},
+                 "saved bindings round trip");
 
     {
         std::ofstream partial(path, std::ios::trunc);
-        partial << R"({"masterVolume":0.25,"windowWidth":"wide","futureField":42})";
+        partial << R"({"masterVolume":0.25,"windowWidth":"wide","futureField":42,"bindings":{"forward":{"device":"mouse","code":99},"back":{"device":"keyboard","code":73}}})";
     }
     const PlayerSettings recovered = loadPlayerSettings(path);
     ok &= expect(recovered.masterVolume == 0.25f && recovered.windowWidth == 1600,
                  "partial file keeps valid fields");
+    ok &= expect(recovered.bindings[PlayerAction::Forward] ==
+                         InputBinding{InputDevice::Keyboard, 87} &&
+                     recovered.bindings[PlayerAction::Back] ==
+                         InputBinding{InputDevice::Keyboard, 73},
+                 "invalid bindings default without discarding valid bindings");
 
     {
         std::ofstream malformed(path, std::ios::trunc);

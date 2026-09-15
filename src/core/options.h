@@ -110,6 +110,7 @@ struct Options {
     bool levelSwitchTest = false;
     bool settingsTest = false;
     bool settingsMenu = false;
+    bool controlsMenu = false;
     std::string settingsPath;
     int width = 1600;
     int height = 900;

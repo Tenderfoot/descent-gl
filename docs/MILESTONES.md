@@ -1662,3 +1662,40 @@ instrumentation while the same Release path reports none. The Phase 3 menu path
 is not entered during that run, and its fixed-capacity rendering is covered
 separately; the count remains a renderer/debug-runtime diagnostic rather than a
 Phase 3 regression.
+
+---
+
+## Player shell — Phase 4 ✅
+
+Gameplay input now resolves through 24 named player actions backed by
+persistent keyboard and mouse bindings. Flight, fire, weapon selection, flare,
+headlight, automap, chase camera, mute and pause all sample the same binding
+set. The debug UI and menu navigation remain application controls rather than
+player bindings.
+
+The settings screen opens a scrolling controls page. Confirming or clicking an
+action captures the next keyboard or mouse press, Escape cancels capture, and
+reset restores the complete default set. Assigning an occupied input swaps the
+two actions instead of leaving a hidden conflict. Binding capture also blocks
+the old action for that frame, so pressing M to bind it cannot mute the game
+behind the menu.
+
+The settings schema advanced to version 2 and writes every binding under the
+action's stable name. Version 1 files load unchanged with defaults, partial
+binding maps are accepted, invalid codes return to defaults, and unknown
+fields remain ignored.
+
+| Check | Result |
+| --- | --- |
+| Player actions represented | ✅ 24 keyboard/mouse actions |
+| Configured keyboard action reaches `ShipControls` | ✅ forward rebound to I, thrust 1.0 |
+| Configured mouse action reaches gameplay | ✅ primary fire rebound to mouse 4 |
+| Existing-input conflict | ✅ forward → S swaps back to W |
+| Binding save and reload | ✅ exact round trip through settings JSON |
+| Controls at 1600×900 | ✅ seven action rows, reset and back, visually verified |
+| Controls at 640×360 | ✅ three action rows, reset and back, all inside the panel |
+| Debug and Release builds | ✅ clean |
+| Debug and Release headless suites | ✅ all ten pass |
+| Release controls-menu allocations after warm-up | ✅ sim none, draw none on 0 of 90 frames |
+| Release rendered run | ✅ 120 frames, clean exit, sim and draw allocations none |
+| Release resize test | ✅ 1,801 frames, 900 steps, 119.7 steps/s |

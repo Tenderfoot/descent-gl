@@ -98,6 +98,7 @@ milestone rather than describing what the code should do:
 | `--settings-menu` | Open the player settings screen, so its layout can be captured without navigating there. |
 | `--settings-test` | Exercise missing, partial, malformed, saved and reloaded player settings without a window. |
 | `--settings PATH` | Read and write player settings at a specific path instead of the platform user configuration directory. |
+| `--controls-menu` | Open the keyboard and mouse binding screen for visual verification. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame
@@ -139,8 +140,9 @@ level directly unless `--start-menu` is present.
 | M | Mute |
 | Escape | Pause / resume |
 
-All of these come from one table in `src/game/bindings.h`; nothing else in the
-project names a GLFW key code for gameplay.
+Player actions and their defaults come from `src/game/input_actions.cpp`.
+`src/game/bindings.h` samples the current persisted keyboard and mouse bindings
+into simulation controls; gameplay call sites identify actions, not GLFW codes.
 
 ## Conventions
 

@@ -26,6 +26,8 @@ public:
 
     // Any key at all went down this frame, for "press any key to continue".
     bool anyKeyPressed() const;
+    int firstPressedKey() const;
+    int firstPressedMouseButton() const;
 
     glm::vec2 consumeMouseDelta();     // pixels moved since last consume
     glm::vec2 cursorPosition() const { return cursorPosition_; }

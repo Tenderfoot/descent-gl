@@ -1,5 +1,7 @@
 #pragma once
 
+#include "game/input_actions.h"
+
 #include <filesystem>
 
 namespace dvk {
@@ -13,6 +15,7 @@ struct PlayerSettings {
     bool vsync = true;
     int windowWidth = 1600;
     int windowHeight = 900;
+    InputBindings bindings = defaultInputBindings();
 };
 
 std::filesystem::path defaultPlayerSettingsPath();

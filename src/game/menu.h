@@ -17,6 +17,7 @@ enum class MenuScreen {
     LevelSelect,
     Pause,
     Settings,
+    Controls,
     DisplayConfirmation,
     Summary,
 };
@@ -25,6 +26,7 @@ enum class MenuAction {
     None,
     ChooseLevel,   // main menu "play": open the level list
     OpenSettings,
+    OpenControls,
     ApplySettings,
     KeepDisplay,
     RevertDisplay,
@@ -43,6 +45,9 @@ struct MenuInput {
     bool increase = false;
     bool confirm = false;
     bool pointerPressed = false;
+    bool cancel = false;
+    bool bindingPressed = false;
+    InputBinding binding;
     glm::vec2 pointer{0.0f};
 };
 
@@ -65,6 +70,7 @@ struct MenuButtonView {
     std::array<char, 32> value{};
     // >= 0 on a level row: which level of the menu's list it starts.
     int levelIndex = -1;
+    int actionIndex = -1;
 };
 
 // The level list is as long as the directory is, and a screen is not. Eight
@@ -90,6 +96,9 @@ struct MenuView {
     int firstLevelShown = 0;
     int levelsShown = 0;
     int confirmationSeconds = 0;
+    int controlCount = 0;
+    int firstControlShown = 0;
+    int controlsShown = 0;
 };
 
 class PlayerMenu {
@@ -109,6 +118,8 @@ public:
     void showLevelSelect();
     void showPause();
     void showSettings(const PlayerSettings& settings);
+    void showControls();
+    void closeControls();
     void showDisplayConfirmation(int seconds);
     void closeSettings();
     void setConfirmationSeconds(int seconds);
@@ -119,6 +130,7 @@ public:
     MenuView view(int width, int height) const;
     MenuScreen screen() const { return screen_; }
     const PlayerSettings& editedSettings() const { return editedSettings_; }
+    bool capturingBinding() const { return capturingBinding_; }
 
 private:
     int buttonCount() const;
@@ -130,6 +142,7 @@ private:
     // Kept apart from selection_ so that leaving the list and coming back puts
     // the cursor on the level that was picked rather than on the first row.
     int levelSelection_ = 0;
+    int controlSelection_ = 0;
     int chosenLevel_ = -1;
     bool won_ = false;
     const char* reason_ = "";
@@ -139,6 +152,7 @@ private:
     MenuScreen settingsParent_ = MenuScreen::Main;
     PlayerSettings editedSettings_;
     int confirmationSeconds_ = 0;
+    bool capturingBinding_ = false;
 };
 
 }

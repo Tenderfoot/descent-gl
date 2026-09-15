@@ -260,13 +260,17 @@ int main(int argc, char** argv) {
 
     const bool commandLineRun =
         argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest &&
-        !opts.settingsMenu;
+        !opts.settingsMenu && !opts.controlsMenu;
     if (commandLineRun) {
         session.start();
         menu.hide();
     } else if (opts.settingsMenu) {
         menu.showMain();
         menu.showSettings(settings);
+    } else if (opts.controlsMenu) {
+        menu.showMain();
+        menu.showSettings(settings);
+        menu.showControls();
     } else if (opts.levelSelect || opts.levelSwitchTest) {
         menu.showLevelSelect();
     } else {
@@ -481,15 +485,24 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Pause)) &&
+        const bool pausePressed =
+            dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::Pause);
+        const bool menuEscape = input.pressed(GLFW_KEY_ESCAPE);
+        const bool bindingCaptureActive =
+            menu.screen() == dvk::MenuScreen::Controls && menu.capturingBinding();
+        if (!bindingCaptureActive && (pausePressed || menuEscape) &&
             menu.screen() == dvk::MenuScreen::DisplayConfirmation) {
             finishDisplayConfirmation(false);
             accumulator = 0.0;
-        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Pause)) &&
+        } else if (!bindingCaptureActive && (pausePressed || menuEscape) &&
+                   menu.screen() == dvk::MenuScreen::Controls) {
+            menu.closeControls();
+            accumulator = 0.0;
+        } else if (!bindingCaptureActive && (pausePressed || menuEscape) &&
                    menu.screen() == dvk::MenuScreen::Settings) {
             menu.closeSettings();
             accumulator = 0.0;
-        } else if (input.pressed(dvk::keyFor(dvk::Toggle::Pause))) {
+        } else if (!bindingCaptureActive && pausePressed) {
             if (session.mode() == dvk::AppMode::Playing) {
                 session.pause();
                 menu.showPause();
@@ -524,6 +537,7 @@ int main(int argc, char** argv) {
         switch (menuAction) {
             case dvk::MenuAction::ChooseLevel: menu.showLevelSelect(); break;
             case dvk::MenuAction::OpenSettings: menu.showSettings(settings); break;
+            case dvk::MenuAction::OpenControls: menu.showControls(); break;
             case dvk::MenuAction::ApplySettings: {
                 const dvk::PlayerSettings previous = settings;
                 settings = menu.editedSettings();
@@ -547,7 +561,8 @@ int main(int argc, char** argv) {
             case dvk::MenuAction::KeepDisplay: finishDisplayConfirmation(true); break;
             case dvk::MenuAction::RevertDisplay: finishDisplayConfirmation(false); break;
             case dvk::MenuAction::Back:
-                if (menu.screen() == dvk::MenuScreen::Settings) menu.closeSettings();
+                if (menu.screen() == dvk::MenuScreen::Controls) menu.closeControls();
+                else if (menu.screen() == dvk::MenuScreen::Settings) menu.closeSettings();
                 else menu.showMain();
                 break;
             case dvk::MenuAction::Start:
@@ -589,24 +604,27 @@ int main(int argc, char** argv) {
             case dvk::MenuAction::None: break;
         }
 
-        if (input.pressed(dvk::keyFor(dvk::Toggle::DebugUi))) {
+        if (!bindingCaptureActive && input.pressed(GLFW_KEY_F3)) {
             showDebugUi = !showDebugUi;
         } else if (session.mode() == dvk::AppMode::Playing &&
-                   input.pressed(dvk::keyFor(dvk::Toggle::Headlight))) {
+                   dvk::bindingPressed(input, settings.bindings,
+                                       dvk::PlayerAction::Headlight)) {
             // Refuses to come on with no energy left, which is the whole point
             // of it costing any.
             cur.combat.player.headlightOn =
                 !cur.combat.player.headlightOn && cur.combat.player.energy > 0.0f;
         }
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Chase))) {
+        if (!bindingCaptureActive &&
+            dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::ChaseCamera)) {
             camera = camera == dvk::CameraMode::FirstPerson ? dvk::CameraMode::Chase
                                                             : dvk::CameraMode::FirstPerson;
         }
-        if (session.mode() == dvk::AppMode::Playing &&
-            input.pressed(dvk::keyFor(dvk::Toggle::Automap))) {
+        if (!bindingCaptureActive && session.mode() == dvk::AppMode::Playing &&
+            dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::Automap)) {
             automap.open = !automap.open;
         }
-        if (input.pressed(dvk::keyFor(dvk::Toggle::Mute))) {
+        if (!bindingCaptureActive &&
+            dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::Mute)) {
             // Mute keeps the device open and the ambient channels running, so
             // unmuting is instant and does not restart the engine mid-note.
             audio.setMuted(!audio.muted());
@@ -638,7 +656,8 @@ int main(int argc, char** argv) {
             // The whole frame's motion belongs to the first step; later steps
             // in the same frame have no new input to apply.
             dvk::sim::ShipControls controls =
-                dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta);
+                dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta,
+                                  settings.bindings);
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -659,11 +678,17 @@ int main(int argc, char** argv) {
             // Only the first sim step of a frame sees the button edges, for
             // the same reason it is the only one that sees the mouse motion.
             if (!consumedMouse) {
-                fire.primary = input.mouseDown(GLFW_MOUSE_BUTTON_LEFT);
-                fire.secondary = input.mouseDown(GLFW_MOUSE_BUTTON_RIGHT);
-                fire.flare = input.pressed(dvk::keyFor(dvk::Toggle::Flare));
+                fire.primary = dvk::bindingDown(input, settings.bindings,
+                                                dvk::PlayerAction::PrimaryFire);
+                fire.secondary = dvk::bindingDown(input, settings.bindings,
+                                                  dvk::PlayerAction::SecondaryFire);
+                fire.flare = dvk::bindingPressed(input, settings.bindings,
+                                                 dvk::PlayerAction::Flare);
                 for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
-                    if (input.pressed(dvk::kWeaponSelectBase + w)) fire.selectWeapon = w;
+                    const dvk::PlayerAction action =
+                        static_cast<dvk::PlayerAction>(static_cast<int>(dvk::PlayerAction::Weapon1) +
+                                                       w);
+                    if (dvk::bindingPressed(input, settings.bindings, action)) fire.selectWeapon = w;
                 }
                 if (opts.autofire >= 0) {
                     if (opts.autofire >= dvk::sim::WeaponCount) {

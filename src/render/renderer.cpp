@@ -676,6 +676,16 @@ void Renderer::buildMenu(const MenuView& menu) {
             hud_.text(button.value.data(), valueX, labelY, labelScale, text);
         }
     }
+
+    if (menu.screen == MenuScreen::Controls && menu.controlsShown > 0 &&
+        menu.controlCount > menu.controlsShown) {
+        char range[64];
+        std::snprintf(range, sizeof(range), "%d-%d of %d", menu.firstControlShown + 1,
+                      menu.firstControlShown + menu.controlsShown, menu.controlCount);
+        const float rangeScale = scale * 0.7f;
+        hud_.text(range, (width - hud_.textWidth(range, rangeScale)) * 0.5f, height * 0.335f,
+                  rangeScale, dim);
+    }
 }
 
 void Renderer::hudPass() {

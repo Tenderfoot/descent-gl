@@ -1,6 +1,7 @@
 #include "game/loop_test.h"
 
 #include "core/log.h"
+#include "game/bindings.h"
 #include "game/level.h"
 #include "game/level_list.h"
 #include "game/menu.h"
@@ -13,6 +14,7 @@
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <array>
@@ -326,7 +328,7 @@ bool verifyPlayerMenu() {
     menu.showPause();
     menu.showSettings(settings);
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 8,
+    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 9,
                  "settings open from the pause menu");
     ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%",
                  "settings show their current values");
@@ -342,6 +344,34 @@ bool verifyPlayerMenu() {
     menu.update(decrease, 1600, 900);
     ok &= expect(menu.editedSettings().masterVolume == 0.75f,
                  "left adjusts the selected setting");
+
+    menu.showControls();
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::Controls && view.buttonCount == 9 &&
+                     view.controlCount == static_cast<int>(kPlayerActionCount),
+                 "controls show a scrolling window of player actions");
+    MenuInput beginCapture;
+    beginCapture.confirm = true;
+    menu.update(beginCapture, 1600, 900);
+    ok &= expect(menu.capturingBinding(), "confirming an action waits for an input");
+    MenuInput bind;
+    bind.bindingPressed = true;
+    bind.binding = {InputDevice::Keyboard, 83};
+    menu.update(bind, 1600, 900);
+    ok &= expect(menu.editedSettings().bindings[PlayerAction::Forward] == bind.binding &&
+                     menu.editedSettings().bindings[PlayerAction::Back] ==
+                         InputBinding{InputDevice::Keyboard, 87},
+                 "rebinding swaps an existing conflict");
+    view = menu.view(640, 360);
+    bool controlsFit = true;
+    for (int i = 0; i < view.buttonCount; ++i) {
+        const MenuRect& bounds = view.buttons[static_cast<size_t>(i)].bounds;
+        controlsFit &= bounds.y >= 360.0f * 0.12f && bounds.y + bounds.height <= 360.0f * 0.90f;
+    }
+    ok &= expect(controlsFit, "controls stay inside the panel at the smallest supported size");
+    menu.closeControls();
+    ok &= expect(menu.screen() == MenuScreen::Settings,
+                 "closing controls returns to settings with edits intact");
     menu.closeSettings();
     ok &= expect(menu.screen() == MenuScreen::Pause,
                  "closing settings returns to the menu that opened them");
@@ -363,6 +393,35 @@ bool verifyPlayerMenu() {
     return ok;
 }
 
+bool verifyInputBindings() {
+    bool ok = true;
+    InputBindings bindings = defaultInputBindings();
+    assignInputBinding(bindings, PlayerAction::Forward,
+                       {InputDevice::Keyboard, GLFW_KEY_I});
+
+    Input input;
+    input.beginFrame();
+    input.onKey(GLFW_KEY_I, GLFW_PRESS);
+    const sim::ShipControls controls = readControls(input, glm::vec2(0.0f), bindings);
+    ok &= expect(controls.thrust == 1.0f &&
+                     bindingPressed(input, bindings, PlayerAction::Forward),
+                 "the configured keyboard binding drives its action");
+
+    assignInputBinding(bindings, PlayerAction::PrimaryFire,
+                       {InputDevice::Mouse, GLFW_MOUSE_BUTTON_4});
+    input.beginFrame();
+    input.onMouseButton(GLFW_MOUSE_BUTTON_4, GLFW_PRESS);
+    ok &= expect(bindingDown(input, bindings, PlayerAction::PrimaryFire) &&
+                     bindingPressed(input, bindings, PlayerAction::PrimaryFire),
+                 "the configured mouse binding drives its action");
+
+    char label[32]{};
+    formatInputBinding(bindings[PlayerAction::PrimaryFire], label, sizeof(label));
+    ok &= expect(std::string_view(label) == "mouse 4", "mouse bindings have player-facing names");
+    log::info("input bindings: {}", ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 } // namespace
 
 int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char* robotConfigPath) {
@@ -373,6 +432,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     bool ok = true;
     ok &= verifyLevelSession(rig.level, rig.robotCfg);
     ok &= verifyPlayerMenu();
+    ok &= verifyInputBindings();
     ok &= verifyLevelList(levelPath);
     ok &= verifyLevelSelect();
 

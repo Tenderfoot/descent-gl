@@ -73,6 +73,8 @@ Options Options::parse(int argc, char** argv) {
             o.settingsTest = true;
         } else if (a == "--settings-menu") {
             o.settingsMenu = true;
+        } else if (a == "--controls-menu") {
+            o.controlsMenu = true;
         } else if (a == "--settings" && hasNext) {
             o.settingsPath = argv[++i];
         } else if (a == "--autofire" && hasNext) {

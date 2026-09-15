@@ -1345,8 +1345,33 @@ runs.
 Settings rows carry their rendered values in fixed-size character storage in
 `MenuView`. The renderer therefore draws the screen through the existing HUD
 batch without formatting into heap-backed strings. At small resolutions the
-eight rows reduce their height and gap together so the final row remains
+nine rows reduce their height and gap together so the final row remains
 inside the panel.
+
+### Player input actions and rebinding
+
+`src/game/input_actions.h` is the stable vocabulary between devices, settings
+and gameplay. Its 24 actions cover the six flight axes, primary and secondary
+fire, flare, headlight, automap, four weapon selections, chase camera, mute and
+pause. Each action has a stable JSON name, a player-facing label and a default
+keyboard or mouse binding. The simulation still receives only
+`sim::ShipControls`; `src/game/bindings.h` translates the current bindings at
+the edge of the fixed step.
+
+Bindings are part of the versioned player settings document. Each entry stores
+a device and code under the action's stable name, so adding an action gives old
+files its default and unknown future actions remain harmless. Invalid device
+codes normalize to the action default. Assigning an input that another action
+already owns swaps the two bindings, keeping every action reachable without a
+separate conflict dialog.
+
+The controls screen is a window over the action list rather than a fixed page.
+At 1600×900 it shows seven actions plus reset and back; at 640×360 it shows
+three plus those two permanent rows. The cursor traverses all 24 actions and
+the window follows it. Confirming or clicking an action enters capture mode,
+where the next keyboard or mouse press becomes the binding and Escape cancels.
+Gameplay shortcuts are suppressed for the capture frame, so binding the old
+mute or camera key cannot also trigger that action behind the menu.
 
 ### Loading a second mine
 

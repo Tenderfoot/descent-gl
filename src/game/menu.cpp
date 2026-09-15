@@ -34,13 +34,14 @@ constexpr std::array<ButtonDefinition, 2> kSummaryButtons{{
     {MenuAction::MainMenu, "main menu"},
 }};
 
-constexpr std::array<ButtonDefinition, 8> kSettingsButtons{{
+constexpr std::array<ButtonDefinition, 9> kSettingsButtons{{
     {MenuAction::None, "master volume"},
     {MenuAction::None, "mouse sensitivity"},
     {MenuAction::None, "invert mouse y"},
     {MenuAction::None, "fullscreen"},
     {MenuAction::None, "window size"},
     {MenuAction::None, "vsync"},
+    {MenuAction::OpenControls, "controls"},
     {MenuAction::ApplySettings, "apply"},
     {MenuAction::Back, "cancel"},
 }};
@@ -64,6 +65,8 @@ std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
             return {kPauseButtons.data(), static_cast<int>(kPauseButtons.size())};
         case MenuScreen::Settings:
             return {kSettingsButtons.data(), static_cast<int>(kSettingsButtons.size())};
+        case MenuScreen::Controls:
+            return {nullptr, static_cast<int>(kPlayerActionCount) + 2};
         case MenuScreen::DisplayConfirmation:
             return {kDisplayConfirmationButtons.data(),
                     static_cast<int>(kDisplayConfirmationButtons.size())};
@@ -138,6 +141,18 @@ void PlayerMenu::showDisplayConfirmation(int seconds) {
     confirmationSeconds_ = std::max(seconds, 0);
 }
 
+void PlayerMenu::showControls() {
+    screen_ = MenuScreen::Controls;
+    controlSelection_ = std::clamp(controlSelection_, 0, static_cast<int>(kPlayerActionCount) + 1);
+    capturingBinding_ = false;
+}
+
+void PlayerMenu::closeControls() {
+    screen_ = MenuScreen::Settings;
+    selection_ = 6;
+    capturingBinding_ = false;
+}
+
 void PlayerMenu::closeSettings() {
     screen_ = settingsParent_;
     selection_ = 0;
@@ -163,6 +178,7 @@ void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int ro
 // long: the cursor moves through the whole list and the window follows it.
 int PlayerMenu::buttonCount() const {
     if (screen_ == MenuScreen::LevelSelect) return static_cast<int>(levels_.size()) + 1;
+    if (screen_ == MenuScreen::Controls) return static_cast<int>(kPlayerActionCount) + 2;
     return buttonsFor(screen_).second;
 }
 
@@ -208,8 +224,20 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     const int count = buttonCount();
     if (count == 0) return MenuAction::None;
 
-    const bool list = screen_ == MenuScreen::LevelSelect;
-    int& cursor = list ? levelSelection_ : selection_;
+    if (screen_ == MenuScreen::Controls && capturingBinding_) {
+        if (input.cancel) {
+            capturingBinding_ = false;
+        } else if (input.bindingPressed) {
+            assignInputBinding(editedSettings_.bindings,
+                               static_cast<PlayerAction>(controlSelection_), input.binding);
+            capturingBinding_ = false;
+        }
+        return MenuAction::None;
+    }
+
+    const bool levelList = screen_ == MenuScreen::LevelSelect;
+    const bool controlList = screen_ == MenuScreen::Controls;
+    int& cursor = levelList ? levelSelection_ : (controlList ? controlSelection_ : selection_);
 
     const MenuView current = view(width, height);
     for (int i = 0; i < current.buttonCount; ++i) {
@@ -217,7 +245,9 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         if (!button.bounds.contains(input.pointer)) continue;
         // On the level list a button is not its own index: the rows show a
         // window into the list, and "back" sits past the end of it.
-        cursor = list ? (button.levelIndex >= 0 ? button.levelIndex : count - 1) : i;
+        if (levelList) cursor = button.levelIndex >= 0 ? button.levelIndex : count - 1;
+        else if (controlList) cursor = button.actionIndex;
+        else cursor = i;
     }
 
     if (input.previous) cursor = (cursor + count - 1) % count;
@@ -234,6 +264,16 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
             const MenuButtonView& button = updated.buttons[static_cast<size_t>(i)];
             if (!button.bounds.contains(input.pointer)) continue;
             if (button.levelIndex >= 0) chosenLevel_ = button.levelIndex;
+            if (controlList) {
+                if (button.actionIndex < static_cast<int>(kPlayerActionCount)) {
+                    capturingBinding_ = true;
+                } else if (button.actionIndex == static_cast<int>(kPlayerActionCount)) {
+                    editedSettings_.bindings = defaultInputBindings();
+                } else {
+                    return MenuAction::Back;
+                }
+                return MenuAction::None;
+            }
             if (screen_ == MenuScreen::Settings && i < 6) {
                 adjustSetting(i, 1);
                 return MenuAction::None;
@@ -242,10 +282,20 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         }
     }
     if (input.confirm) {
-        if (list) {
+        if (levelList) {
             if (levelSelection_ >= static_cast<int>(levels_.size())) return MenuAction::Back;
             chosenLevel_ = levelSelection_;
             return MenuAction::Start;
+        }
+        if (controlList) {
+            if (controlSelection_ < static_cast<int>(kPlayerActionCount)) {
+                capturingBinding_ = true;
+            } else if (controlSelection_ == static_cast<int>(kPlayerActionCount)) {
+                editedSettings_.bindings = defaultInputBindings();
+            } else {
+                return MenuAction::Back;
+            }
+            return MenuAction::None;
         }
         if (screen_ == MenuScreen::Settings && selection_ < 6) {
             adjustSetting(selection_, 1);
@@ -330,6 +380,64 @@ MenuView PlayerMenu::view(int width, int height) const {
         return result;
     }
 
+    if (screen_ == MenuScreen::Controls) {
+        const int actionCount = static_cast<int>(kPlayerActionCount);
+        result.title = "controls";
+        result.subtitle = capturingBinding_ ? "press a key or mouse button; escape cancels"
+                                            : "choose an action to rebind";
+        result.controlCount = actionCount;
+
+        const float listTop = screenHeight * 0.36f;
+        const float listHeight = std::max(screenHeight * 0.895f - listTop, 1.0f);
+        const float rowGap = std::clamp(screenHeight * 0.008f, 3.0f, 10.0f);
+        const int fits = std::max(static_cast<int>((listHeight + rowGap) / (30.0f + rowGap)), 3);
+        const int shown = std::clamp(std::min(actionCount, 7), 1, fits - 2);
+        const int rows = shown + 2;
+        const float rowHeight =
+            std::clamp((listHeight - rowGap * static_cast<float>(rows - 1)) /
+                           static_cast<float>(rows),
+                       18.0f, 52.0f);
+        int first = 0;
+        if (actionCount > shown) {
+            const int focus = std::min(controlSelection_, actionCount - 1);
+            first = std::clamp(focus - (shown - 1) / 2, 0, actionCount - shown);
+        }
+        result.firstControlShown = first;
+        result.controlsShown = shown;
+
+        for (int i = 0; i < shown; ++i) {
+            const int actionIndex = first + i;
+            const PlayerAction action = static_cast<PlayerAction>(actionIndex);
+            MenuButtonView& button = result.buttons[static_cast<size_t>(i)];
+            button.label = playerActionLabel(action);
+            button.actionIndex = actionIndex;
+            button.bounds = {left, listTop + static_cast<float>(i) * (rowHeight + rowGap),
+                             buttonWidth, rowHeight};
+            button.selected = actionIndex == controlSelection_;
+            if (button.selected && capturingBinding_) {
+                std::snprintf(button.value.data(), button.value.size(), "%s", "press input");
+            } else {
+                formatInputBinding(editedSettings_.bindings[action], button.value.data(),
+                                   button.value.size());
+            }
+        }
+        MenuButtonView& reset = result.buttons[static_cast<size_t>(shown)];
+        reset.label = "reset defaults";
+        reset.actionIndex = actionCount;
+        reset.bounds = {left, listTop + static_cast<float>(shown) * (rowHeight + rowGap),
+                        buttonWidth, rowHeight};
+        reset.selected = controlSelection_ == actionCount;
+
+        MenuButtonView& back = result.buttons[static_cast<size_t>(shown + 1)];
+        back.label = "back";
+        back.actionIndex = actionCount + 1;
+        back.bounds = {left, listTop + static_cast<float>(shown + 1) * (rowHeight + rowGap),
+                       buttonWidth, rowHeight};
+        back.selected = controlSelection_ == actionCount + 1;
+        result.buttonCount = rows;
+        return result;
+    }
+
     switch (screen_) {
         case MenuScreen::Main:
             result.title = "descent";
@@ -343,6 +451,7 @@ MenuView PlayerMenu::view(int width, int height) const {
             result.title = "settings";
             result.subtitle = "left and right adjust";
             break;
+        case MenuScreen::Controls: return result;
         case MenuScreen::DisplayConfirmation:
             result.title = "display changed";
             result.subtitle = "keep these display settings?";
@@ -361,7 +470,7 @@ MenuView PlayerMenu::view(int width, int height) const {
     const float rowGap = settingsScreen ? std::clamp(screenHeight * 0.008f, 3.0f, 10.0f) : gap;
     const float buttonHeight =
         settingsScreen
-            ? std::clamp((screenHeight * 0.55f - static_cast<float>(count - 1) * rowGap) /
+            ? std::clamp((screenHeight * 0.54f - static_cast<float>(count - 1) * rowGap) /
                              static_cast<float>(count),
                          18.0f, 56.0f)
             : std::clamp(screenHeight * 0.065f, 42.0f, 64.0f);

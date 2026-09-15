@@ -35,6 +35,7 @@ add_executable(descent
     src/core/window.cpp
     src/game/asset_check.cpp
     src/game/collision_test.cpp
+    src/game/input_actions.cpp
     src/game/level.cpp
     src/game/level_list.cpp
     src/game/light_test.cpp
