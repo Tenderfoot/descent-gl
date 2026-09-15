@@ -24,6 +24,35 @@ namespace dvk::sim {
 
 enum class ProjectileKind : uint8_t { Laser, Vulcan, Concussion, Homing, Flare };
 
+// Which projectile a weapon launches.
+//
+// Written out rather than cast from the weapon id. The two enums only look
+// parallel: Flare sits at index 4 and has no weapon behind it at all, so a cast
+// silently mislabels the first weapon added after Homing - and a hitscan weapon
+// launches nothing, which no cast can express.
+constexpr ProjectileKind projectileFor(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+            return ProjectileKind::Laser;
+        case WeaponVulcan:
+            return ProjectileKind::Vulcan;
+        case WeaponConcussion:
+            return ProjectileKind::Concussion;
+        case WeaponHoming:
+            return ProjectileKind::Homing;
+        case WeaponRailgun:
+        case WeaponLightning:
+            // Hitscan: launches nothing at all. Never reached, because the
+            // firing path branches on weaponFire() before it asks - the cases
+            // are here so the next weapon cannot slip past this switch, which
+            // is the whole reason this is not a cast.
+            break;
+        case WeaponCount:
+            break;
+    }
+    return ProjectileKind::Laser;
+}
+
 struct Projectile {
     bool alive = false;
     ProjectileKind kind = ProjectileKind::Laser;
@@ -35,6 +64,8 @@ struct Projectile {
     float damage = 0.0f;
     float splashRadius = 0.0f;
     float splashDamage = 0.0f;
+    float impactImpulse = 0.0f;
+    float splashImpulse = 0.0f;
     float age = 0.0f;
     float lifetime = 2.0f;
     float lightRadius = 0.0f;
@@ -70,7 +101,22 @@ struct Effect {
     float lightIntensity = 0.0f;
 };
 
+// A hitscan tracer: the line a shot took, drawn for a moment after the damage
+// has already been dealt. Held by value like every other pool, because SimState
+// is copied each step.
+struct Beam {
+    bool alive = false;
+    glm::vec3 start{0.0f};
+    glm::vec3 end{0.0f};
+    glm::vec3 color{1.0f};
+    int segment = 0;
+    float width = 0.12f;
+    float age = 0.0f;
+    float lifetime = 0.10f;
+};
+
 inline constexpr int kMaxProjectiles = 128;
+inline constexpr int kMaxBeams = 16;
 inline constexpr int kMaxFlares = 16;
 inline constexpr int kMaxEffects = 48;
 inline constexpr int kMaxObjects = 64;
@@ -100,6 +146,7 @@ struct Pool {
 using ProjectilePool = Pool<Projectile, kMaxProjectiles>;
 using FlarePool = Pool<Flare, kMaxFlares>;
 using EffectPool = Pool<Effect, kMaxEffects>;
+using BeamPool = Pool<Beam, kMaxBeams>;
 
 // The player's resources and loadout.
 struct PlayerState {
@@ -129,11 +176,25 @@ struct PlayerState {
     float hurtTimer = 0.0f;     // seconds since the hull was last hit
     float recoilTimer = 0.0f;   // seconds since a missile shoved the ship
 
+    // Rate limit for the lightning gun's crackle. Its trace runs every one of
+    // the 120 steps a second; its sound must not.
+    float beamCueTimer = 0.0f;
+
     // Rate limit for the out-of-ammo click. The trigger is read every step, so
     // without this an empty gun clicks 120 times a second, which sounds like a
     // fault in the program rather than like an empty gun.
     float emptyClickTimer = 0.0f;
 };
+
+// Full shields. The number the disabled threshold is a fraction of.
+inline constexpr float kPlayerMaxShields = 100.0f;
+
+// True while the ship is too badly damaged to fly itself. At or below this the
+// player has no thrust, no steering, no guns and no headlight: the ship drifts
+// on what it had. Robots use the same fraction - see kDisabledHealthFraction.
+inline bool playerDisabled(const PlayerState& player) {
+    return player.shields <= kPlayerMaxShields * kDisabledHealthFraction;
+}
 
 // How long after an out-of-ammo click before another one is allowed.
 inline constexpr float kEmptyClickInterval = 0.4f;
@@ -163,6 +224,7 @@ struct CombatState {
     ProjectilePool projectiles;
     FlarePool flares;
     EffectPool effects;
+    BeamPool beams;
     PlayerState player;
     ObjectHealth objects;
 };
@@ -170,6 +232,50 @@ struct CombatState {
 struct RobotState;
 struct RobotConfig;
 struct SolidDoors;
+struct PropState;
+
+// --- the combat trace ----------------------------------------------------
+
+// What a shot ran into first. Kind::None means it reached its full length
+// without touching anything.
+struct CombatHit {
+    enum class Kind : uint8_t { None, Wall, Robot, Object, Player, Prop };
+
+    Kind kind = Kind::None;
+    float distance = 0.0f;
+    glm::vec3 point{0.0f};
+    glm::vec3 normal{0.0f};   // walls and doors only, out of the surface
+    int segment = -1;         // the segment the hit is in
+    int index = -1;           // robot slot for Robot, Level::objects index for Object,
+                              // floating-light slot for Prop
+};
+
+struct CombatTraceParams {
+    // Above zero sweeps a sphere of this radius instead of casting a ray, so a
+    // fast projectile cannot pass through a thin wall between two steps.
+    float radius = 0.0f;
+    // Who fired: -1 is the player, anything else is that robot's slot. A shot
+    // never hits its own side - the player's fire passes through the player,
+    // and no robot's fire touches any robot, because a corridor of them
+    // shooting each other is a brawl the player only watches.
+    int owner = -1;
+    // False traces geometry alone. Flares are thrown, not fired: they land on
+    // the floor rather than sticking into whatever they crossed.
+    bool hitBodies = true;
+};
+
+// The nearest of wall, shut door, robot, destructible object and player along
+// `direction` from `origin`, walking the segment graph as it goes.
+//
+// This is the one place that answers "what is in front of me". The projectile
+// loop, the hitscan weapons and any future robot hitscan all ask it, rather
+// than each growing its own copy of the sphere test - which is how the three
+// copies this replaced came to disagree about which target wins a tie.
+CombatHit traceCombatRay(const Level& level, const CombatState& state, const Body& ship,
+                         const RobotState* robots, const glm::vec3& origin,
+                         const glm::vec3& direction, float maxDistance, int segment,
+                         const CombatTraceParams& params = {}, const SolidDoors* doors = nullptr,
+                         const PropState* props = nullptr);
 
 // Sets up object health from the level's objects. An object whose type names
 // a robot definition is not scenery: the simulation owns it as a robot, so it
@@ -187,7 +293,8 @@ void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& ou
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
-                const SolidDoors* doors = nullptr, EventQueue* events = nullptr);
+                const SolidDoors* doors = nullptr, EventQueue* events = nullptr,
+                PropState* props = nullptr);
 
 // A short-lived additive billboard with a light: a muzzle flash, an impact, an
 // explosion. Public because robots fire too, and a robot's muzzle flash is the

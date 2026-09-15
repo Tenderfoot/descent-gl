@@ -85,25 +85,6 @@ float firstWallHit(const Level& level, const glm::vec3& origin, const glm::vec3&
 // surface (validated in M3), so a ray from an interior point crosses it an odd
 // number of times. Three directions and a majority vote, because a single ray
 // that grazes an edge can double-count it.
-bool insideMine(const Level& level, const glm::vec3& p) {
-    // Deliberately irrational-looking directions: a ray down an axis lies in
-    // the plane of a grid-aligned wall far too often.
-    static const std::array<glm::vec3, 3> kProbes{{
-        glm::normalize(glm::vec3(0.5773f, 0.3313f, 0.7454f)),
-        glm::normalize(glm::vec3(-0.8112f, 0.4231f, 0.4037f)),
-        glm::normalize(glm::vec3(0.2671f, -0.8923f, 0.3629f)),
-    }};
-
-    int votes = 0;
-    for (const glm::vec3& dir : kProbes) {
-        int crossings = 0;
-        for (const WallTriangle& w : level.walls) {
-            if (sim::rayTriangleDistance(p, dir, w.p[0], w.p[1], w.p[2]) > 1e-4f) ++crossings;
-        }
-        if (crossings % 2 == 1) ++votes;
-    }
-    return votes >= 2;
-}
 
 } // namespace
 
@@ -163,6 +144,66 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         if (escapes > 0) {
             log::error("{} of {} trials left the mine (first at step {})", escapes, trials,
                        worstStep);
+            ok = false;
+        }
+    }
+
+    // --- containment and energy under knockback ---------------------------
+    //
+    // The knockback channel deliberately sits outside maxSpeed, so a blast can
+    // push far harder than the ship's own engines ever do. Two things have to
+    // hold at that speed: the mine still contains the body, and a bouncing body
+    // never leaves a collision faster than it arrived - restitution inside an
+    // iterated push-out can otherwise compound in a corner and run away.
+    {
+        constexpr int kSteps = 360;
+        constexpr float kBlastSpeed = 150.0f;   // well past anything the weapons produce
+        int escapes = 0;
+        float fastest = 0.0f;
+
+        for (const float restitution : {0.0f, 0.65f}) {
+            sim::CollisionConfig bouncy = collision;
+            bouncy.restitution = restitution;
+            // A bouncing body wants no scrape: otherwise the bounce is bled
+            // away as fast as it is made, and the case never gets tested.
+            if (restitution > 0.0f) bouncy.scrapeDamping = 0.0f;
+
+            for (int si = 0; si < n; ++si) {
+                for (const glm::vec3& dir : dirs) {
+                    sim::Body body;
+                    body.position = level.segments[static_cast<size_t>(si)].center;
+                    body.segment = si;
+                    body.radius = flight.shipRadius;
+                    body.knockback = dir * kBlastSpeed;
+
+                    for (int step = 0; step < kSteps; ++step) {
+                        body.knockback *= std::exp(-sim::kKnockbackDamping * kStep);
+                        body.position += body.motion() * kStep;
+                        sim::resolveCollision(level, body, bouncy, kStep, nullptr);
+                        fastest = std::max(fastest, glm::length(body.motion()));
+
+                        if (!insideMine(level, body.position)) {
+                            if (escapes < 6) {
+                                log::error("knockback escaped the mine: segment {} heading "
+                                           "{:.2f} {:.2f} {:.2f}, restitution {:.2f}, step {}",
+                                           si, dir.x, dir.y, dir.z, restitution, step);
+                            }
+                            ++escapes;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        log::info("knockback: {} u/s in both slide and bounce, {} escapes, fastest seen {:.1f} u/s",
+                  kBlastSpeed, escapes, fastest);
+        if (escapes > 0) {
+            log::error("{} knockback trials left the mine", escapes);
+            ok = false;
+        }
+        if (fastest > kBlastSpeed + 0.5f) {
+            log::error("a bounce manufactured speed: {:.1f} u/s from {:.1f}", fastest, kBlastSpeed);
             ok = false;
         }
     }

@@ -178,6 +178,34 @@ struct LevelObject {
     float health = 0.0f;
 };
 
+// Authored props that move once the level is running. The simulation state for
+// them lives in sim::PropState; these are only what the file says.
+struct FloatingLightDef {
+    glm::vec3 position{0.0f};
+    int segment = -1;
+    float radius = 1.1f;
+    glm::vec3 color{1.0f, 0.86f, 0.62f};
+    float lightRadius = 26.0f;
+    float lightIntensity = 2.6f;
+    float restitution = 0.72f;
+    float mass = 0.45f;
+    float drift = 1.4f;
+};
+
+struct SwingingLightDef {
+    glm::vec3 anchor{0.0f};     // where the cord meets the ceiling
+    int segment = -1;
+    float cordLength = 7.0f;
+    float amplitude = 0.55f;    // radians either side of straight down
+    float rate = 1.5f;          // rad/s through the swing
+    float phase = 0.0f;
+    glm::vec3 swingAxis{1.0f, 0.0f, 0.0f};
+    glm::vec3 color{1.0f, 0.95f, 0.82f};
+    float lightRadius = 34.0f;
+    float lightIntensity = 3.2f;
+    float coneDegrees = 60.0f;
+};
+
 struct Level {
     std::string name;
     std::vector<glm::vec3> vertices;
@@ -186,6 +214,8 @@ struct Level {
     std::vector<LevelObject> objects;
     std::vector<Door> doors;
     std::vector<Pickup> pickups;
+    std::vector<FloatingLightDef> floatingLights;
+    std::vector<SwingingLightDef> swingingLights;
     ExitTrigger exitTrigger;
     PlayerStart start;
 
@@ -222,6 +252,18 @@ struct LightFlood {
 namespace sim {
 struct DoorField;
 }
+
+// True if a point is inside the mine's sealed surface, by ray parity against
+// every wall triangle.
+//
+// A different question from findSegment(), and the one containment checks want.
+// findSegment() asks which hexahedron holds the point and answers -1 on a point
+// that sits exactly on a shared face or in a corner where two segments meet -
+// which is inside the mine, just not unambiguously inside any one segment.
+// Using findSegment() to mean "did it escape" reports leaks that are not there.
+//
+// Linear in the wall count and meant for tests, not for the step.
+bool insideMine(const Level& level, const glm::vec3& point);
 
 // Recomputes one light's segment set. Call after moving it or changing radius;
 // a stale set is how a light ends up lighting a room through a wall.

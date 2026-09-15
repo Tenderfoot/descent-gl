@@ -1,15 +1,74 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <glm/vec3.hpp>
 #include <string>
 
 namespace dvk::sim {
 
-enum WeaponId : int { WeaponLaser = 0, WeaponVulcan, WeaponConcussion, WeaponHoming, WeaponCount };
+enum WeaponId : int {
+    WeaponLaser = 0,
+    WeaponVulcan,
+    WeaponConcussion,
+    WeaponHoming,
+    WeaponRailgun,
+    WeaponLightning,
+    WeaponCount,
+};
 
-inline constexpr std::array<const char*, WeaponCount> kWeaponNames{"laser", "vulcan",
-                                                                  "concussion", "homing"};
+inline constexpr std::array<const char*, WeaponCount> kWeaponNames{
+    "laser", "vulcan", "concussion", "homing", "railgun", "lightning"};
+
+// Which trigger a weapon answers to. Written out per weapon rather than
+// inferred from the enum's order: "id <= WeaponVulcan" happened to be true
+// while the guns were declared guns-first, and would silently reclassify every
+// weapon added after it.
+enum class WeaponSlot : uint8_t { Primary, Secondary };
+
+constexpr WeaponSlot weaponSlot(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+        case WeaponVulcan:
+        case WeaponRailgun:
+        case WeaponLightning:
+            return WeaponSlot::Primary;
+        case WeaponConcussion:
+        case WeaponHoming:
+            return WeaponSlot::Secondary;
+        case WeaponCount:
+            break;
+    }
+    return WeaponSlot::Primary;
+}
+
+// How a weapon delivers its damage. Structural rather than tunable, so it is a
+// function of the id and not a field anyone can set to a nonsense combination.
+//
+//   Projectile   spawns a bolt that travels and is swept against the world.
+//   Instant      one trace per trigger pull, at fireInterval. Damage and
+//                energy are per shot.
+//   Continuous   one trace every step the trigger is held. Damage and energy
+//                are per SECOND and are multiplied by dt; fireInterval is the
+//                gap between its sound cues, not a rate limit on damage.
+enum class WeaponFire : uint8_t { Projectile, Instant, Continuous };
+
+constexpr WeaponFire weaponFire(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponLaser:
+        case WeaponVulcan:
+        case WeaponConcussion:
+        case WeaponHoming:
+            return WeaponFire::Projectile;
+        case WeaponRailgun:
+            return WeaponFire::Instant;
+        case WeaponLightning:
+            return WeaponFire::Continuous;
+        case WeaponCount:
+            break;
+    }
+    return WeaponFire::Projectile;
+}
 
 // Laser has four upgrade levels. Each changes damage and colour, and the colour
 // is the readable part: in a mine with no ambient light, what your own fire
@@ -30,6 +89,18 @@ struct WeaponDef {
     float lightIntensity = 2.4f;
     float splashRadius = 0.0f;
     float splashDamage = 0.0f;
+    // The punch. impactImpulse is what a direct hit shoves the target with;
+    // splashImpulse is what the blast shoves everything in its radius with, at
+    // the centre, falling off to nothing at the edge. Both are a velocity
+    // change in units/s at mass 1 - see sim/body.h.
+    float impactImpulse = 0.0f;
+    float splashImpulse = 0.0f;
+    // Hitscan only: how far the trace reaches, and what its tracer looks like.
+    // A beam is drawn from the muzzle to whatever the trace found, so range is
+    // visible as well as felt.
+    float range = 0.0f;            // units
+    float beamWidth = 0.12f;       // units, half the drawn thickness
+    float beamTime = 0.10f;        // seconds the tracer lingers
     // Homing only.
     float turnRate = 0.0f;         // rad/s
     float seekCone = 0.0f;         // radians, half-angle it will acquire within
@@ -56,6 +127,11 @@ struct WeaponConfig {
     glm::vec3 flareColor{1.0f, 0.72f, 0.36f};
 
     // Player resources.
+    // How hard the ship is to shove. Heavier than a drone and lighter than a
+    // brute: a concussion at your own feet throws you, and a vulcan round does
+    // not. Lives here rather than in FlightConfig because this is the config
+    // stepCombat is handed, and stepCombat is what does the shoving.
+    float playerMass = 1.5f;
     float headlightDrain = 1.6f;     // energy per second while the headlight is on
     float energyRecharge = 0.0f;     // none by default; pickups are M7's job
 

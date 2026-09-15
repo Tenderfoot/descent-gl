@@ -5,6 +5,7 @@
 #include "game/visibility.h"
 #include "sim/gameflow.h"
 #include "sim/lighting.h"
+#include "sim/props.h"
 #include "render/camera.h"
 #include "render/model.h"
 #include "render/shadow.h"
@@ -326,6 +327,109 @@ int runWorldTest(const char* levelPath) {
                           level.lights.size(), level.walls.size());
             }
             std::remove(temp.c_str());
+        }
+    }
+
+    // --- the props that move --------------------------------------------
+    //
+    // A floating light has to survive being shot hard in any direction: it
+    // bounces rather than slides, and restitution inside an iterated push-out
+    // is exactly the case that can throw a body through a corner. A lamp has to
+    // stay on its cord and inside the room it hangs in.
+    if (!level.floatingLights.empty() || !level.swingingLights.empty()) {
+        constexpr float kStep = 1.0f / 120.0f;
+        sim::PropState props;
+        sim::spawnProps(level, props);
+
+        int escapes = 0;
+        int bounced = 0;
+        int trials = 0;
+        for (int fi = 0; fi < props.floatingCount; ++fi) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        ++trials;
+
+                        sim::PropState run = props;
+                        sim::FloatingLight& ball = run.floating[static_cast<size_t>(fi)];
+                        const glm::vec3 shove =
+                            glm::normalize(glm::vec3(dx, dy, dz)) * 150.0f;   // past any weapon
+                        ball.body.knockback = shove;
+
+                        bool reversed = false;
+                        for (int step = 0; step < 600; ++step) {   // five seconds
+                            sim::stepProps(level, run, kStep);
+                            if (!insideMine(level, ball.body.position)) {
+                                if (escapes < 4) {
+                                    log::error("floating light {} left the mine heading {} {} {} "
+                                               "at {:.2f}s, position {:.2f} {:.2f} {:.2f}",
+                                               fi, dx, dy, dz, static_cast<float>(step) * kStep,
+                                               ball.body.position.x, ball.body.position.y,
+                                               ball.body.position.z);
+                                }
+                                ++escapes;
+                                break;
+                            }
+                            if (glm::dot(ball.body.motion(), shove) < 0.0f) reversed = true;
+                        }
+                        if (reversed) ++bounced;
+                    }
+                }
+            }
+        }
+
+        if (escapes > 0) {
+            log::error("{} of {} floating-light trials left the mine", escapes, trials);
+            ok = false;
+        }
+        if (trials > 0 && bounced < trials) {
+            log::error("only {} of {} floating-light trials bounced back off a wall", bounced,
+                       trials);
+            ok = false;
+        }
+        if (trials > 0) {
+            log::info("floating lights: {} trials at 150 u/s for 5 s, {} escapes, {} bounced back",
+                      trials, escapes, bounced);
+        }
+
+        // One full period of every lamp: it must reach its authored amplitude
+        // on both sides, stay exactly a cord's length from its anchor, and
+        // never swing out of the mine.
+        for (int li = 0; li < props.swingingCount; ++li) {
+            sim::PropState run = props;
+            sim::SwingingLight& lamp = run.swinging[static_cast<size_t>(li)];
+            const float period = 6.2831853f / std::max(0.01f, lamp.rate);
+            float widest = 0.0f;
+            float worstCord = 0.0f;
+            int outside = 0;
+
+            for (int step = 0; step * kStep < period * 1.05f; ++step) {
+                sim::stepProps(level, run, kStep);
+                const glm::vec3 arm = lamp.position - lamp.anchor;
+                worstCord = std::max(worstCord, std::abs(glm::length(arm) - lamp.cordLength));
+                widest = std::max(widest, std::acos(std::clamp(
+                                              glm::dot(glm::normalize(arm),
+                                                       glm::vec3(0.0f, -1.0f, 0.0f)),
+                                              -1.0f, 1.0f)));
+                if (!insideMine(level, lamp.position)) ++outside;
+            }
+
+            if (outside > 0) {
+                log::error("swinging light {} left the mine on {} steps", li, outside);
+                ok = false;
+            }
+            if (worstCord > 0.001f) {
+                log::error("swinging light {} stretched its cord by {:.4f}u", li, worstCord);
+                ok = false;
+            }
+            if (std::abs(widest - lamp.amplitude) > 0.02f) {
+                log::error("swinging light {} reached {:.3f} rad, not its {:.3f} amplitude", li,
+                           widest, lamp.amplitude);
+                ok = false;
+            }
+            log::info("swinging light {}: {:.2f}s period, reached {:.3f} rad of {:.3f}, cord held "
+                      "to {:.5f}u", li, period, widest, lamp.amplitude, worstCord);
         }
     }
 

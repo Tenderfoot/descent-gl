@@ -200,6 +200,26 @@ void validate(const Level& level, const std::string& path) {
 
 } // namespace
 
+bool insideMine(const Level& level, const glm::vec3& point) {
+    // Deliberately irrational-looking directions: a ray down an axis lies in
+    // the plane of a grid-aligned wall far too often.
+    static const std::array<glm::vec3, 3> kProbes{{
+        glm::normalize(glm::vec3(0.5773f, 0.3313f, 0.7454f)),
+        glm::normalize(glm::vec3(-0.8112f, 0.4231f, 0.4037f)),
+        glm::normalize(glm::vec3(0.2671f, -0.8923f, 0.3629f)),
+    }};
+
+    int votes = 0;
+    for (const glm::vec3& dir : kProbes) {
+        int crossings = 0;
+        for (const WallTriangle& w : level.walls) {
+            if (sim::rayTriangleDistance(point, dir, w.p[0], w.p[1], w.p[2]) > 1e-4f) ++crossings;
+        }
+        if (crossings % 2 == 1) ++votes;
+    }
+    return votes >= 2;
+}
+
 void rebuildLightSegments(const Level& level, Light& light, LightFlood& scratch,
                           const sim::DoorField* doors) {
     light.segments.clear();
@@ -429,6 +449,40 @@ Level loadLevel(const std::string& path) {
             level.exitTrigger.segment = it->value("segment", -1);
         }
 
+        if (auto it = j.find("floatingLights"); it != j.end()) {
+            for (const auto& fj : *it) {
+                FloatingLightDef def;
+                def.position = readVec3(fj.at("position"));
+                def.segment = fj.value("segment", -1);
+                def.radius = fj.value("radius", def.radius);
+                if (fj.contains("color")) def.color = readVec3(fj.at("color"));
+                def.lightRadius = fj.value("lightRadius", def.lightRadius);
+                def.lightIntensity = fj.value("lightIntensity", def.lightIntensity);
+                def.restitution = fj.value("restitution", def.restitution);
+                def.mass = fj.value("mass", def.mass);
+                def.drift = fj.value("drift", def.drift);
+                level.floatingLights.push_back(def);
+            }
+        }
+
+        if (auto it = j.find("swingingLights"); it != j.end()) {
+            for (const auto& sj : *it) {
+                SwingingLightDef def;
+                def.anchor = readVec3(sj.at("anchor"));
+                def.segment = sj.value("segment", -1);
+                def.cordLength = sj.value("cordLength", def.cordLength);
+                def.amplitude = sj.value("amplitude", def.amplitude);
+                def.rate = sj.value("rate", def.rate);
+                def.phase = sj.value("phase", def.phase);
+                if (sj.contains("swingAxis")) def.swingAxis = readVec3(sj.at("swingAxis"));
+                if (sj.contains("color")) def.color = readVec3(sj.at("color"));
+                def.lightRadius = sj.value("lightRadius", def.lightRadius);
+                def.lightIntensity = sj.value("lightIntensity", def.lightIntensity);
+                def.coneDegrees = sj.value("coneDegrees", def.coneDegrees);
+                level.swingingLights.push_back(def);
+            }
+        }
+
         if (auto it = j.find("objects"); it != j.end()) {
             for (const auto& oj : *it) {
                 LevelObject obj;
@@ -511,6 +565,37 @@ Level loadLevel(const std::string& path) {
     if (level.exitTrigger.present &&
         (level.exitTrigger.segment < 0 || level.exitTrigger.segment >= level.segmentCount())) {
         level.exitTrigger.segment = findSegment(level, level.exitTrigger.position);
+    }
+
+    // Both prop kinds are validated here rather than at spawn, so a level with
+    // a lamp hung through the ceiling or a ball inside a wall fails at load -
+    // where the message can name the file - instead of behaving oddly later.
+    for (FloatingLightDef& def : level.floatingLights) {
+        if (def.segment < 0 || def.segment >= level.segmentCount()) {
+            def.segment = findSegment(level, def.position, def.segment);
+        }
+        if (def.segment < 0) {
+            log::fatal("{}: floating light at {:.1f} {:.1f} {:.1f} is not inside any segment",
+                       path, def.position.x, def.position.y, def.position.z);
+        }
+    }
+
+    for (SwingingLightDef& def : level.swingingLights) {
+        if (def.segment < 0 || def.segment >= level.segmentCount()) {
+            def.segment = findSegment(level, def.anchor, def.segment);
+        }
+        if (def.segment < 0) {
+            log::fatal("{}: swinging light anchored at {:.1f} {:.1f} {:.1f} is not inside any "
+                       "segment", path, def.anchor.x, def.anchor.y, def.anchor.z);
+        }
+        // A cord longer than the room drops the lamp through the floor, where
+        // it lights the segment below through solid rock.
+        const glm::vec3 lowest = def.anchor + glm::vec3(0.0f, -def.cordLength, 0.0f);
+        if (findSegment(level, lowest, def.segment) < 0) {
+            log::fatal("{}: swinging light at {:.1f} {:.1f} {:.1f} has a {:.1f}u cord that "
+                       "reaches outside the mine", path, def.anchor.x, def.anchor.y,
+                       def.anchor.z, def.cordLength);
+        }
     }
 
     for (Light& light : level.lights) rebuildLightSegments(level, light);
@@ -607,6 +692,32 @@ bool saveLevel(const std::string& path, const Level& level) {
             {{"kind", kPickupNames[static_cast<size_t>(pickup.kind)]},
              {"position", {pickup.position.x, pickup.position.y, pickup.position.z}},
              {"segment", pickup.segment}});
+    }
+    for (const FloatingLightDef& def : level.floatingLights) {
+        j["floatingLights"].push_back(
+            {{"position", {def.position.x, def.position.y, def.position.z}},
+             {"segment", def.segment},
+             {"radius", def.radius},
+             {"color", {def.color.r, def.color.g, def.color.b}},
+             {"lightRadius", def.lightRadius},
+             {"lightIntensity", def.lightIntensity},
+             {"restitution", def.restitution},
+             {"mass", def.mass},
+             {"drift", def.drift}});
+    }
+    for (const SwingingLightDef& def : level.swingingLights) {
+        j["swingingLights"].push_back(
+            {{"anchor", {def.anchor.x, def.anchor.y, def.anchor.z}},
+             {"segment", def.segment},
+             {"cordLength", def.cordLength},
+             {"amplitude", def.amplitude},
+             {"rate", def.rate},
+             {"phase", def.phase},
+             {"swingAxis", {def.swingAxis.x, def.swingAxis.y, def.swingAxis.z}},
+             {"color", {def.color.r, def.color.g, def.color.b}},
+             {"lightRadius", def.lightRadius},
+             {"lightIntensity", def.lightIntensity},
+             {"coneDegrees", def.coneDegrees}});
     }
     if (level.exitTrigger.present) {
         j["exit"] = {{"position",

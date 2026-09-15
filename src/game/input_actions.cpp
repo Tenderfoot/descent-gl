@@ -46,6 +46,8 @@ constexpr std::array<ActionDefinition, kPlayerActionCount> kActions{{
     {"weapon2", "select vulcan", key(GLFW_KEY_2)},
     {"weapon3", "select concussion", key(GLFW_KEY_3)},
     {"weapon4", "select homing", key(GLFW_KEY_4)},
+    {"weapon5", "select railgun", key(GLFW_KEY_5)},
+    {"weapon6", "select lightning", key(GLFW_KEY_6)},
     {"chaseCamera", "chase camera", key(GLFW_KEY_F1)},
     {"mute", "mute", key(GLFW_KEY_M)},
     {"pause", "pause", key(GLFW_KEY_ESCAPE)},

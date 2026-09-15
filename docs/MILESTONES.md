@@ -1733,3 +1733,56 @@ written temporary file. Automated runs do not update real player history, and
 | Debug and Release verification suites | ✅ all 11 tests pass |
 | Release rendered run and level list after warm-up | ✅ sim none, draw none on 0 of 90 frames |
 | Release resize test | ✅ 1,788 frames, 902 steps, 119.8 steps/s; draw allocations limited to 7 resize-resource frames |
+
+## Combat force, hitscan weapons, disabled ships and moving props
+
+Six requested mechanics, resequenced into four phases around the two things
+most of them shared: one impulse system and one combat trace. Building the
+shared parts first made four of the six small.
+
+**Phase 0 — one trace, honest weapon slots.** `traceCombatRay()` replaced three
+near-identical copies of the same target test in the projectile loop, which
+compared each target only against the wall and never against each other.
+`projectileFor()`, `weaponSlot()` and `weaponFire()` replaced a cast and an
+`id <= WeaponVulcan` test that were correct only while the weapon enum happened
+to be in the right order. No behaviour visible to the player changed, except
+that the nearest target now wins.
+
+**Phase 1 — impulse and restitution.** `Body::knockback` is a second velocity
+channel because everything that owns `velocity` would erase a shove.
+`applySplash` gained blast occlusion; `CollisionConfig` gained restitution.
+
+**Phase 2 — railgun and lightning gun.** Two hitscan weapons on keys 5 and 6,
+both consuming Phase 0's trace, both charged to energy with no new ammo
+counters. Beams draw into the existing billboard buffer.
+
+**Phase 3 — disabled ships.** One threshold governs robots and the player.
+A disabled ship keeps exactly the velocity it had and tumbles; the player loses
+thrust, steering, guns, flares and headlight together.
+
+**Phase 4 — props that move.** A floating light that bounces when shot, and a
+ceiling lamp that swings analytically on a cord. Both are dynamic lights, so a
+swinging spot sweeps real stencil shadows.
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings |
+| Verification suite | ✅ all 11 tests pass |
+| Blast occlusion | ✅ 30-unit blast 1 u behind a 10 u wall: 0 damage, 0 shove; same blast in the open: 50 shields |
+| Knockback containment | ✅ 150 u/s from 34 segments × 26 directions × restitution {0.0, 0.65} × 3 s: 0 escapes |
+| Bounce energy | ✅ fastest speed in 1,768 trials 148.0 u/s against 150.0 u/s started at |
+| Hitscan containment | ✅ 884 traces at 300 u range from every segment centre: 0 ran past the mine, longest 130.2 u |
+| Held beam metering | ✅ 1.0 s of trigger costs 11.0 energy against 11.0/s configured |
+| Disabled ship drift | ✅ 38.08 u/s held for 5.0 s with the stick hard over, against maxSpeed 20 |
+| Disabled robot | ✅ at 9% health: no fire for 2 s, drifted 12.0 u keeping 6.0 u/s of 6.0, tumbling, still killable |
+| Disabled player | ✅ at 9% shields: 1 s of every trigger fires nothing, headlight out; 50% shields restores control next step |
+| Floating light shot | ✅ railgun 19.86 u, concussion 15.94 u away in 0.5 s, never destroyed |
+| Floating light containment | ✅ 52 trials at 150 u/s for 5 s: 0 escapes, 52 bounced back |
+| Swinging lamp | ✅ 4.83 s period, reached 0.550 rad of its 0.550 amplitude, cord held to 0.00000 u |
+| Sound set | ✅ 26 clips load, up from 24; `make-sounds.py --check` reports 0 files differ |
+| Rendered run | ✅ railgun beam visible in flight with its impact; floating light and swinging lamp lit and drawn |
+
+Two pre-existing failures were fixed first, in their own commit, because the
+Linux verification path did not work at all: the build did not compile under
+GCC, and `--weapons-test` failed on a case whose damage had always come from
+robot fire rather than from the missile it was testing.

@@ -2,6 +2,7 @@
 
 #include "sim/combat.h"
 #include "sim/gameflow.h"
+#include "sim/props.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 
@@ -27,6 +28,7 @@ struct SimState {
     // vector here would allocate in the simulation loop.
     sim::CombatState combat;
     sim::RobotState robots;
+    sim::PropState props;
     sim::GameState game;
 };
 
@@ -64,6 +66,18 @@ struct RenderState {
     std::array<Flash, sim::kMaxEffects> flashes{};
     int flashCount = 0;
 
+    // Hitscan tracers. Not interpolated: a beam is struck at one instant and
+    // lives for a tenth of a second, so blending it between two steps would
+    // smear it rather than smooth it.
+    struct BeamView {
+        glm::vec3 start{0.0f};
+        glm::vec3 end{0.0f};
+        glm::vec3 color{1.0f};
+        float width = 0.12f;
+    };
+    std::array<BeamView, sim::kMaxBeams> beams{};
+    int beamCount = 0;
+
     // Which level objects are still standing, so a destroyed target stops
     // being drawn and stops casting.
     std::array<bool, sim::kMaxObjects> objectAlive{};
@@ -75,6 +89,10 @@ struct RenderState {
         glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
         int type = 0;
         int slot = 0;
+        // Seconds this robot has been disabled, or 0 while it is healthy. It
+        // drives the red pulse, and it comes from the simulation rather than a
+        // render clock so every robot's pulse is its own.
+        float disabledTime = 0.0f;
     };
     std::array<RobotView, sim::kMaxRobots> robots{};
     // Indexed by robot slot, so the light and shadow passes can cull a robot
@@ -96,10 +114,31 @@ struct RenderState {
     std::array<float, sim::kMaxDoors> doorOpenness{};
     int doorCount = 0;
 
+    // Floating lights and swinging lamps, as the unlit pass draws them. The
+    // lights themselves go into the dynamic light list; these are the visible
+    // fixtures.
+    struct PropView {
+        glm::vec3 position{0.0f};
+        glm::vec3 color{1.0f};
+        float size = 1.0f;
+        // Swinging lamps only: where the cord is anchored, so the renderer can
+        // draw the cord the lamp is hanging from.
+        bool corded = false;
+        glm::vec3 anchor{0.0f};
+    };
+    std::array<PropView, sim::kMaxFloatingLights + sim::kMaxSwingingLights> props{};
+    int propCount = 0;
+
     // The mine coming apart during the countdown: a world-space offset added
     // to the camera, and a multiplier on every static light so they flicker.
     glm::vec3 shakeOffset{0.0f};
     float staticLightScale = 1.0f;
+
+    // The player's ship is under the disabled threshold: tinted in the chase
+    // camera, and the reason the HUD is showing a warning. The clock is the
+    // level's own elapsed time, used only to give the pulse a phase.
+    bool shipDisabled = false;
+    float shipDisabledTime = 0.0f;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
@@ -139,6 +178,19 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
     }
 
+    for (const sim::Beam& beam : b.combat.beams.items) {
+        if (!beam.alive) continue;
+        RenderState::BeamView view;
+        view.start = beam.start;
+        view.end = beam.end;
+        // Fades over its short life, so a railgun tracer hangs for a moment
+        // and then is gone rather than blinking out.
+        const float k = beam.lifetime > 0.0f ? beam.age / beam.lifetime : 1.0f;
+        view.color = beam.color * std::max(0.0f, 1.0f - k);
+        view.width = beam.width;
+        r.beams[static_cast<size_t>(r.beamCount++)] = view;
+    }
+
     for (const sim::Effect& e : b.combat.effects.items) {
         if (!e.alive) continue;
         RenderState::Flash flash;
@@ -158,6 +210,7 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         RenderState::RobotView view;
         view.type = cur.type;
         view.slot = i;
+        view.disabledTime = cur.mode == sim::RobotMode::Disabled ? cur.modeTime : 0.0f;
         view.position =
             prev.alive ? glm::mix(prev.body.position, cur.body.position, t) : cur.body.position;
         view.orientation =
@@ -194,6 +247,32 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
                      b.game.doors[static_cast<size_t>(i)].openness, t);
     }
 
+    for (int i = 0; i < b.props.floatingCount; ++i) {
+        const sim::FloatingLight& ball = b.props.floating[static_cast<size_t>(i)];
+        if (!ball.alive) continue;
+        const sim::FloatingLight& was = a.props.floating[static_cast<size_t>(i)];
+        RenderState::PropView view;
+        view.position = was.alive ? glm::mix(was.body.position, ball.body.position, t)
+                                  : ball.body.position;
+        view.color = ball.color;
+        view.size = ball.body.radius * 1.5f;
+        r.props[static_cast<size_t>(r.propCount++)] = view;
+    }
+    for (int i = 0; i < b.props.swingingCount; ++i) {
+        const sim::SwingingLight& lamp = b.props.swinging[static_cast<size_t>(i)];
+        if (!lamp.alive) continue;
+        const sim::SwingingLight& was = a.props.swinging[static_cast<size_t>(i)];
+        RenderState::PropView view;
+        view.position = was.alive ? glm::mix(was.position, lamp.position, t) : lamp.position;
+        view.color = lamp.color;
+        view.size = 0.9f;
+        view.corded = true;
+        view.anchor = lamp.anchor;
+        r.props[static_cast<size_t>(r.propCount++)] = view;
+    }
+
+    r.shipDisabled = b.ship.disabled;
+    r.shipDisabledTime = b.game.elapsed;
     r.objectCount = b.combat.objects.count;
     for (int i = 0; i < r.objectCount; ++i) {
         r.objectAlive[static_cast<size_t>(i)] = b.combat.objects.alive[static_cast<size_t>(i)];

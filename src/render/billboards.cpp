@@ -1,5 +1,7 @@
 #include "render/billboards.h"
 
+#include <glm/geometric.hpp>
+
 namespace dvk::gl {
 
 Billboards::Billboards() {
@@ -34,6 +36,37 @@ void Billboards::add(const glm::vec3& center, const glm::vec3& right, const glm:
     const Vertex br{center + r - u, color, 1.0f, 0.0f};
     const Vertex tr{center + r + u, color, 1.0f, 1.0f};
     const Vertex tl{center - r + u, color, 0.0f, 1.0f};
+
+    vertices_.push_back(bl);
+    vertices_.push_back(br);
+    vertices_.push_back(tr);
+    vertices_.push_back(bl);
+    vertices_.push_back(tr);
+    vertices_.push_back(tl);
+}
+
+void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye,
+                         float width, const glm::vec3& color) {
+    const glm::vec3 axis = end - start;
+    const float length = glm::length(axis);
+    if (length < 1e-4f) return;
+    const glm::vec3 dir = axis / length;
+
+    // The beam's own axis crossed with the line of sight gives the direction to
+    // widen in, so the quad turns to face the camera about the beam rather than
+    // about its centre. Looking straight down a beam the cross product
+    // degenerates, which is correct: a beam pointed at the eye has no width to
+    // show, and the near-zero side vector makes it vanish instead of flipping.
+    const glm::vec3 toEye = eye - start;
+    const glm::vec3 side = glm::cross(dir, toEye);
+    const float sideLength = glm::length(side);
+    if (sideLength < 1e-5f) return;
+    const glm::vec3 w = side * (width / sideLength);
+
+    const Vertex bl{start - w, color, 0.0f, 0.0f};
+    const Vertex br{start + w, color, 1.0f, 0.0f};
+    const Vertex tr{end + w, color, 1.0f, 1.0f};
+    const Vertex tl{end - w, color, 0.0f, 1.0f};
 
     vertices_.push_back(bl);
     vertices_.push_back(br);

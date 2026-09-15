@@ -1872,7 +1872,7 @@ a one-second loop clicks once a second.
 
 ### Where the WAVs come from
 
-`assets/sounds/*.wav`, 24 files, mono 16-bit 44.1 kHz, written by
+`assets/sounds/*.wav`, 26 files, mono 16-bit 44.1 kHz, written by
 `tools/make-sounds.py` — committed, deterministic, stdlib-only, and
 regenerable. They are synthesised from oscillators and filtered noise, in the
 same spirit as `render/procedural.cpp` generating the textures.
@@ -1889,3 +1889,121 @@ always succeeds, so leaving it in means a container with no sound card opening a
 "device" successfully and the game reporting sound it is not producing. Without
 it, such a machine fails to open, `Audio::init` warns, and the run says
 `device "none"` — which is true.
+
+## Combat, force and things that move
+
+Added after M8, in four phases. Each is its own commit.
+
+### One trace, not three
+
+`sim::traceCombatRay` answers "what does this shot reach first" — the nearest
+of wall, shut door, robot, destructible object, player and floating light,
+walking the segment graph as it goes. The projectile loop had grown three
+near-identical copies of the same closest-point-on-segment test, each compared
+only against the wall and never against each other, so a bolt that reached a
+robot and a crate in the same step took the robot regardless of which was
+nearer.
+
+Two enums that look parallel are kept apart by functions rather than casts.
+`weaponSlot()` decides primary or secondary; `weaponFire()` names the delivery
+mode; `projectileFor()` maps a weapon to the bolt it launches. The last one
+replaced `static_cast<ProjectileKind>(weaponId)`, which was correct only while
+`ProjectileKind::Flare` at index 4 happened to sit past the last weapon. All
+three are switches with no default, so the compiler names the next weapon that
+forgets one — which it did, one commit later.
+
+### Knockback is a second velocity channel
+
+`Body::knockback` is separate from `Body::velocity` because everything that
+owns `velocity` would erase it. `stepShip` damps velocity toward zero and then
+clamps it to `maxSpeed`, so a shove above cruising speed would be discarded in
+the step it arrived in; `steer()` drives a robot's velocity toward whatever it
+means to be doing. Neither gets a say in the new channel. It decays at
+`kKnockbackDamping`, deliberately independent of `linearDamping`, so retuning
+how far the ship coasts does not change how a blast feels.
+
+Every integration site moves at `Body::motion()`, and `resolveCollision` takes
+the inward part out of both channels — being blown into a wall is not a way
+through it.
+
+`applySplash` casts from the blast to each target before touching it. It used
+to check distance alone, so a grenade on the far side of a wall damaged
+straight through. Damage falls off linearly; the shove falls off squared, so
+the rim of a blast rocks you and the middle of one throws you.
+
+`CollisionConfig::restitution` defaults to zero, which is the sliding response
+every body has always had. Above zero it reflects. Two hazards come with it:
+the iterated push-out can compound a bounce in a corner, so nothing leaves a
+collision faster than it arrived; and `scrapeDamping` would bleed a bounce away
+as fast as it is made, so anything bouncy sets it to zero.
+
+### Hitscan weapons
+
+A railgun modelled as a very fast bolt would still be a bolt: swept step by
+step, and still able to tunnel if it were fast enough. `WeaponFire` names the
+three modes structurally. `Instant` traces once per trigger pull; `Continuous`
+traces every step the trigger is held, with damage, energy and impulse read as
+per-second rates multiplied by `dt`.
+
+The lightning gun traces 120 times a second and must not be heard or seen to
+flash 120 times a second, so its cue, muzzle flash and impact light are gated
+to one per `fireInterval` while the beam itself is drawn every step.
+
+Beams are quads turned about their own axis to face the viewer, built into the
+same buffer as the sprites so the unlit pass keeps to one draw. Looking straight
+down a beam the side vector degenerates and it vanishes, which is correct.
+`RenderState` does not interpolate them: a beam is struck at one instant and
+lives a tenth of a second, so blending it between steps would smear it.
+
+### Disabled ships
+
+One threshold, `kDisabledHealthFraction`, governs robots and the player alike.
+A disabled ship keeps exactly the velocity it had — no damping, no speed clamp,
+and the knockback channel is folded into velocity rather than left to decay,
+because with nobody flying the ship a shove and a drift are the same thing.
+
+For robots this is `RobotMode::Disabled`, entered ahead of every other
+transition. It is expressed as "skip everything else" rather than as a desired
+velocity of zero, because `steer()` reads zero as a request to stop and would
+brake the robot against the very momentum it is supposed to keep.
+
+The red is emissive first. `wall.frag` gained `uAlbedoTint`, but this game has
+no ambient term, so a tint only shows where light already falls — and a robot
+drifting in an unlit corridor gets none. The cue that carries the information is
+the eye billboards, pulsing red and dim. The player, who cannot see their own
+hull in first person, gets the damage vignette held on and pulsing instead of
+fading: the flinch is an event, this is a state.
+
+### Props that move
+
+`sim::PropState` is simulation state for things that move but are not ships,
+separate from `Level::objects`, which is authoring data and assumes nothing
+ever leaves the position it was placed at.
+
+A floating light is a `Body` with restitution above zero and no scrape, so it
+bounces. It takes no damage — shooting one moves it — but it stops a shot,
+because you can see it. A swinging light is analytic: one sine, from which the
+lamp position, the spot direction and the cord's lower end all follow. A
+constraint solver would be the wrong tool; the cord holds to five decimal
+places by construction. Both are dynamic lights rebuilt every frame on the same
+path the bolts take, which is what makes a swinging spot sweep real stencil
+shadows across the room it hangs in.
+
+Their visible fixtures are emissive billboards. They do not cast shadows
+themselves: `Renderer::Prop` caches its model matrix and occluder once at load,
+and a moving fixture would need the per-frame `setTransform` treatment robots
+get. The light moves and sweeps shadows; the housing does not cast one.
+
+### A finding: findSegment is not a containment test
+
+`--world-test` reported floating lights escaping the mine. They were not.
+`findSegment()` asks which hexahedron holds a point and answers -1 on a point
+sitting exactly on a shared face, which is inside the mine but not
+unambiguously inside any one segment. `insideMine()` — ray parity against every
+wall triangle — is the containment question, and it now lives in `level.cpp`
+with one definition instead of a private copy in `collision_test.cpp`.
+
+The wrong test also made the fix look wrong: sub-stepping the ball's
+integration appeared not to help, then appeared to make things worse. Under the
+right test, 150 u/s shoves from every floating light in all 26 directions never
+leave the mine without any sub-stepping at all, so that code came back out.

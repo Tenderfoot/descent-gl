@@ -76,6 +76,7 @@ RobotConfig RobotConfig::defaults() {
     drone.model = "drone";
     drone.health = 26.0f;
     drone.radius = 1.9f;
+    drone.mass = 0.8f;
     drone.speed = 19.0f;
     drone.acceleration = 34.0f;
     drone.turnRate = 3.0f;
@@ -85,6 +86,7 @@ RobotConfig RobotConfig::defaults() {
     drone.retreatThreshold = 0.35f;
     drone.projectileSpeed = 80.0f;
     drone.projectileDamage = 4.0f;
+    drone.projectileImpulse = 4.0f;
     drone.fireInterval = 0.3f;
     drone.burstCount = 2;
     drone.burstPause = 1.2f;
@@ -101,6 +103,7 @@ RobotConfig RobotConfig::defaults() {
     gunner.model = "gunner";
     gunner.health = 48.0f;
     gunner.radius = 2.2f;
+    gunner.mass = 1.2f;
     gunner.speed = 13.0f;
     gunner.acceleration = 22.0f;
     gunner.turnRate = 2.0f;
@@ -110,6 +113,7 @@ RobotConfig RobotConfig::defaults() {
     gunner.retreatThreshold = 0.3f;
     gunner.projectileSpeed = 105.0f;
     gunner.projectileDamage = 8.0f;
+    gunner.projectileImpulse = 6.0f;
     gunner.fireInterval = 0.22f;
     gunner.burstCount = 4;
     gunner.burstPause = 1.6f;
@@ -126,6 +130,7 @@ RobotConfig RobotConfig::defaults() {
     brute.model = "brute";
     brute.health = 95.0f;
     brute.radius = 3.1f;
+    brute.mass = 2.8f;
     brute.speed = 8.5f;
     brute.acceleration = 14.0f;
     brute.turnRate = 1.3f;
@@ -135,6 +140,7 @@ RobotConfig RobotConfig::defaults() {
     brute.retreatThreshold = 0.15f;
     brute.projectileSpeed = 70.0f;
     brute.projectileDamage = 14.0f;
+    brute.projectileImpulse = 9.0f;
     brute.fireInterval = 0.5f;
     brute.burstCount = 2;
     brute.burstPause = 2.0f;
@@ -153,6 +159,7 @@ RobotConfig RobotConfig::defaults() {
     reactor.isReactor = true;
     reactor.health = 600.0f;
     reactor.radius = 5.5f;
+    reactor.mass = 600.0f;
     reactor.speed = 0.0f;
     reactor.acceleration = 0.0f;
     reactor.turnRate = 0.8f;
@@ -162,6 +169,7 @@ RobotConfig RobotConfig::defaults() {
     reactor.retreatThreshold = -1.0f;
     reactor.projectileSpeed = 48.0f;
     reactor.projectileDamage = 16.0f;
+    reactor.projectileImpulse = 7.0f;
     reactor.fireInterval = 0.8f;
     reactor.burstCount = 2;
     reactor.burstPause = 1.8f;
@@ -224,6 +232,8 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "lead", def.lead);
             getVec3(tj, "color", def.color);
             getVec3(tj, "eyeColor", def.eyeColor);
+            get(tj, "mass", def.mass);
+            get(tj, "projectileImpulse", def.projectileImpulse);
             get(tj, "eyeSize", def.eyeSize);
             get(tj, "isReactor", def.isReactor);
             get(tj, "dropNothing", def.dropNothing);
@@ -270,6 +280,8 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["lead"] = def.lead;
         tj["color"] = {def.color.r, def.color.g, def.color.b};
         tj["eyeColor"] = {def.eyeColor.r, def.eyeColor.g, def.eyeColor.b};
+        tj["mass"] = def.mass;
+        tj["projectileImpulse"] = def.projectileImpulse;
         tj["eyeSize"] = def.eyeSize;
         tj["isReactor"] = def.isReactor;
         tj["dropNothing"] = def.dropNothing;
@@ -313,6 +325,7 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.body.radius = def.radius;
         robot.orientation = obj.orientation;
         robot.health = obj.health > 0.0f ? obj.health : def.health;
+        robot.mass = def.mass;
         robot.homeSegment = obj.segment;
     }
     log::info("{} robots spawned", out.count);
@@ -451,6 +464,48 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             robot.strafeSign = randUnit() < 0.5f ? -1.0f : 1.0f;
         }
 
+        // --- disabled ----------------------------------------------------
+        //
+        // Under the threshold a robot stops being a robot: it does not look,
+        // path, steer or shoot. It keeps exactly the momentum it had and
+        // tumbles, and it can still be finished off.
+        //
+        // Expressed as "skip everything else" rather than as a desired velocity
+        // of zero, because steer() would read that as a request to stop and
+        // brake it to a halt against the very momentum it is supposed to keep.
+        const float health0 = def.health > 0.0f ? robot.health / def.health : 1.0f;
+        if (health0 <= kDisabledHealthFraction) {
+            if (robot.mode != RobotMode::Disabled) {
+                setMode(robot, RobotMode::Disabled);
+                robot.awareness = 0.0f;
+                robot.burstLeft = 0;
+                // Folded in, not left to decay: with nothing flying the robot,
+                // a shove and a drift are the same thing, and the drift is
+                // meant to last.
+                robot.body.velocity += robot.body.knockback;
+                robot.body.knockback = glm::vec3(0.0f);
+                robot.tumble = glm::vec3(randSigned() * 1.1f, randSigned() * 1.1f,
+                                         randSigned() * 1.6f);
+            }
+
+            robot.body.velocity += robot.body.knockback;
+            robot.body.knockback = glm::vec3(0.0f);
+            robot.orientation =
+                glm::normalize(robot.orientation *
+                               glm::quat(0.0f, robot.tumble * 0.5f * dt) + robot.orientation);
+            robot.body.position += robot.body.velocity * dt;
+            resolveCollision(level, robot.body, collision, dt, nullptr, doors);
+
+            if (robot.health <= 0.0f) {
+                robot.alive = false;
+                emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
+                spawnDebris(state, robot, def);
+                spawnDrop(level, state, def, robot);
+            }
+            continue;
+        }
+        robot.tumble = glm::vec3(0.0f);
+
         // --- perception --------------------------------------------------
         const glm::vec3 toPlayer = player.position - robot.body.position;
         const float distance = glm::length(toPlayer);
@@ -533,6 +588,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                     setMode(robot, robot.awareness > 0.0f ? RobotMode::Chase : RobotMode::Idle);
                 }
                 break;
+            case RobotMode::Disabled:
             case RobotMode::Count:
                 break;
         }
@@ -618,6 +674,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                         p.segment = robot.body.segment;
                         p.radius = 0.3f;
                         p.damage = def.projectileDamage;
+                        p.impactImpulse = def.projectileImpulse;
                         p.lifetime = 4.0f;
                         p.lightRadius = 14.0f;
                         p.lightIntensity = 1.8f;
@@ -645,12 +702,17 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 if (distance > 1e-3f) desired = -(toPlayer / distance);
                 break;
             }
+            case RobotMode::Disabled:
             case RobotMode::Count:
                 break;
         }
 
         steer(robot, desired, def, dt);
-        robot.body.position += robot.body.velocity * dt;
+        // Steering drives `velocity` only. The knockback channel is what a
+        // blast put there, and the robot flies it off rather than deleting it:
+        // it reads as thrusters fighting the shove.
+        robot.body.knockback *= std::exp(-kKnockbackDamping * dt);
+        robot.body.position += robot.body.motion() * dt;
         // Robots are Bodies, so they cannot leave the mine any more than the
         // player can. No separate containment logic, and no separate bugs.
         // The same shut doors stop them too.
@@ -685,7 +747,8 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             d.alive = false;
             continue;
         }
-        d.body.position += d.body.velocity * dt;
+        d.body.knockback *= std::exp(-kKnockbackDamping * dt);
+        d.body.position += d.body.motion() * dt;
         resolveCollision(level, d.body, collision, dt, nullptr, doors);
         // Bleed speed so chunks settle rather than pinballing forever.
         d.body.velocity *= std::exp(-1.4f * dt);

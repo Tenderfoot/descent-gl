@@ -27,6 +27,8 @@ enum class Cue : uint8_t {
     VulcanFire,
     ConcussionFire,
     HomingFire,
+    RailgunFire,
+    LightningFire,      // one crackle per fireInterval while the trigger is held
     FlareThrow,
     WeaponEmpty,        // trigger pulled with no ammo or no energy
     WeaponSelect,
@@ -51,11 +53,12 @@ enum class Cue : uint8_t {
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(Cue::Count)> kCueNames{
-    "laser_fire",  "vulcan_fire",  "concussion_fire", "homing_fire",      "flare_throw",
-    "weapon_empty", "weapon_select", "wall_impact",   "explosion",        "robot_hit",
-    "robot_fire",  "robot_alert",  "robot_death",     "object_destroyed", "player_hurt",
-    "player_death", "door_open",   "door_close",      "door_locked",      "pickup",
-    "key_pickup",  "reactor_destroyed", "countdown_warn", "exit",
+    "laser_fire",  "vulcan_fire",  "concussion_fire", "homing_fire",      "railgun_fire",
+    "lightning_fire", "flare_throw", "weapon_empty",  "weapon_select",    "wall_impact",
+    "explosion",   "robot_hit",    "robot_fire",      "robot_alert",      "robot_death",
+    "object_destroyed", "player_hurt", "player_death", "door_open",       "door_close",
+    "door_locked", "pickup",       "key_pickup",      "reactor_destroyed", "countdown_warn",
+    "exit",
 };
 
 // A sound that wants playing. `segment` is carried because the emitter knows it

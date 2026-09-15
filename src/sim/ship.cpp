@@ -25,9 +25,42 @@ glm::vec3 clampLength(glm::vec3 v, float maxLength) {
     return v;
 }
 
+// Deterministic, and owned here rather than drawn from a std::mt19937: the
+// tumble has to be reproducible from a bug report like everything else in the
+// simulation.
+uint32_t g_tumbleCounter = 0;
+
+float tumbleUnit() {
+    g_tumbleCounter = g_tumbleCounter * 1664525u + 1013904223u;
+    return static_cast<float>((g_tumbleCounter >> 8) & 0xFFFFFFu) / 16777215.0f * 2.0f - 1.0f;
+}
+
 } // namespace
 
 void stepShip(ShipState& s, const ShipControls& c, const FlightConfig& cfg, float dt) {
+    // --- disabled --------------------------------------------------------
+    //
+    // Nothing the player does reaches the ship. Momentum is preserved exactly:
+    // no damping, no maxSpeed clamp, and the knockback channel is folded into
+    // velocity rather than left to decay, because with nobody flying the ship a
+    // shove and a drift are the same thing and the drift is meant to last.
+    if (s.disabled) {
+        if (glm::dot(s.tumble, s.tumble) < 1e-8f) {
+            s.tumble = glm::vec3(tumbleUnit() * 0.9f, tumbleUnit() * 0.9f, tumbleUnit() * 1.4f);
+        }
+        s.thrusterSpin = glm::vec3(0.0f);
+        s.aimSpin = glm::vec3(0.0f);
+
+        const glm::quat spin = s.orientation * glm::quat(0.0f, s.tumble * 0.5f * dt);
+        s.orientation = glm::normalize(s.orientation + spin);
+
+        s.body.velocity += s.body.knockback;
+        s.body.knockback = glm::vec3(0.0f);
+        s.body.position += s.body.velocity * dt;
+        return;
+    }
+    s.tumble = glm::vec3(0.0f);
+
     // --- angular ---------------------------------------------------------
     //
     // Mouse motion arrives as an angular-velocity impulse. Under exponential
@@ -78,7 +111,14 @@ void stepShip(ShipState& s, const ShipControls& c, const FlightConfig& cfg, floa
     s.body.velocity *= decay(cfg.linearDamping, dt);
     s.body.velocity = clampLength(s.body.velocity, cfg.maxSpeed);
 
-    s.body.position += s.body.velocity * dt;
+    // The knockback channel sits outside both, deliberately. linearDamping and
+    // maxSpeed describe the ship's engines and what its hull will hold; a blast
+    // is neither, and running it through them would clip every shove down to
+    // cruising speed and then bleed it away in a third of a second. See
+    // Body::knockback.
+    s.body.knockback *= decay(kKnockbackDamping, dt);
+
+    s.body.position += s.body.motion() * dt;
 }
 
 } // namespace dvk::sim

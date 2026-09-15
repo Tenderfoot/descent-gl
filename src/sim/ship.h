@@ -55,6 +55,14 @@ struct ShipState {
     glm::vec3 thrusterSpin{0.0f};   // local, rad/s, capped
     glm::vec3 aimSpin{0.0f};        // local, rad/s, uncapped
 
+    // Set from the player's shields before every step - see playerDisabled().
+    // A disabled ship ignores its controls completely: no thrust, no steering,
+    // and stepCombat will not fire its guns or light its headlight either. It
+    // keeps exactly the velocity it had, with no damping and no speed clamp,
+    // and tumbles on `tumble` until something finishes it or repairs it.
+    bool disabled = false;
+    glm::vec3 tumble{0.0f};   // local rad/s, chosen once when it goes under
+
     glm::vec3 angularVelocity() const { return thrusterSpin + aimSpin; }
 };
 

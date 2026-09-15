@@ -213,6 +213,31 @@ def homing(rng):
     return normalise(mix(base, gain(whine, 0.22)))
 
 
+def railgun(rng):
+    # A capacitor bank letting go: a hard transient, a metallic ring sliding
+    # down behind it, and a low thump underneath so it lands heavier than the
+    # laser it sits beside on the weapon wheel.
+    crack = decay_env(highpass(noise(0.40, rng), 2600), 0.006)
+    ring = decay_env(sweep(0.40, 2800, 320, shape="tri"), 0.11)
+    coil = decay_env(sweep(0.40, 900, 120, shape="square"), 0.05)
+    thump = decay_env(tone(0.40, 58), 0.09)
+    out = mix(gain(crack, 0.85), gain(ring, 0.38), gain(coil, 0.22), gain(thump, 0.55))
+    return normalise(out)
+
+
+def lightning(rng):
+    # One burst of arc. Short and soft-edged on purpose: the gun re-triggers
+    # this every fireInterval for as long as the trigger is held, so anything
+    # longer or harder stacks into a drone instead of reading as a crackle.
+    arc = highpass(noise(0.22, rng), 1500)
+    for i, sample in enumerate(arc):
+        # Amplitude modulation is what makes noise crackle rather than hiss.
+        arc[i] = sample * (0.55 + 0.45 * math.sin(2.0 * math.pi * 47.0 * i / RATE))
+    body = decay_env(sweep(0.22, 260, 175, shape="square"), 0.06)
+    out = mix(gain(env(arc, attack=0.004, release=0.07), 0.80), gain(body, 0.30))
+    return normalise(out, 0.80)
+
+
 def flare(rng):
     pop = decay_env(noise(0.06, rng), 0.012)
     hiss = env(lowpass(noise(0.30, rng), 3800), attack=0.01, sustain=0.5, release=0.22)
@@ -393,6 +418,8 @@ SOUNDS = {
     "key_pickup.wav": key_pickup,
     "reactor.wav": reactor,
     "countdown.wav": countdown,
+    "railgun.wav": railgun,
+    "lightning.wav": lightning,
     "exit.wav": exit_sound,
     "engine.wav": engine,
     "alarm.wav": alarm,

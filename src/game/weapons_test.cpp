@@ -4,6 +4,7 @@
 #include "game/level.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
+#include "sim/props.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace dvk {
 
@@ -25,6 +27,7 @@ struct Rig {
     sim::RobotConfig robotCfg;
     sim::CombatState state;
     sim::RobotState robots;
+    sim::PropState props;
     sim::Body ship;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
 
@@ -32,6 +35,7 @@ struct Rig {
         state = sim::CombatState{};
         sim::initObjects(level, robotCfg, state.objects);
         sim::spawnRobots(level, robotCfg, robots);
+        sim::spawnProps(level, props);
         ship = sim::Body{};
         ship.position = level.start.position;
         ship.segment = level.start.segment;
@@ -48,8 +52,10 @@ struct Rig {
         for (int i = 0; i < steps; ++i) {
             // Robots are stepped too, so a target shot at here behaves the
             // way it does in the game rather than sitting still for the test.
-            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep, &robots);
+            sim::stepCombat(level, state, ship, orientation, cfg, controls, kStep, &robots,
+                            nullptr, nullptr, &props);
             sim::stepRobots(level, robotCfg, cfg, robots, state, ship, kStep);
+            sim::stepProps(level, props, kStep);
         }
     }
 
@@ -94,8 +100,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         sim::FireControls controls;
         controls.selectWeapon = w;
-        controls.primary = w <= sim::WeaponVulcan;
-        controls.secondary = w >= sim::WeaponConcussion;
+        controls.primary = sim::weaponSlot(w) == sim::WeaponSlot::Primary;
+        controls.secondary = sim::weaponSlot(w) == sim::WeaponSlot::Secondary;
 
         const float energyBefore = rig.state.player.energy;
         const int vulcanBefore = rig.state.player.vulcanAmmo;
@@ -106,14 +112,25 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.state.player.headlightOn = false;
         rig.run(1, controls);
 
-        const int fired = playerBolts(rig);
+        // A projectile weapon is counted by what it put in the pool; a hitscan
+        // weapon leaves a beam instead, because the damage has already landed
+        // by the time anything is drawn.
+        const sim::WeaponFire mode = sim::weaponFire(w);
+        const auto shotsFired = [&]() {
+            return mode == sim::WeaponFire::Projectile ? playerBolts(rig)
+                                                       : rig.state.beams.count();
+        };
+        const int fired = shotsFired();
         ok &= expect(fired == 1, "one shot on the first step");
 
-        // A second step inside the cooldown must not produce another.
+        // A second step inside the cooldown must not produce another. A
+        // continuous weapon has no cooldown - firing every step is the point of
+        // it - so what is checked there is that it keeps going.
         rig.run(1, controls);
-        const bool withinCooldown = def.fireInterval > kStep * 1.5f;
-        if (withinCooldown) {
-            ok &= expect(playerBolts(rig) == 1,
+        if (mode == sim::WeaponFire::Continuous) {
+            ok &= expect(rig.state.beams.count() >= 1, "a held beam keeps firing");
+        } else if (def.fireInterval > kStep * 1.5f) {
+            ok &= expect(shotsFired() == 1,
                          "no second shot while the weapon is still cooling down");
         }
 
@@ -131,8 +148,12 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
             ok &= expect(rig.state.player.homingAmmo < homingBefore, "homing spent ammo");
         }
 
-        log::info("{:11} fires: {} bolt(s), speed {:.0f}, damage {:.1f}",
-                  sim::kWeaponNames[static_cast<size_t>(w)], fired, def.speed, def.damage);
+        log::info("{:11} fires: {} {}, {} {:.0f}, damage {:.1f}{}",
+                  sim::kWeaponNames[static_cast<size_t>(w)], fired,
+                  mode == sim::WeaponFire::Projectile ? "bolt(s)" : "beam(s)",
+                  mode == sim::WeaponFire::Projectile ? "speed" : "range",
+                  mode == sim::WeaponFire::Projectile ? def.speed : def.range, def.damage,
+                  mode == sim::WeaponFire::Continuous ? "/s" : "");
     }
 
     // --- primary and secondary selections are independent -----------------
@@ -482,8 +503,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         sim::FireControls controls;
         controls.selectWeapon = w;
-        controls.primary = w <= sim::WeaponVulcan;
-        controls.secondary = w >= sim::WeaponConcussion;
+        controls.primary = sim::weaponSlot(w) == sim::WeaponSlot::Primary;
+        controls.secondary = sim::weaponSlot(w) == sim::WeaponSlot::Secondary;
         rig.run(1, controls);
 
         int lit = 0;
@@ -521,6 +542,15 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.reset();
         ok &= expect(rig.state.player.hurtTimer == 0.0f, "no flinch before anything lands");
 
+        // The rig steps robots, and this case parks the ship in the open for
+        // most of a second. Sixteen of them notice, open fire, and keep
+        // re-arming the flinch right through the window this is trying to watch
+        // it fade in - so the fade is measured with the mine to itself. The
+        // missile below still delivers its damage through the ordinary path,
+        // which is what the case is actually about.
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+
         // Take a hit the way the game delivers one: a concussion missile into
         // the wall the ship is facing, close enough that its own splash comes
         // back. No special-cased damage call, so this also proves the flinch is
@@ -528,9 +558,30 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         rig.state.player.headlightOn = false;
         const glm::vec3 centre = rig.level.segments[static_cast<size_t>(rig.ship.segment)].center;
         rig.ship.position = centre;
-        // Down and a little sideways: glm::quatLookAt is degenerate when the
-        // look direction is the up vector, and straight down is exactly that.
-        rig.aimAt(centre + glm::vec3(0.35f, -1.0f, 0.0f));
+
+        // At the nearest side of this room that is actually solid. Aiming
+        // straight down looks like the obvious way to drop a missile at your
+        // own feet, but the start segment's floor is a portal: the missile
+        // leaves the room and detonates far enough away that none of its splash
+        // comes back, and the case then only ever registered damage because a
+        // robot somewhere else was shooting.
+        const Segment& room = rig.level.segments[static_cast<size_t>(rig.ship.segment)];
+        glm::vec3 aim = centre;
+        float nearest = std::numeric_limits<float>::max();
+        for (int side = 0; side < SideCount; ++side) {
+            if (room.sides[static_cast<size_t>(side)].isPortal()) continue;
+            const std::array<glm::vec3, 4> corner = rig.level.sideCorners(rig.ship.segment, side);
+            const glm::vec3 face = (corner[0] + corner[1] + corner[2] + corner[3]) * 0.25f;
+            const float d = glm::length(face - centre);
+            if (d < nearest) {
+                nearest = d;
+                aim = face;
+            }
+        }
+        // glm::quatLookAt is degenerate when the look direction is the up
+        // vector, so a floor or ceiling gets nudged off the axis.
+        if (std::abs(glm::normalize(aim - centre).y) > 0.95f) aim.x += 0.35f;
+        rig.aimAt(aim);
 
         const float before = rig.state.player.shields;
         rig.held = sim::FireControls{};
@@ -544,21 +595,262 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         // Run until it lands rather than guessing how long a slow missile takes
         // to cross a room, so the flinch is checked while it is still on.
+        // Where it went off is the last place the missile was seen alive.
+        glm::vec3 blastAt = rig.ship.position;
         int waited = 0;
         while (waited < 600 && rig.state.player.shields >= before) {
+            for (const sim::Projectile& live : rig.state.projectiles.items) {
+                if (live.alive && live.owner < 0) blastAt = live.position;
+            }
             rig.run(1);
             ++waited;
         }
 
         ok &= expect(rig.state.player.shields < before, "the ship's own splash took shields");
         ok &= expect(rig.state.player.hurtTimer > 0.0f, "the hit set the flinch");
+        // The flinch is screen-only, and the flight channel stays the flight
+        // model's: a blast does not fly the ship. It does shove it, and that
+        // shove arrives in the knockback channel where nothing in stepShip can
+        // clamp it away.
         ok &= expect(rig.ship.position == shipAt && rig.ship.velocity == shipVel,
-                     "the flinch did not move the ship");
+                     "the flinch left the flight channel alone");
+        ok &= expect(glm::length(rig.ship.knockback) > 0.0f,
+                     "the blast shoved the ship");
+        ok &= expect(glm::dot(glm::normalize(rig.ship.knockback),
+                              glm::normalize(rig.ship.position - blastAt)) > 0.0f,
+                     "the shove points away from the blast");
 
         rig.run(static_cast<int>((sim::kHurtFlashTime + 0.05f) / kStep));
         ok &= expect(rig.state.player.hurtTimer == 0.0f, "the flinch faded out");
         log::info("damage flinch: {:.0f} shields lost, faded in {:.2f}s", before -
                   rig.state.player.shields, sim::kHurtFlashTime);
+    }
+
+    // --- a disabled ship has no guns and no headlight -------------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+        rig.state.player.headlightOn = true;
+
+        // Under the threshold, still alive.
+        rig.state.player.shields = sim::kPlayerMaxShields * 0.09f;
+        ok &= expect(sim::playerDisabled(rig.state.player), "9% shields disables the ship");
+
+        const int boltsBefore = rig.state.projectiles.count();
+        sim::FireControls everything;
+        everything.selectWeapon = sim::WeaponLaser;
+        everything.primary = true;
+        everything.secondary = true;
+        everything.flare = true;
+        const int flaresBefore = rig.state.player.flares;
+        rig.run(120, everything);
+
+        ok &= expect(rig.state.projectiles.count() == boltsBefore,
+                     "a disabled ship fires nothing");
+        ok &= expect(rig.state.beams.count() == 0, "a disabled ship raises no beam");
+        ok &= expect(rig.state.player.flares == flaresBefore, "a disabled ship throws no flare");
+        ok &= expect(!rig.state.player.headlightOn, "a disabled ship's headlight goes out");
+
+        // A shield pickup hands it straight back: the state is derived from
+        // shields every step, never latched.
+        rig.state.player.shields = sim::kPlayerMaxShields * 0.5f;
+        ok &= expect(!sim::playerDisabled(rig.state.player), "repairing past 10% restores control");
+        rig.run(1, everything);
+        ok &= expect(rig.state.projectiles.count() > boltsBefore, "and the guns work again");
+
+        log::info("disabled player: one second of every trigger at 9% shields fired nothing");
+    }
+
+    // --- a hitscan shot never leaves the mine --------------------------------
+    //
+    // The projectile equivalent of this is the no-tunnelling case: a bolt fast
+    // enough to cross a wall in one step must still be stopped by it. A trace
+    // has no step to cross, so the question becomes whether it stops at all.
+    // The mine is closed, so a 300-unit ray fired from anywhere in any
+    // direction must end on something. A ray that runs to full range has left
+    // the world.
+    {
+        rig.reset();
+        const sim::WeaponDef& rail = rig.cfg.weapons[sim::WeaponRailgun];
+
+        std::array<glm::vec3, 26> dirs{};
+        size_t made = 0;
+        for (int x = -1; x <= 1; ++x) {
+            for (int y = -1; y <= 1; ++y) {
+                for (int z = -1; z <= 1; ++z) {
+                    if (x == 0 && y == 0 && z == 0) continue;
+                    dirs[made++] = glm::normalize(glm::vec3(x, y, z));
+                }
+            }
+        }
+
+        int escaped = 0;
+        float longest = 0.0f;
+        for (int si = 0; si < rig.level.segmentCount(); ++si) {
+            const glm::vec3 from = rig.level.segments[static_cast<size_t>(si)].center;
+            for (const glm::vec3& dir : dirs) {
+                const sim::CombatHit hit = sim::traceCombatRay(
+                    rig.level, rig.state, rig.ship, &rig.robots, from, dir, rail.range, si);
+                if (hit.kind == sim::CombatHit::Kind::None) {
+                    ++escaped;
+                    continue;
+                }
+                longest = std::max(longest, hit.distance);
+            }
+        }
+
+        ok &= expect(escaped == 0, "no hitscan shot ran past the end of the mine");
+        log::info("hitscan containment: {} traces at {:.0f}u range, {} escaped, longest {:.1f}u",
+                  rig.level.segmentCount() * static_cast<int>(dirs.size()), rail.range, escaped,
+                  longest);
+    }
+
+    // --- a held beam is metered per second, not per step ----------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+        rig.state.player.headlightOn = false;
+
+        const sim::WeaponDef& arc = rig.cfg.weapons[sim::WeaponLightning];
+        sim::FireControls held;
+        held.selectWeapon = sim::WeaponLightning;
+        held.primary = true;
+
+        // One second of held trigger, a step at a time. What comes off the
+        // energy bar must be the per-second number in the config, not that
+        // number once per step - which at 120 Hz would empty the bar instantly.
+        const float before = rig.state.player.energy;
+        rig.run(120, held);
+        const float spent = before - rig.state.player.energy;
+
+        ok &= expect(std::abs(spent - arc.energyCost) < arc.energyCost * 0.05f,
+                     "one second of beam costs one second of energy");
+        ok &= expect(rig.state.beams.count() > 0, "the beam is still up while held");
+
+        // And it stops the moment the trigger does.
+        rig.run(static_cast<int>(arc.beamTime / kStep) + 2, sim::FireControls{});
+        ok &= expect(rig.state.beams.count() == 0, "the beam goes out when the trigger does");
+
+        log::info("held beam: {:.1f} energy over 1.0 s against {:.1f}/s configured", spent,
+                  arc.energyCost);
+    }
+
+    // --- shooting a floating light moves it ----------------------------------
+    //
+    // Both delivery paths, because they reach the prop through different code:
+    // the railgun through the hitscan branch, the concussion through the
+    // projectile loop. Both are nose-mounted. The laser is not - it alternates
+    // wingtips 1.75 units off the centreline, which is wider than a 1.1-radius
+    // ball, so aiming a laser dead at one of these and missing is correct.
+    {
+        for (const int weapon : {sim::WeaponRailgun, sim::WeaponConcussion}) {
+            rig.reset();
+            for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+            rig.robots.count = 0;
+
+            if (rig.props.floatingCount == 0) {
+                log::info("floating light: SKIPPED, this level has none");
+                break;
+            }
+
+            sim::FloatingLight& ball = rig.props.floating[0];
+            rig.ship.position = ball.body.position + glm::vec3(0.0f, 0.0f, 12.0f);
+            rig.ship.segment = ball.body.segment;
+            rig.aimAt(ball.body.position);
+
+            const glm::vec3 restingAt = ball.body.position;
+            const glm::vec3 fromShip = glm::normalize(ball.body.position - rig.ship.position);
+
+            sim::FireControls shoot;
+            shoot.selectWeapon = weapon;
+            shoot.primary = sim::weaponSlot(weapon) == sim::WeaponSlot::Primary;
+            shoot.secondary = sim::weaponSlot(weapon) == sim::WeaponSlot::Secondary;
+            rig.run(1, shoot);
+            // Long enough for a missile to cross the gap and land.
+            rig.run(60, sim::FireControls{});
+
+            const glm::vec3 moved = ball.body.position - restingAt;
+            const char* name = sim::kWeaponNames[static_cast<size_t>(weapon)];
+            ok &= expect(glm::length(moved) > 0.5f, "shooting a floating light moves it");
+            ok &= expect(glm::dot(glm::normalize(moved), fromShip) > 0.0f,
+                         "it moves away from the shot, not towards it");
+            // It is a light, not a target: shooting it never takes it away.
+            ok &= expect(ball.alive, "shooting a floating light does not destroy it");
+
+            log::info("floating light: {} moved it {:.2f}u away in 0.5 s", name,
+                      glm::length(moved));
+        }
+    }
+
+    // --- a blast does not reach through rock ---------------------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+
+        const glm::vec3 centre = rig.level.segments[static_cast<size_t>(rig.ship.segment)].center;
+        rig.ship.position = centre;
+
+        // Aim at a side of this room that is solid, and find where it is.
+        const Segment& room = rig.level.segments[static_cast<size_t>(rig.ship.segment)];
+        glm::vec3 toWall(0.0f);
+        float wallAt = 0.0f;
+        for (int side = 0; side < SideCount; ++side) {
+            if (room.sides[static_cast<size_t>(side)].isPortal()) continue;
+            const std::array<glm::vec3, 4> corner = rig.level.sideCorners(rig.ship.segment, side);
+            const glm::vec3 face = (corner[0] + corner[1] + corner[2] + corner[3]) * 0.25f;
+            const glm::vec3 to = face - centre;
+            const float d = glm::length(to);
+            if (d < 1e-3f) continue;
+            const sim::RayHit hit =
+                sim::raycast(rig.level, centre, to / d, 400.0f, rig.ship.segment);
+            if (!hit.hit) continue;
+            if (wallAt == 0.0f || hit.distance < wallAt) {
+                wallAt = hit.distance;
+                toWall = to / d;
+            }
+        }
+        ok &= expect(wallAt > 0.0f, "the room has a solid wall to hide behind");
+
+        // Detonates wherever it is put, on the next step, with a radius wide
+        // enough to cover the ship twice over. Straight into the pool rather
+        // than fired, because the point is to choose where it goes off.
+        const auto detonate = [&](const glm::vec3& at) {
+            const int slot = rig.state.projectiles.spawn();
+            if (slot < 0) return;
+            sim::Projectile& bomb = rig.state.projectiles.items[static_cast<size_t>(slot)];
+            bomb.kind = sim::ProjectileKind::Concussion;
+            bomb.position = at;
+            bomb.segment = rig.ship.segment;
+            bomb.velocity = glm::vec3(0.0f);
+            bomb.lifetime = 0.0f;
+            bomb.splashRadius = wallAt * 3.0f;
+            bomb.splashDamage = 60.0f;
+            bomb.splashImpulse = 90.0f;
+            rig.run(1);
+        };
+
+        // One unit past the wall: well inside the blast radius, and on the
+        // wrong side of solid rock.
+        const float shieldsBefore = rig.state.player.shields;
+        detonate(centre + toWall * (wallAt + 1.0f));
+        ok &= expect(rig.state.player.shields == shieldsBefore,
+                     "a blast through a wall does no damage");
+        ok &= expect(rig.ship.knockback == glm::vec3(0.0f),
+                     "a blast through a wall does not shove");
+
+        // The same blast, the same distance, with nothing in the way.
+        rig.ship.knockback = glm::vec3(0.0f);
+        detonate(centre + toWall * (wallAt * 0.5f));
+        ok &= expect(rig.state.player.shields < shieldsBefore,
+                     "the same blast in the open does damage");
+        ok &= expect(glm::length(rig.ship.knockback) > 0.0f,
+                     "the same blast in the open shoves");
+
+        log::info("blast occlusion: wall at {:.1f}u, through it 0 shields, around it {:.0f}",
+                  wallAt, shieldsBefore - rig.state.player.shields);
     }
 
     // --- a missile kicks the camera, a gun does not ---------------------------

@@ -15,6 +15,7 @@ void LevelSession::load(const Level& level, const sim::RobotConfig& robots, int 
     }
     sim::initObjects(level, robots, initial_.combat.objects);
     sim::spawnRobots(level, robots, initial_.robots);
+    sim::spawnProps(level, initial_.props);
     sim::initGame(level, initial_.robots, initial_.game);
     current_ = initial_;
     previous_ = initial_;

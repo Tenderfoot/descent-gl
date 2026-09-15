@@ -93,8 +93,14 @@ struct CollisionConfig {
     // does not start in contact and chatter.
     float skin = 0.01f;
     // Exponential rate applied while in contact, so grinding along a wall
-    // bleeds speed instead of preserving it perfectly.
+    // bleeds speed instead of preserving it perfectly. Anything meant to bounce
+    // wants this at zero, or the bounce is bled away as fast as it is made.
     float scrapeDamping = 2.5f;   // 1/s
+    // How much of the inward velocity comes back out. Zero is the sliding
+    // response every ship and robot has always had: the inward part is removed
+    // and the tangential part survives. Above zero reflects, which is what a
+    // loose object rattling around a room needs.
+    float restitution = 0.0f;
 };
 
 // Pushes the body out of any wall it is inside, removes the inward part of its

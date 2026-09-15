@@ -181,11 +181,17 @@ int main(int argc, char** argv) {
     // level that places it is first loaded.
     dvk::validateAssets();
 
+    // The explicit std::filesystem::path around the override is not decoration:
+    // libstdc++ refuses a conditional whose arms are path and std::string, so
+    // without it the Linux build - the one an agent verifies milestones on -
+    // does not compile.
     const std::filesystem::path settingsPath =
-        opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath() : opts.settingsPath;
+        opts.settingsPath.empty() ? dvk::defaultPlayerSettingsPath()
+                                  : std::filesystem::path(opts.settingsPath);
     dvk::PlayerSettings settings = dvk::loadPlayerSettings(settingsPath);
     const std::filesystem::path progressPath =
-        opts.progressPath.empty() ? dvk::defaultPlayerProgressPath() : opts.progressPath;
+        opts.progressPath.empty() ? dvk::defaultPlayerProgressPath()
+                                  : std::filesystem::path(opts.progressPath);
     dvk::PlayerProgress progress = dvk::loadPlayerProgress(progressPath);
     if (opts.volumeOverride) settings.masterVolume = opts.volume;
     if (opts.sizeOverride) {
@@ -694,6 +700,9 @@ int main(int argc, char** argv) {
             dvk::sim::ShipControls controls =
                 dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta,
                                   settings.bindings);
+            // Recomputed every step rather than latched, so a shield pickup
+            // hands the ship straight back.
+            cur.ship.disabled = dvk::sim::playerDisabled(cur.combat.player);
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -725,14 +734,16 @@ int main(int argc, char** argv) {
                         fire.flare = true;
                     } else {
                         fire.selectWeapon = opts.autofire;
-                        fire.primary = opts.autofire <= dvk::sim::WeaponVulcan;
-                        fire.secondary = opts.autofire >= dvk::sim::WeaponConcussion;
+                        fire.primary =
+                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Primary;
+                        fire.secondary =
+                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Secondary;
                     }
                 }
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
                                  fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
-                                 &soundEvents);
+                                 &soundEvents, &cur.props);
             if (!consumedMouse) {
                 pendingFlare = false;
                 pendingWeaponSelection = -1;
@@ -740,6 +751,7 @@ int main(int argc, char** argv) {
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
                                  &soundEvents);
+            dvk::sim::stepProps(level, cur.props, static_cast<float>(kSimStep), &solidDoors);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
             // In M5 zero shields respawned you on the spot. From M7 it ends
@@ -935,6 +947,34 @@ int main(int argc, char** argv) {
             dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
         };
 
+        // The floating balls and the swinging lamps. Both move every frame, so
+        // both are dynamic lights with their segment sets rebuilt each frame -
+        // the same path the bolts take, which is what makes a swinging spot
+        // sweep real stencil shadows across the room it hangs in.
+        for (int i = 0; i < cur.props.floatingCount; ++i) {
+            const dvk::sim::FloatingLight& ball = cur.props.floating[static_cast<size_t>(i)];
+            if (!ball.alive) continue;
+            addPointLight(ball.body.position, ball.body.segment, ball.color, ball.lightRadius,
+                          ball.lightIntensity);
+        }
+        for (int i = 0; i < cur.props.swingingCount; ++i) {
+            const dvk::sim::SwingingLight& lamp = cur.props.swinging[static_cast<size_t>(i)];
+            if (!lamp.alive) continue;
+            if (lamp.lightIntensity <= 0.0f || lamp.lightRadius <= 0.0f) continue;
+            dvk::Light& l = nextLight();
+            l.type = dvk::LightType::Spot;
+            l.position = lamp.position;
+            l.direction = lamp.direction;
+            l.coneDegrees = lamp.coneDegrees;
+            l.segment = lamp.segment;
+            l.color = lamp.color;
+            l.intensity = lamp.lightIntensity;
+            l.radius = lamp.lightRadius;
+            l.castsShadows = true;
+            l.segments.clear();
+            dvk::rebuildLightSegments(level, l, flood, &cur.game.doorField);
+        }
+
         for (const dvk::sim::Projectile& p : cur.combat.projectiles.items) {
             if (!p.alive) continue;
             addPointLight(p.position, p.segment, p.color, p.lightRadius, p.lightIntensity);
@@ -1022,6 +1062,8 @@ int main(int argc, char** argv) {
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
+        hud.shipDisabled = cur.ship.disabled;
+        hud.shipDisabledTime = cur.game.elapsed;
         // Both the bar and the word come from `playerSeen` rather than from
         // `playerLight`, even though the latter is the better-behaved number.
         // They have to agree: a bar sitting under its own threshold tick beside
@@ -1441,7 +1483,8 @@ int main(int argc, char** argv) {
         ImGui::SetNextWindowPos(ImVec2(420, 300), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(430, 0), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("weapons")) {
-            ImGui::TextDisabled("1-4 select, left mouse fires, right mouse launches, F throws a flare");
+            ImGui::TextDisabled(
+                "1-6 select, left mouse fires, right mouse launches, F throws a flare");
             for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
                 dvk::sim::WeaponDef& def = weapons.weapons[static_cast<size_t>(w)];
                 ImGui::PushID(w);
@@ -1454,9 +1497,17 @@ int main(int argc, char** argv) {
                     ImGui::ColorEdit3("colour", &def.color.r);
                     ImGui::SliderFloat("light radius", &def.lightRadius, 0.0f, 60.0f, "%.1f");
                     ImGui::SliderFloat("light intensity", &def.lightIntensity, 0.0f, 8.0f, "%.2f");
+                    ImGui::SliderFloat("impact impulse", &def.impactImpulse, 0.0f, 40.0f, "%.1f");
                     if (def.splashRadius > 0.0f || w >= dvk::sim::WeaponConcussion) {
                         ImGui::SliderFloat("splash radius", &def.splashRadius, 0.0f, 30.0f, "%.1f");
                         ImGui::SliderFloat("splash damage", &def.splashDamage, 0.0f, 60.0f, "%.1f");
+                        ImGui::SliderFloat("splash impulse", &def.splashImpulse, 0.0f, 150.0f,
+                                           "%.1f");
+                    }
+                    if (dvk::sim::weaponFire(w) != dvk::sim::WeaponFire::Projectile) {
+                        ImGui::SliderFloat("range", &def.range, 5.0f, 400.0f, "%.0f u");
+                        ImGui::SliderFloat("beam width", &def.beamWidth, 0.02f, 0.6f, "%.3f");
+                        ImGui::SliderFloat("beam time", &def.beamTime, 0.02f, 0.5f, "%.3f s");
                     }
                     if (w == dvk::sim::WeaponHoming) {
                         ImGui::SliderFloat("turn rate", &def.turnRate, 0.0f, 8.0f, "%.2f rad/s");
@@ -1472,6 +1523,7 @@ int main(int argc, char** argv) {
             ImGui::SliderFloat("flare radius", &weapons.flareRadius, 2.0f, 80.0f, "%.1f");
             ImGui::SliderFloat("flare lifetime", &weapons.flareLifetime, 2.0f, 90.0f, "%.0f s");
             ImGui::SliderFloat("headlight drain", &weapons.headlightDrain, 0.0f, 10.0f, "%.2f /s");
+            ImGui::SliderFloat("player mass", &weapons.playerMass, 0.2f, 6.0f, "%.2f");
             if (ImGui::Button("Save weapons")) {
                 dvk::sim::saveWeaponConfig(kWeaponConfigPath, weapons);
             }
