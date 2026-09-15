@@ -1462,9 +1462,12 @@ int main(int argc, char** argv) {
                     ImGui::ColorEdit3("colour", &def.color.r);
                     ImGui::SliderFloat("light radius", &def.lightRadius, 0.0f, 60.0f, "%.1f");
                     ImGui::SliderFloat("light intensity", &def.lightIntensity, 0.0f, 8.0f, "%.2f");
+                    ImGui::SliderFloat("impact impulse", &def.impactImpulse, 0.0f, 40.0f, "%.1f");
                     if (def.splashRadius > 0.0f || w >= dvk::sim::WeaponConcussion) {
                         ImGui::SliderFloat("splash radius", &def.splashRadius, 0.0f, 30.0f, "%.1f");
                         ImGui::SliderFloat("splash damage", &def.splashDamage, 0.0f, 60.0f, "%.1f");
+                        ImGui::SliderFloat("splash impulse", &def.splashImpulse, 0.0f, 150.0f,
+                                           "%.1f");
                     }
                     if (w == dvk::sim::WeaponHoming) {
                         ImGui::SliderFloat("turn rate", &def.turnRate, 0.0f, 8.0f, "%.2f rad/s");
@@ -1480,6 +1483,7 @@ int main(int argc, char** argv) {
             ImGui::SliderFloat("flare radius", &weapons.flareRadius, 2.0f, 80.0f, "%.1f");
             ImGui::SliderFloat("flare lifetime", &weapons.flareLifetime, 2.0f, 90.0f, "%.0f s");
             ImGui::SliderFloat("headlight drain", &weapons.headlightDrain, 0.0f, 10.0f, "%.2f /s");
+            ImGui::SliderFloat("player mass", &weapons.playerMass, 0.2f, 6.0f, "%.2f");
             if (ImGui::Button("Save weapons")) {
                 dvk::sim::saveWeaponConfig(kWeaponConfigPath, weapons);
             }

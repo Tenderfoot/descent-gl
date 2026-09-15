@@ -57,6 +57,8 @@ struct Projectile {
     float damage = 0.0f;
     float splashRadius = 0.0f;
     float splashDamage = 0.0f;
+    float impactImpulse = 0.0f;
+    float splashImpulse = 0.0f;
     float age = 0.0f;
     float lifetime = 2.0f;
     float lightRadius = 0.0f;

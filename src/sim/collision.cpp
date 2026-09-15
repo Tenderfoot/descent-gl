@@ -32,6 +32,17 @@ void portalTriangles(const Level& level, int segment, int side, glm::vec3 out[6]
     }
 }
 
+// Takes the inward part of both velocity channels out, and with restitution
+// above zero sends it back. Knockback is reflected alongside velocity so a body
+// blown into a wall bounces off it rather than being pressed through.
+void reflect(Body& body, const glm::vec3& normal, float restitution) {
+    const float bounce = 1.0f + restitution;
+    const float into = glm::dot(body.velocity, normal);
+    if (into < 0.0f) body.velocity -= normal * (into * bounce);
+    const float intoKnock = glm::dot(body.knockback, normal);
+    if (intoKnock < 0.0f) body.knockback -= normal * (intoKnock * bounce);
+}
+
 } // namespace
 
 bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
@@ -65,6 +76,7 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
     if (level.segments.empty()) return 0;
 
     int total = 0;
+    const float speedBefore = glm::length(body.motion());
 
     for (int iteration = 0; iteration < cfg.iterations; ++iteration) {
         // Where the body is now, which the previous iteration may have changed.
@@ -119,11 +131,11 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
                 const float depth = body.radius - distance;
                 body.position += normal * (depth + cfg.skin);
 
-                // Remove only the part of the velocity going into the wall. The
+                // Remove the part of the velocity going into the wall. The
                 // tangential part survives, which is what makes the ship slide
-                // along a wall instead of stopping dead on it.
-                const float into = glm::dot(body.velocity, normal);
-                if (into < 0.0f) body.velocity -= normal * into;
+                // along a wall instead of stopping dead on it. With restitution
+                // above zero it goes further and reflects.
+                reflect(body, normal, cfg.restitution);
 
                 if (log) {
                     Contact c;
@@ -159,8 +171,7 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
                         : (glm::dot(body.velocity, face.normal) < 0.0f ? face.normal
                                                                        : -face.normal);
                 body.position += normal * (body.radius - distance + cfg.skin);
-                const float into = glm::dot(body.velocity, normal);
-                if (into < 0.0f) body.velocity -= normal * into;
+                reflect(body, normal, cfg.restitution);
 
                 if (log) {
                     Contact c;
@@ -179,8 +190,22 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
         if (resolvedThisPass == 0) break;
     }
 
+    // Restitution inside an iterated push-out can manufacture speed: in a
+    // corner, reflecting off one wall and then off the other compounds. Nothing
+    // leaves a collision faster than it arrived.
+    if (total > 0 && cfg.restitution > 0.0f) {
+        const float speedAfter = glm::length(body.motion());
+        if (speedAfter > speedBefore && speedAfter > 1e-6f) {
+            const float scale = speedBefore / speedAfter;
+            body.velocity *= scale;
+            body.knockback *= scale;
+        }
+    }
+
     if (total > 0 && cfg.scrapeDamping > 0.0f) {
-        body.velocity *= std::exp(-cfg.scrapeDamping * dt);
+        const float bleed = std::exp(-cfg.scrapeDamping * dt);
+        body.velocity *= bleed;
+        body.knockback *= bleed;
     }
 
     body.segment = trackSegment(level, body.position, body.segment);

@@ -39,6 +39,9 @@ struct RobotDef {
     std::string model;
     float health = 30.0f;
     float radius = 2.0f;
+    // How hard it is to shove. An impulse is divided by this, so a drone gets
+    // thrown across a room by the same blast that rocks a brute.
+    float mass = 1.0f;
     float speed = 14.0f;           // units/s
     float acceleration = 26.0f;
     float turnRate = 2.2f;         // rad/s
@@ -51,6 +54,7 @@ struct RobotDef {
     float retreatTime = 1.6f;
     float projectileSpeed = 85.0f;
     float projectileDamage = 6.0f;
+    float projectileImpulse = 5.0f;   // the punch its bolts carry
     float fireInterval = 0.35f;    // between shots inside a burst
     int burstCount = 3;
     float burstPause = 1.4f;
@@ -116,6 +120,10 @@ struct Robot {
     Body body;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
     float health = 0.0f;
+    // Copied from the type at spawn. Carried on the instance because the code
+    // that shoves a robot - splash damage, a bolt landing - has the RobotState
+    // but not the RobotConfig.
+    float mass = 1.0f;
 
     RobotMode mode = RobotMode::Idle;
     RobotMode previousMode = RobotMode::Idle;

@@ -78,7 +78,14 @@ void stepShip(ShipState& s, const ShipControls& c, const FlightConfig& cfg, floa
     s.body.velocity *= decay(cfg.linearDamping, dt);
     s.body.velocity = clampLength(s.body.velocity, cfg.maxSpeed);
 
-    s.body.position += s.body.velocity * dt;
+    // The knockback channel sits outside both, deliberately. linearDamping and
+    // maxSpeed describe the ship's engines and what its hull will hold; a blast
+    // is neither, and running it through them would clip every shove down to
+    // cruising speed and then bleed it away in a third of a second. See
+    // Body::knockback.
+    s.body.knockback *= decay(kKnockbackDamping, dt);
+
+    s.body.position += s.body.motion() * dt;
 }
 
 } // namespace dvk::sim

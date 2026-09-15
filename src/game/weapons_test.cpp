@@ -575,21 +575,104 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         // Run until it lands rather than guessing how long a slow missile takes
         // to cross a room, so the flinch is checked while it is still on.
+        // Where it went off is the last place the missile was seen alive.
+        glm::vec3 blastAt = rig.ship.position;
         int waited = 0;
         while (waited < 600 && rig.state.player.shields >= before) {
+            for (const sim::Projectile& live : rig.state.projectiles.items) {
+                if (live.alive && live.owner < 0) blastAt = live.position;
+            }
             rig.run(1);
             ++waited;
         }
 
         ok &= expect(rig.state.player.shields < before, "the ship's own splash took shields");
         ok &= expect(rig.state.player.hurtTimer > 0.0f, "the hit set the flinch");
+        // The flinch is screen-only, and the flight channel stays the flight
+        // model's: a blast does not fly the ship. It does shove it, and that
+        // shove arrives in the knockback channel where nothing in stepShip can
+        // clamp it away.
         ok &= expect(rig.ship.position == shipAt && rig.ship.velocity == shipVel,
-                     "the flinch did not move the ship");
+                     "the flinch left the flight channel alone");
+        ok &= expect(glm::length(rig.ship.knockback) > 0.0f,
+                     "the blast shoved the ship");
+        ok &= expect(glm::dot(glm::normalize(rig.ship.knockback),
+                              glm::normalize(rig.ship.position - blastAt)) > 0.0f,
+                     "the shove points away from the blast");
 
         rig.run(static_cast<int>((sim::kHurtFlashTime + 0.05f) / kStep));
         ok &= expect(rig.state.player.hurtTimer == 0.0f, "the flinch faded out");
         log::info("damage flinch: {:.0f} shields lost, faded in {:.2f}s", before -
                   rig.state.player.shields, sim::kHurtFlashTime);
+    }
+
+    // --- a blast does not reach through rock ---------------------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+
+        const glm::vec3 centre = rig.level.segments[static_cast<size_t>(rig.ship.segment)].center;
+        rig.ship.position = centre;
+
+        // Aim at a side of this room that is solid, and find where it is.
+        const Segment& room = rig.level.segments[static_cast<size_t>(rig.ship.segment)];
+        glm::vec3 toWall(0.0f);
+        float wallAt = 0.0f;
+        for (int side = 0; side < SideCount; ++side) {
+            if (room.sides[static_cast<size_t>(side)].isPortal()) continue;
+            const std::array<glm::vec3, 4> corner = rig.level.sideCorners(rig.ship.segment, side);
+            const glm::vec3 face = (corner[0] + corner[1] + corner[2] + corner[3]) * 0.25f;
+            const glm::vec3 to = face - centre;
+            const float d = glm::length(to);
+            if (d < 1e-3f) continue;
+            const sim::RayHit hit =
+                sim::raycast(rig.level, centre, to / d, 400.0f, rig.ship.segment);
+            if (!hit.hit) continue;
+            if (wallAt == 0.0f || hit.distance < wallAt) {
+                wallAt = hit.distance;
+                toWall = to / d;
+            }
+        }
+        ok &= expect(wallAt > 0.0f, "the room has a solid wall to hide behind");
+
+        // Detonates wherever it is put, on the next step, with a radius wide
+        // enough to cover the ship twice over. Straight into the pool rather
+        // than fired, because the point is to choose where it goes off.
+        const auto detonate = [&](const glm::vec3& at) {
+            const int slot = rig.state.projectiles.spawn();
+            if (slot < 0) return;
+            sim::Projectile& bomb = rig.state.projectiles.items[static_cast<size_t>(slot)];
+            bomb.kind = sim::ProjectileKind::Concussion;
+            bomb.position = at;
+            bomb.segment = rig.ship.segment;
+            bomb.velocity = glm::vec3(0.0f);
+            bomb.lifetime = 0.0f;
+            bomb.splashRadius = wallAt * 3.0f;
+            bomb.splashDamage = 60.0f;
+            bomb.splashImpulse = 90.0f;
+            rig.run(1);
+        };
+
+        // One unit past the wall: well inside the blast radius, and on the
+        // wrong side of solid rock.
+        const float shieldsBefore = rig.state.player.shields;
+        detonate(centre + toWall * (wallAt + 1.0f));
+        ok &= expect(rig.state.player.shields == shieldsBefore,
+                     "a blast through a wall does no damage");
+        ok &= expect(rig.ship.knockback == glm::vec3(0.0f),
+                     "a blast through a wall does not shove");
+
+        // The same blast, the same distance, with nothing in the way.
+        rig.ship.knockback = glm::vec3(0.0f);
+        detonate(centre + toWall * (wallAt * 0.5f));
+        ok &= expect(rig.state.player.shields < shieldsBefore,
+                     "the same blast in the open does damage");
+        ok &= expect(glm::length(rig.ship.knockback) > 0.0f,
+                     "the same blast in the open shoves");
+
+        log::info("blast occlusion: wall at {:.1f}u, through it 0 shields, around it {:.0f}",
+                  wallAt, shieldsBefore - rig.state.player.shields);
     }
 
     // --- a missile kicks the camera, a gun does not ---------------------------

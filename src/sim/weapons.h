@@ -51,6 +51,12 @@ struct WeaponDef {
     float lightIntensity = 2.4f;
     float splashRadius = 0.0f;
     float splashDamage = 0.0f;
+    // The punch. impactImpulse is what a direct hit shoves the target with;
+    // splashImpulse is what the blast shoves everything in its radius with, at
+    // the centre, falling off to nothing at the edge. Both are a velocity
+    // change in units/s at mass 1 - see sim/body.h.
+    float impactImpulse = 0.0f;
+    float splashImpulse = 0.0f;
     // Homing only.
     float turnRate = 0.0f;         // rad/s
     float seekCone = 0.0f;         // radians, half-angle it will acquire within
@@ -77,6 +83,11 @@ struct WeaponConfig {
     glm::vec3 flareColor{1.0f, 0.72f, 0.36f};
 
     // Player resources.
+    // How hard the ship is to shove. Heavier than a drone and lighter than a
+    // brute: a concussion at your own feet throws you, and a vulcan round does
+    // not. Lives here rather than in FlightConfig because this is the config
+    // stepCombat is handed, and stepCombat is what does the shoving.
+    float playerMass = 1.5f;
     float headlightDrain = 1.6f;     // energy per second while the headlight is on
     float energyRecharge = 0.0f;     // none by default; pickups are M7's job
 

@@ -35,6 +35,8 @@ void readWeapon(const nlohmann::json& j, WeaponDef& w) {
     get(j, "lightIntensity", w.lightIntensity);
     get(j, "splashRadius", w.splashRadius);
     get(j, "splashDamage", w.splashDamage);
+    get(j, "impactImpulse", w.impactImpulse);
+    get(j, "splashImpulse", w.splashImpulse);
     get(j, "turnRate", w.turnRate);
     get(j, "seekCone", w.seekCone);
     get(j, "seekRange", w.seekRange);
@@ -55,6 +57,8 @@ nlohmann::json writeWeapon(const WeaponDef& w) {
         {"lightIntensity", w.lightIntensity},
         {"splashRadius", w.splashRadius},
         {"splashDamage", w.splashDamage},
+        {"impactImpulse", w.impactImpulse},
+        {"splashImpulse", w.splashImpulse},
         {"turnRate", w.turnRate},
         {"seekCone", w.seekCone},
         {"seekRange", w.seekRange},
@@ -68,6 +72,7 @@ WeaponConfig WeaponConfig::defaults() {
 
     WeaponDef& laser = cfg.weapons[WeaponLaser];
     laser.damage = 8.0f;
+    laser.impactImpulse = 5.0f;
     laser.speed = 140.0f;
     laser.fireInterval = 0.18f;
     laser.energyCost = 0.7f;
@@ -79,6 +84,7 @@ WeaponConfig WeaponConfig::defaults() {
 
     WeaponDef& vulcan = cfg.weapons[WeaponVulcan];
     vulcan.damage = 3.0f;
+    vulcan.impactImpulse = 2.5f;
     vulcan.speed = 220.0f;
     vulcan.fireInterval = 0.05f;     // 20 rounds a second
     vulcan.ammoCost = 1;
@@ -91,6 +97,8 @@ WeaponConfig WeaponConfig::defaults() {
 
     WeaponDef& concussion = cfg.weapons[WeaponConcussion];
     concussion.damage = 40.0f;
+    concussion.impactImpulse = 14.0f;
+    concussion.splashImpulse = 60.0f;
     concussion.speed = 55.0f;
     concussion.fireInterval = 0.65f;
     concussion.ammoCost = 1;
@@ -105,6 +113,8 @@ WeaponConfig WeaponConfig::defaults() {
     WeaponDef& homing = cfg.weapons[WeaponHoming];
     homing = concussion;
     homing.damage = 34.0f;
+    homing.impactImpulse = 11.0f;
+    homing.splashImpulse = 48.0f;
     homing.speed = 46.0f;
     homing.fireInterval = 0.8f;
     homing.color = glm::vec3(0.5f, 0.85f, 1.0f);
@@ -153,6 +163,7 @@ WeaponConfig loadWeaponConfig(const std::string& path) {
     get(j, "flareRadius", cfg.flareRadius);
     get(j, "flareIntensity", cfg.flareIntensity);
     getVec3(j, "flareColor", cfg.flareColor);
+    get(j, "playerMass", cfg.playerMass);
     get(j, "headlightDrain", cfg.headlightDrain);
     get(j, "energyRecharge", cfg.energyRecharge);
     get(j, "shadowBudget", cfg.shadowBudget);
@@ -178,6 +189,7 @@ bool saveWeaponConfig(const std::string& path, const WeaponConfig& cfg) {
     j["flareRadius"] = cfg.flareRadius;
     j["flareIntensity"] = cfg.flareIntensity;
     j["flareColor"] = {cfg.flareColor.r, cfg.flareColor.g, cfg.flareColor.b};
+    j["playerMass"] = cfg.playerMass;
     j["headlightDrain"] = cfg.headlightDrain;
     j["energyRecharge"] = cfg.energyRecharge;
     j["shadowBudget"] = cfg.shadowBudget;

@@ -62,16 +62,48 @@ namespace {
 // hurt the person who fired it is a missile you can safely shoot at your own
 // feet, which is not the weapon this is meant to be.
 int applySplash(const Level& level, CombatState& state, RobotState* robots, Body* player,
-                const glm::vec3& centre, float radius, float damage) {
-    if (radius <= 0.0f || damage <= 0.0f) return 0;
+                const glm::vec3& centre, int segment, float radius, float damage, float impulse,
+                float playerMass, const SolidDoors* doors) {
+    if (radius <= 0.0f || (damage <= 0.0f && impulse <= 0.0f)) return 0;
     int hits = 0;
+
+    // A blast does not reach through rock. Cast from the explosion outward
+    // rather than the other way around, so the walk starts in the segment the
+    // explosion already knows it is in. The half-unit slack is the same one the
+    // robots' line of sight uses: a ray that stops on the target's own skin has
+    // not been blocked.
+    const auto exposed = [&](const glm::vec3& target, float* distance) {
+        const glm::vec3 to = target - centre;
+        const float d = glm::length(to);
+        *distance = d;
+        if (d > radius) return false;
+        if (d < 0.001f) return true;
+        const RayHit blocked = raycast(level, centre, to / d, d, segment, doors);
+        return !blocked.hit || blocked.distance >= d - 0.5f;
+    };
+
+    // Damage falls off linearly; the shove falls off squared, so the edge of a
+    // blast rocks you and the centre of one throws you. A linear shove reads as
+    // a wall of force with a hard rim.
+    const auto share = [&](float d) {
+        const float t = d / radius;
+        return std::pair<float, float>{damage * (1.0f - t), impulse * (1.0f - t) * (1.0f - t)};
+    };
+
+    // Everything inside the blast wants a direction to travel; a body exactly
+    // at the centre has none, so it goes up.
+    const auto away = [&](const glm::vec3& at) {
+        const glm::vec3 to = at - centre;
+        return glm::dot(to, to) > 1e-6f ? to : glm::vec3(0.0f, 1.0f, 0.0f);
+    };
 
     for (int i = 0; i < state.objects.count; ++i) {
         if (!state.objects.alive[static_cast<size_t>(i)]) continue;
         const LevelObject& obj = level.objects[static_cast<size_t>(i)];
-        const float d = glm::length(obj.position - centre);
-        if (d > radius) continue;
-        state.objects.health[static_cast<size_t>(i)] -= damage * (1.0f - d / radius);
+        float d = 0.0f;
+        if (!exposed(obj.position, &d)) continue;
+        // Scenery does not move: it has no Body to shove.
+        state.objects.health[static_cast<size_t>(i)] -= share(d).first;
         ++hits;
     }
 
@@ -79,18 +111,22 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
         for (int i = 0; i < robots->count; ++i) {
             Robot& robot = robots->robots[static_cast<size_t>(i)];
             if (!robot.alive) continue;
-            const float d = glm::length(robot.body.position - centre);
-            if (d > radius) continue;
-            robot.health -= damage * (1.0f - d / radius);
+            float d = 0.0f;
+            if (!exposed(robot.body.position, &d)) continue;
+            const auto [hurt, shove] = share(d);
+            robot.health -= hurt;
+            applyImpulse(robot.body, away(robot.body.position), shove, robot.mass);
             ++hits;
         }
     }
 
     if (player) {
-        const float d = glm::length(player->position - centre);
-        if (d <= radius) {
-            state.player.shields -= damage * (1.0f - d / radius);
-            state.player.hurtTimer = kHurtFlashTime;
+        float d = 0.0f;
+        if (exposed(player->position, &d)) {
+            const auto [hurt, shove] = share(d);
+            state.player.shields -= hurt;
+            if (hurt > 0.0f) state.player.hurtTimer = kHurtFlashTime;
+            applyImpulse(*player, away(player->position), shove, playerMass);
             ++hits;
         }
     }
@@ -106,7 +142,8 @@ constexpr float kObjectRadius = 2.4f;
 // here: a bolt landing on a wall, a robot or a crate is a different noise each
 // time, and the caller is the only place that knows which of those it was.
 void killProjectile(const Level& level, CombatState& state, RobotState* robots, Body* player,
-                    Projectile& p, const glm::vec3& at, int segment, EventQueue* events) {
+                    Projectile& p, const glm::vec3& at, int segment, float playerMass,
+                    const SolidDoors* doors, EventQueue* events) {
     p.alive = false;
 
     if (p.kind == ProjectileKind::Flare) {
@@ -122,7 +159,8 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
 
     const bool explosive = p.splashRadius > 0.0f;
     if (explosive) {
-        applySplash(level, state, robots, player, at, p.splashRadius, p.splashDamage);
+        applySplash(level, state, robots, player, at, segment, p.splashRadius, p.splashDamage,
+                    p.splashImpulse, playerMass, doors);
         spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f, 0.45f,
                     p.splashRadius * 1.6f, 7.0f);
         emit(events, Cue::Explosion, at, segment);
@@ -342,6 +380,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         p.damage = damage;
         p.splashRadius = def.splashRadius;
         p.splashDamage = def.splashDamage;
+        p.impactImpulse = def.impactImpulse;
+        p.splashImpulse = def.splashImpulse;
         p.lifetime = def.lifetime;
         p.lightRadius = def.lightRadius;
         p.lightIntensity = def.lightIntensity;
@@ -417,7 +457,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         p.age += dt;
         if (p.age >= p.lifetime) {
             // A flare that never landed still becomes a light where it ran out.
-            killProjectile(level, state, robots, &ship, p, p.position, p.segment, events);
+            killProjectile(level, state, robots, &ship, p, p.position, p.segment, cfg.playerMass, doors,
+                               events);
             continue;
         }
 
@@ -470,14 +511,19 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             case CombatHit::Kind::Player:
                 state.player.shields -= p.damage;
                 state.player.hurtTimer = kHurtFlashTime;
+                applyImpulse(ship, dir, p.impactImpulse, cfg.playerMass);
                 spawnEffect(state, hit.point, p.segment, p.color, 1.4f, 0.18f, 8.0f, 2.0f);
                 emitLocal(events, Cue::PlayerHurt);
-                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, events);
+                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, cfg.playerMass, doors,
+                               events);
                 continue;
 
             case CombatHit::Kind::Robot: {
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
+                // Along the line of travel, not away from the impact point: a
+                // bullet pushes what it hits the way it was already going.
+                applyImpulse(robot.body, dir, p.impactImpulse, robot.mass);
                 // A hit is also a noise: it wakes the thing you just shot even
                 // if it had not seen you.
                 robot.awareness = 1.0f;
@@ -485,7 +531,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 robot.hasLastKnown = true;
                 spawnEffect(state, hit.point, p.segment, p.color, 1.7f, 0.22f, 11.0f, 2.8f);
                 emit(events, Cue::RobotHit, hit.point, p.segment);
-                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, events);
+                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, cfg.playerMass, doors,
+                               events);
                 continue;
             }
 
@@ -493,7 +540,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 state.objects.health[static_cast<size_t>(hit.index)] -= p.damage;
                 spawnEffect(state, hit.point, p.segment, p.color, 1.6f, 0.2f, 10.0f, 2.6f);
                 emit(events, Cue::WallImpact, hit.point, p.segment);
-                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, events);
+                killProjectile(level, state, robots, &ship, p, hit.point, p.segment, cfg.playerMass, doors,
+                               events);
                 continue;
 
             case CombatHit::Kind::Wall: {
@@ -507,7 +555,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 // A flare landing is not an impact: it has already made its
                 // noise being thrown, and the thing it does next is glow.
                 if (p.kind != ProjectileKind::Flare) emit(events, Cue::WallImpact, at, atSegment);
-                killProjectile(level, state, robots, &ship, p, at, atSegment, events);
+                killProjectile(level, state, robots, &ship, p, at, atSegment, cfg.playerMass, doors,
+                               events);
                 continue;
             }
 
