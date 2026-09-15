@@ -71,6 +71,9 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     billboardShader_ =
         std::make_unique<Shader>("shaders/billboard.vert", "shaders/billboard.frag");
     hudShader_ = std::make_unique<Shader>("shaders/hud.vert", "shaders/hud.frag");
+    // The HUD's fragment stage, unchanged, behind a vertex stage that puts the
+    // quads in the mine instead of on the screen. See render/signs.h.
+    signShader_ = std::make_unique<Shader>("shaders/sign.vert", "shaders/hud.frag");
 
     // One unit cube reused for every door half. A door is a box; there is no
     // reason for it to be anything else.
@@ -96,6 +99,12 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     for (Occluder& occluder : doorOccluders_) {
         occluder.reset(&slabOccluderMesh_, glm::mat4(1.0f));
     }
+    // Worst case for the signage, so the draw path never grows the buffer:
+    // every door keyed and visible, two halves, two faces, two plates each, and
+    // a bezel, a plate and one quad per letter of the longest string a sign can
+    // carry. It costs a megabyte once and keeps the frame report at "none".
+    constexpr size_t kSignQuadsPerPlate = 2 + 24;
+    doorSigns_.reserveQuads(static_cast<size_t>(sim::kMaxDoors) * 2 * 2 * 2 * kSignQuadsPerPlate);
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
     // Clamped rather than repeating: a sprite is a picture with an edge, and
@@ -346,17 +355,68 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
     }
 }
 
+namespace {
+
+// A door slab is oversized by this much at the frame and at the top and bottom,
+// so its outer faces sit inside the rock rather than exactly in the plane of the
+// adjacent wall. Exactly coplanar faces from two different meshes z-fight in the
+// depth prepass and then disagree in every light pass, which showed as a fizzing
+// strip around the door frame.
+constexpr float kSlabMargin = 0.25f;
+
+// The unit cube is scaled to 0.9 across the doorway's normal, so a slab's face
+// stands this far out from the plane of the opening.
+constexpr float kSlabHalfThickness = 0.45f;
+
+// The opening's own frame, derived from its four corners rather than from the
+// segment, so a deformed doorway still gets a slab and a sign that fit it.
+struct DoorFrame {
+    glm::vec3 across{1.0f, 0.0f, 0.0f};   // unit, left to right across the opening
+    glm::vec3 up{0.0f, 1.0f, 0.0f};       // unit
+    glm::vec3 normal{0.0f, 0.0f, 1.0f};   // unit, out of the doorway
+    float width = 0.0f;                   // the whole opening, not a half
+    float height = 0.0f;
+    // Half-extent of one slab across the opening, and how far that slab travels
+    // to end up entirely buried in the wall.
+    float halfWidth = 0.0f;
+    float travel = 0.0f;
+    bool valid = false;
+};
+
+DoorFrame doorFrame(const Door& door) {
+    DoorFrame frame;
+    const glm::vec3 acrossRaw = (door.corners[1] - door.corners[0]) +
+                                (door.corners[2] - door.corners[3]);
+    const glm::vec3 upRaw = (door.corners[3] - door.corners[0]) +
+                            (door.corners[2] - door.corners[1]);
+    frame.width = glm::length(acrossRaw) * 0.5f;
+    frame.height = glm::length(upRaw) * 0.5f;
+    if (frame.width < 1e-3f || frame.height < 1e-3f) return frame;
+
+    frame.across = acrossRaw / (frame.width * 2.0f);
+    frame.up = upRaw / (frame.height * 2.0f);
+    frame.normal = glm::normalize(glm::cross(frame.across, frame.up));
+    frame.halfWidth = frame.width * 0.25f + kSlabMargin * 0.5f;
+    frame.travel = frame.width * 0.5f + kSlabMargin;
+    frame.valid = true;
+    return frame;
+}
+
+// How far half `half` of a door has slid from where it sits when shut.
+float doorSlide(const DoorFrame& frame, int half, float openness) {
+    const float side = half == 0 ? -1.0f : 1.0f;
+    return side * openness * frame.travel;
+}
+
+}   // namespace
+
 // Places the two halves of every door. A door slides apart across the opening,
 // so the halves stay inside the doorway's own plane and end up buried in the
 // wall to either side rather than poking through the ceiling.
 //
-// Each half is oversized by kSlabMargin at the frame and at the top and
-// bottom, so its outer faces sit inside the rock rather than exactly in the
-// plane of the adjacent wall. Exactly coplanar faces from two different
-// meshes z-fight in the depth prepass and then disagree in every light pass,
-// which showed as a fizzing strip around the door frame. The halves still
-// meet exactly at the centre seam: those two faces face away from each other,
-// so only one is ever drawn.
+// Each half is oversized by kSlabMargin; see the constant for why. The halves
+// still meet exactly at the centre seam: those two faces face away from each
+// other, so only one is ever drawn.
 //
 // The slabs are always drawn and always cast, whatever the openness. Fully
 // open they are buried in the wall, where the depth test hides them and
@@ -364,44 +424,27 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
 // only thing occluding the doorway, since the portal walk and the light flood
 // see through a door from the moment it cracks open.
 void Renderer::buildDoors(const RenderState& rs, const Level& level) {
-    constexpr float kSlabMargin = 0.25f;
     const size_t count = std::min(level.doors.size(), static_cast<size_t>(sim::kMaxDoors));
     for (size_t di = 0; di < count; ++di) {
         const Door& door = level.doors[di];
+        const DoorFrame frame = doorFrame(door);
+        if (!frame.valid) continue;
         const float openness =
             di < static_cast<size_t>(rs.doorCount) ? rs.doorOpenness[di] : 0.0f;
 
-        // A frame from the opening's own edges, so a deformed doorway still
-        // gets a slab that fits it.
-        const glm::vec3 acrossRaw = (door.corners[1] - door.corners[0]) +
-                                    (door.corners[2] - door.corners[3]);
-        const glm::vec3 upRaw = (door.corners[3] - door.corners[0]) +
-                                (door.corners[2] - door.corners[1]);
-        const float width = glm::length(acrossRaw) * 0.5f;
-        const float height = glm::length(upRaw) * 0.5f;
-        if (width < 1e-3f || height < 1e-3f) continue;
-
-        const glm::vec3 across = acrossRaw / (width * 2.0f);
-        const glm::vec3 up = upRaw / (height * 2.0f);
-        const glm::vec3 normal = glm::normalize(glm::cross(across, up));
-
         glm::mat4 basis(1.0f);
-        basis[0] = glm::vec4(across, 0.0f);
-        basis[1] = glm::vec4(up, 0.0f);
-        basis[2] = glm::vec4(normal, 0.0f);
+        basis[0] = glm::vec4(frame.across, 0.0f);
+        basis[1] = glm::vec4(frame.up, 0.0f);
+        basis[2] = glm::vec4(frame.normal, 0.0f);
 
-        // Half the opening plus the margin, as a half-extent, and how far the
-        // half slides to end up entirely inside the wall when fully open.
-        const float halfWidth = width * 0.25f + kSlabMargin * 0.5f;
-        const float travel = width * 0.5f + kSlabMargin;
         for (int half = 0; half < 2; ++half) {
             const float side = half == 0 ? -1.0f : 1.0f;
-            const float slide = side * (halfWidth + openness * travel);
-            const glm::vec3 centre = door.center + across * slide;
+            const float offset = side * frame.halfWidth + doorSlide(frame, half, openness);
+            const glm::vec3 centre = door.center + frame.across * offset;
 
             glm::mat4 model = glm::translate(glm::mat4(1.0f), centre) * basis;
-            model = glm::scale(model,
-                               glm::vec3(halfWidth * 2.0f, height + kSlabMargin * 2.0f, 0.9f));
+            model = glm::scale(model, glm::vec3(frame.halfWidth * 2.0f,
+                                                frame.height + kSlabMargin * 2.0f, 0.9f));
 
             DoorSlab& slab = doorSlabs_[di * 2 + static_cast<size_t>(half)];
             slab.model = model;
@@ -416,6 +459,110 @@ void Renderer::buildDoors(const RenderState& rs, const Level& level) {
         doorSlabs_[di * 2 + 1].segmentA = -1;
         doorSlabs_[di * 2 + 1].segmentB = -1;
     }
+}
+
+namespace {
+
+// Where the signage sits on a doorway, as fractions of the opening, and what it
+// says. Two plates: whether the door will open, and which key it wants.
+constexpr float kSignHalfWidth = 0.42f;      // of the opening's width
+constexpr float kSignHeight = 0.20f;         // of its height, above the centre
+constexpr float kStatusHalfHeight = 0.075f;
+constexpr float kKeyHalfHeight = 0.055f;
+constexpr float kSignGap = 0.012f;
+// Clear of the slab face, so the sign is never coplanar with what it is stuck to.
+constexpr float kSignStandoff = 0.02f;
+
+constexpr glm::vec4 kDeniedPlate{0.72f, 0.05f, 0.09f, 1.0f};
+constexpr glm::vec4 kGrantedPlate{0.09f, 0.66f, 0.20f, 1.0f};
+// Not pure black: the lettering is stamped into a lit plate, not cut out of it.
+constexpr glm::vec4 kInk{0.05f, 0.04f, 0.04f, 1.0f};
+
+struct KeyStyle {
+    glm::vec4 plate;
+    const char* text;
+};
+
+KeyStyle keyStyle(KeyColor key) {
+    switch (key) {
+        case KeyColor::Blue:   return {{0.16f, 0.45f, 0.95f, 1.0f}, "BLUE KEY REQUIRED"};
+        case KeyColor::Yellow: return {{0.95f, 0.80f, 0.12f, 1.0f}, "YELLOW KEY REQUIRED"};
+        case KeyColor::Red:    return {{0.90f, 0.16f, 0.14f, 1.0f}, "RED KEY REQUIRED"};
+        default:               return {{0.6f, 0.6f, 0.6f, 1.0f}, ""};
+    }
+}
+
+}   // namespace
+
+// The signage on the keyed doors: a strip saying whether the door in front of
+// the player is going to open, and under it one in the key's own colour saying
+// which key it wants. Without them a locked door is a striped panel that looks
+// exactly like a door the player can already open, and the only feedback for
+// the difference is a refusal noise after flying into it.
+//
+// Both faces of both halves, so the sign is there whichever side the player
+// arrives from and parts with the door as it opens. The lettering is laid out
+// across the whole doorway and cut at the seam rather than per half, so a letter
+// that straddles the join is split down the middle instead of being drawn twice.
+void Renderer::buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk) {
+    doorSigns_.clear();
+
+    const size_t count = std::min(level.doors.size(), static_cast<size_t>(sim::kMaxDoors));
+    for (size_t di = 0; di < count; ++di) {
+        const Door& door = level.doors[di];
+        const int key = static_cast<int>(door.key);
+        if (key < 0 || key >= static_cast<int>(rs.keys.size())) continue;
+        if (!walk.isVisible(door.segment) && !walk.isVisible(door.neighbour)) continue;
+
+        const DoorFrame frame = doorFrame(door);
+        if (!frame.valid) continue;
+        const float openness =
+            di < static_cast<size_t>(rs.doorCount) ? rs.doorOpenness[di] : 0.0f;
+
+        const bool have = rs.keys[static_cast<size_t>(key)];
+        const KeyStyle style = keyStyle(door.key);
+
+        const float halfWidth = frame.width * kSignHalfWidth;
+        const float statusHalfH = frame.height * kStatusHalfHeight;
+        const float keyHalfH = frame.height * kKeyHalfHeight;
+        const float statusY = frame.height * kSignHeight;
+        const float keyY = statusY - statusHalfH - frame.height * kSignGap - keyHalfH;
+
+        for (int half = 0; half < 2; ++half) {
+            // The sign is glued to its slab, so it rides the same slide. Its
+            // own centre stays over the middle of the opening while the door is
+            // shut, which is what puts the seam at u = 0.5.
+            const glm::vec3 slid =
+                door.center + frame.across * doorSlide(frame, half, openness);
+
+            for (int face = 0; face < 2; ++face) {
+                const float facing = face == 0 ? 1.0f : -1.0f;
+                const glm::vec3 offset =
+                    frame.normal * (facing * (kSlabHalfThickness + kSignStandoff));
+
+                DoorSigns::Panel panel;
+                panel.right = frame.across * facing;
+                panel.up = frame.up;
+                panel.halfWidth = halfWidth;
+                // Seen from behind, the door's left-hand half is on the
+                // reader's right, so the slice this half carries swaps over.
+                const bool firstSlice = (half == 0) == (facing > 0.0f);
+                panel.uMin = firstSlice ? 0.0f : 0.5f;
+                panel.uMax = firstSlice ? 0.5f : 1.0f;
+
+                panel.halfHeight = statusHalfH;
+                panel.center = slid + offset + frame.up * statusY;
+                doorSigns_.add(panel, have ? "ACCESS GRANTED" : "ACCESS DENIED",
+                               have ? kGrantedPlate : kDeniedPlate, kInk);
+
+                panel.halfHeight = keyHalfH;
+                panel.center = slid + offset + frame.up * keyY;
+                doorSigns_.add(panel, style.text, style.plate, kInk);
+            }
+        }
+    }
+
+    doorSigns_.upload();
 }
 
 void Renderer::buildHud(const HudData& hud) {
@@ -1338,6 +1485,27 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         glDepthMask(GL_TRUE);
     }
 
+    if (!doorSigns_.empty()) {
+        // Alpha-blended, depth-tested, not depth-writing: signage is a decal on
+        // a door, so anything in front of it hides it and it occludes nothing
+        // itself - including the copy of it on the door's far face, which the
+        // slab's own depth rejects. Nothing inside the buffer is offset from
+        // anything else, because with no depth writes the layering is simply the
+        // order the quads were emitted in: bezel, plate, then letters.
+        //
+        // Culling off rather than winding both faces: the far-side panels are
+        // wound the other way round, and a decal has no inside to cull.
+        signShader_->bind();
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_CULL_FACE);
+        doorSigns_.draw();
+        glEnable(GL_CULL_FACE);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+
     if (!billboards_.empty()) {
         // Additive, depth-tested but not depth-writing: a bolt lights what is
         // behind it and never occludes anything.
@@ -1394,6 +1562,7 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     gatherLights(level, dynamicLights, eyePos(rs), walk, shadowBudget);
     updateRobotOccluders(rs);
     buildDoors(rs, level);
+    buildDoorSigns(rs, level, walk);
     buildBillboards(rs);
     buildHud(hud);
     buildMenu(menu);

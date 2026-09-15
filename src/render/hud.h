@@ -13,10 +13,9 @@ class Texture2D;
 
 // The in-game HUD: screen-space quads drawn in the unlit pass.
 //
-// Text comes from a procedurally generated 5x7 bitmap font baked into one
-// texture at startup, rather than from a font library or a shipped atlas. The
-// HUD needs digits, a colon and capitals; that is 37 glyphs, and generating
-// them keeps the dependency list where CLAUDE.md says it is.
+// Text comes from the project's 5x7 bitmap font, generated into one texture at
+// startup rather than loaded from a font library or a shipped atlas - see
+// render/font.h, which the door signs draw from as well.
 class Hud {
 public:
     Hud();

@@ -10,6 +10,7 @@
 #include "render/model.h"
 #include "render/shader.h"
 #include "render/shadow.h"
+#include "render/signs.h"
 #include "render/target.h"
 #include "render/texture_array.h"
 
@@ -263,6 +264,7 @@ private:
     void lightPasses(const RenderState& rs, const PortalWalk& walk);
     void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildDoors(const RenderState& rs, const Level& level);
+    void buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildHud(const HudData& hud);
     void buildMenu(const MenuView& menu);
     void hudPass();
@@ -344,6 +346,11 @@ private:
     OccluderMesh slabOccluderMesh_;
     std::vector<DoorSlab> doorSlabs_;
     std::vector<Occluder> doorOccluders_;
+
+    // The "access denied" / "access granted" strips on the keyed doors, rebuilt
+    // every frame because they move with the slabs and change with the keys.
+    DoorSigns doorSigns_;
+    std::unique_ptr<Shader> signShader_;
 
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order

@@ -1786,3 +1786,28 @@ Two pre-existing failures were fixed first, in their own commit, because the
 Linux verification path did not work at all: the build did not compile under
 GCC, and `--weapons-test` failed on a case whose damage had always come from
 robot fire rather than from the missile it was testing.
+
+## Door signs
+
+Keyed doors were indistinguishable from unkeyed ones: the same hazard-striped
+slab, with the only feedback for the difference being a refusal noise after
+flying into it. Each keyed door now carries two lit plates — a status strip
+reading `ACCESS DENIED` or `ACCESS GRANTED` against the keys the player is
+actually carrying, and under it a plate in the key's own colour naming the key
+the door wants. Both faces of both halves, split at the seam so the sign parts
+with the door.
+
+Built as the world-space sibling of the HUD: `render/signs.h` emits a bezel, a
+plate and one quad per letter into one buffer and one draw, reusing `hud.frag`
+unchanged and the 5x7 font that moved out of `hud.cpp` into `render/font.h`.
+See `docs/ARCHITECTURE.md`, "Door signs".
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| Verification suite | ⬜ not run — the change was pushed for review without it |
+| Rendered run | ⬜ not run |
+
+The verification suite and a rendered run were skipped at the requester's
+explicit instruction, so nothing here claims the signs have been seen on screen.
+They need running before this is treated as finished.
