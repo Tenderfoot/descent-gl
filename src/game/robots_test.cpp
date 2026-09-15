@@ -146,6 +146,64 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
 
     ok &= expect(rig.robotCfg.types.size() >= 3, "three robot types are defined");
 
+    // Clear robot-to-player sight, but an object blocks the only light. This
+    // exercises the exposure query inside stepRobots, not just its LOS ray.
+    {
+        Level room = rig.level;
+        room.lights.clear();
+        const int segment = room.start.segment;
+        const glm::vec3 at = room.segments[static_cast<size_t>(segment)].center;
+        Light light;
+        light.position = at + glm::vec3(4.0f, 0.0f, 0.0f);
+        light.radius = 20.0f;
+        light.intensity = 10.0f;
+        light.segment = segment;
+        light.segments = {segment};
+        room.lights.push_back(light);
+
+        sim::Body player;
+        player.position = at;
+        player.segment = segment;
+        sim::CombatState combat;
+        combat.player.headlightOn = false;
+        sim::RobotState robots;
+        robots.count = 1;
+        sim::Robot& robot = robots.robots[0];
+        robot.alive = true;
+        robot.type = 0;
+        robot.health = rig.robotCfg.types[0].health;
+        robot.body.position = at + glm::vec3(0.0f, 0.0f, 4.0f);
+        robot.body.segment = segment;
+
+        sim::OccluderSet blockers;
+        sim::PlacedProxy pillar;
+        pillar.kind = sim::ProxyVolume::Kind::Box;
+        pillar.centre = at + glm::vec3(2.0f, 0.0f, 0.0f);
+        pillar.halfExtents = glm::vec3(0.5f, 2.0f, 0.5f);
+        blockers.add(pillar, {sim::OccluderKind::Object, 0}, segment);
+        ok &= expect(!sim::occluded(blockers, robot.body.position, player.position),
+                     "shadow cover leaves robot-to-player sight clear");
+        ok &= expect(!sim::raycast(room, robot.body.position, glm::vec3(0, 0, -1),
+                                  4.0f, segment).hit,
+                     "shadow cover sight is also clear of walls");
+        ok &= expect(!sim::playerVisibility(room, combat, rig.weapons, at, segment,
+                                           nullptr, nullptr, &blockers).visible,
+                     "the blocker puts the player in darkness");
+        sim::stepRobots(room, rig.robotCfg, rig.weapons, robots, combat, player, kStep,
+                        nullptr, nullptr, nullptr, &blockers);
+        ok &= expect(robot.awareness == 0.0f,
+                     "an unalerted robot cannot detect a player in an object's shadow");
+
+        blockers.clear();
+        ok &= expect(sim::playerVisibility(room, combat, rig.weapons, at, segment,
+                                          nullptr, nullptr, &blockers).visible,
+                     "removing the blocker exposes the player to light");
+        sim::stepRobots(room, rig.robotCfg, rig.weapons, robots, combat, player, kStep,
+                        nullptr, nullptr, nullptr, &blockers);
+        ok &= expect(robot.awareness > 0.0f,
+                     "the same robot detects the player when the shadow is removed");
+    }
+
     // --- a robot that cannot see the player idles --------------------------
     {
         rig.reset();
