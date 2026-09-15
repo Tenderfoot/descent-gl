@@ -120,6 +120,12 @@ struct RenderState {
     std::array<float, sim::kMaxDoors> doorOpenness{};
     int doorCount = 0;
 
+    // Blue, yellow, red: which keys the player is carrying. HudData carries the
+    // same three flags for the readout, but this is not a readout - the signage
+    // on a locked door is part of the world, and the renderer has to know what
+    // the door would do if the player flew at it.
+    std::array<bool, 3> keys{};
+
     // Floating lights and swinging lamps, as the unlit pass draws them. The
     // lights themselves go into the dynamic light list; these are the visible
     // fixtures.
@@ -251,6 +257,11 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         r.doorOpenness[static_cast<size_t>(i)] =
             glm::mix(a.game.doors[static_cast<size_t>(i)].openness,
                      b.game.doors[static_cast<size_t>(i)].openness, t);
+    }
+    // Not interpolated: picking a key up happens on one step, and half a key
+    // is not a thing a door can be told about.
+    for (size_t i = 0; i < r.keys.size() && i < b.game.keys.size(); ++i) {
+        r.keys[i] = b.game.keys[i];
     }
 
     for (int i = 0; i < b.props.floatingCount; ++i) {

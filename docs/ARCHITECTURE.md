@@ -2002,6 +2002,60 @@ else in the project reads an image file, so the global flag has no other caller
 to surprise — the comment in `sprites.cpp` says so, because the next image
 loader will need to know.
 
+### Door signs
+
+A locked door and an unlocked one were the same striped panel. The only feedback
+for the difference was flying into it and hearing a refusal, which is a slow way
+to learn a mine's layout. Each keyed door now carries two lit plates: a status
+strip reading `ACCESS DENIED` or `ACCESS GRANTED` depending on whether the player
+is carrying the key, and under it a plate in the key's own colour reading
+`BLUE KEY REQUIRED`, `YELLOW KEY REQUIRED` or `RED KEY REQUIRED`. The second
+plate does not change with the first: which key the door wants is a property of
+the door, and a player who has just been refused needs to know what to go and
+find.
+
+They are **emissive**, drawn in the unlit pass rather than lit by the mine. That
+is forced by the no-ambient rule: a sign painted into the lit pass is invisible
+in an unlit corridor, which is exactly where a player is most likely to be
+guessing about a door. An illuminated sign is what a mine would have anyway.
+
+`render/signs.h` is the world-space sibling of `render/hud.h` and is built the
+same way — a bezel quad, a plate quad and one quad per letter, all in one stream
+buffer and one draw. It reuses `hud.frag` **unchanged**, including the negative-UV
+sentinel that lets solid quads and glyphs share a draw call; the only new shader
+is `sign.vert`, which differs from `hud.vert` in nothing but putting the quads
+through the camera instead of through the screen. The 5x7 font both of them draw
+with moved out of `hud.cpp` into `render/font.h` to make that sharing possible.
+
+Nothing inside the buffer is depth-offset from anything else. The pass writes no
+depth, so the layering is simply the order the quads were emitted in, and the
+only offset that matters is the 0.02 units that hold the whole sign clear of the
+slab face it is stuck to. The copy of the sign on the door's far face needs no
+special handling either: it is behind the slab, and the slab's own depth from
+the prepass rejects it.
+
+The one piece of real work is the seam. A door is two halves that slide apart,
+so a sign across the doorway has to come apart with them. `DoorSigns::Panel`
+describes the whole sign but carries a horizontal slice `[uMin, uMax]` of it,
+and each half asks for its own slice positioned at its own centre. The lettering
+is laid out across the **whole** doorway and then clipped per glyph, adjusting
+the glyph's UVs as well as its geometry, so a letter straddling the join is cut
+down the middle and each piece rides away on its own slab rather than being
+drawn twice or squeezed to fit. Seen from behind the door, the half that carries
+the first slice swaps over, because the door's left-hand half is on that
+reader's right.
+
+`RenderState` gained a `keys` array for this. `HudData` already had the same
+three flags, but those are a readout; a locked door's signage is part of the
+world, and the renderer has to know what the door would do if the player flew at
+it. It is not interpolated — picking a key up happens on one step, and half a
+key is not something a door can be told about.
+
+The slab and the sign now share one `doorFrame()`, which derives the opening's
+`across`, `up` and `normal` and the slab's half-extent and travel from the four
+corners. They were computing the same thing twice, and a sign that disagreed
+with its door about where the doorway is would be visibly wrong.
+
 ### Disabled ships
 
 One threshold, `kDisabledHealthFraction`, governs robots and the player alike.

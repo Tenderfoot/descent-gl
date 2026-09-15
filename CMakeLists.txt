@@ -51,6 +51,7 @@ add_executable(descent
     src/render/debug.cpp
     src/render/billboards.cpp
     src/render/debug_lines.cpp
+    src/render/font.cpp
     src/render/gpu_timer.cpp
     src/render/hud.cpp
     src/render/level_mesh.cpp
@@ -61,6 +62,7 @@ add_executable(descent
     src/render/screenshot.cpp
     src/render/shader.cpp
     src/render/shadow.cpp
+    src/render/signs.cpp
     src/render/sprites.cpp
     src/render/stb_impl.cpp
     src/render/target.cpp
