@@ -724,25 +724,28 @@ int main(int argc, char** argv) {
                                        static_cast<float>(kSimStep), &contacts, &solidDoors);
 
             dvk::sim::FireControls fire;
-            // Only the first sim step of a frame sees the button edges, for
-            // the same reason it is the only one that sees the mouse motion.
+            // Held triggers belong to every fixed step. Only button edges are
+            // consumed once per rendered frame; otherwise a continuous weapon
+            // loses damage and energy drain whenever a frame runs two steps.
+            fire.primary = dvk::bindingDown(input, settings.bindings,
+                                            dvk::PlayerAction::PrimaryFire);
+            fire.secondary = dvk::bindingDown(input, settings.bindings,
+                                              dvk::PlayerAction::SecondaryFire);
             if (!consumedMouse) {
-                fire.primary = dvk::bindingDown(input, settings.bindings,
-                                                dvk::PlayerAction::PrimaryFire);
-                fire.secondary = dvk::bindingDown(input, settings.bindings,
-                                                  dvk::PlayerAction::SecondaryFire);
                 fire.flare = pendingFlare;
                 fire.selectWeapon = pendingWeaponSelection;
-                if (opts.autofire >= 0) {
-                    if (opts.autofire >= dvk::sim::WeaponCount) {
-                        fire.flare = true;
-                    } else {
-                        fire.selectWeapon = opts.autofire;
-                        fire.primary =
-                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Primary;
-                        fire.secondary =
-                            dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Secondary;
-                    }
+            }
+            if (opts.autofire >= 0) {
+                if (opts.autofire >= dvk::sim::WeaponCount) {
+                    // Autofire is held by definition. stepCombat owns the flare
+                    // cooldown, just as it owns every weapon's fire interval.
+                    fire.flare = true;
+                } else {
+                    if (!consumedMouse) fire.selectWeapon = opts.autofire;
+                    fire.primary =
+                        dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Primary;
+                    fire.secondary =
+                        dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Secondary;
                 }
             }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,

@@ -783,7 +783,8 @@ void Renderer::buildBillboards(const RenderState& rs) {
         const RenderState::PropView& prop = rs.props[static_cast<size_t>(i)];
         billboards_.add(prop.position, right, up, prop.size, prop.color);
         if (prop.corded) {
-            billboards_.addBeam(prop.anchor, prop.position, eye, 0.05f, prop.color * 0.28f);
+            billboards_.addBeam(prop.anchor, prop.position, eye, right, 0.05f,
+                                prop.color * 0.28f);
         }
     }
 
@@ -791,7 +792,16 @@ void Renderer::buildBillboards(const RenderState& rs) {
     // keeps to one draw.
     for (int i = 0; i < rs.beamCount; ++i) {
         const RenderState::BeamView& beam = rs.beams[static_cast<size_t>(i)];
-        billboards_.addBeam(beam.start, beam.end, eye, beam.width, beam.color);
+        glm::vec3 visualStart = beam.start;
+        if (rs.camera == CameraMode::FirstPerson) {
+            // The trace leaves the ship's centreline so it hits the crosshair.
+            // Drawing from there looks straight down the ribbon and collapses
+            // its length. Offset only the visible muzzle; the hit point and all
+            // gameplay remain on the centreline.
+            visualStart = rs.shipPos + right * 0.34f - up * 0.22f +
+                          glm::mat3_cast(rs.shipOrientation) * glm::vec3(0.0f, 0.0f, -0.65f);
+        }
+        billboards_.addBeam(visualStart, beam.end, eye, right, beam.width, beam.color);
     }
 
     // Pickups. Emissive so they can be found in a dark corridor, and pulsing

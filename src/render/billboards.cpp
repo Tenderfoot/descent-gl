@@ -2,6 +2,8 @@
 
 #include <glm/geometric.hpp>
 
+#include <cmath>
+
 namespace dvk::gl {
 
 Billboards::Billboards() {
@@ -46,7 +48,7 @@ void Billboards::add(const glm::vec3& center, const glm::vec3& right, const glm:
 }
 
 void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye,
-                         float width, const glm::vec3& color) {
+                         const glm::vec3& cameraRight, float width, const glm::vec3& color) {
     const glm::vec3 axis = end - start;
     const float length = glm::length(axis);
     if (length < 1e-4f) return;
@@ -55,12 +57,21 @@ void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm
     // The beam's own axis crossed with the line of sight gives the direction to
     // widen in, so the quad turns to face the camera about the beam rather than
     // about its centre. Looking straight down a beam the cross product
-    // degenerates, which is correct: a beam pointed at the eye has no width to
-    // show, and the near-zero side vector makes it vanish instead of flipping.
+    // degenerates. In that case the camera's own right vector is the stable
+    // answer: the beam must remain visible rather than vanish or flip.
     const glm::vec3 toEye = eye - start;
-    const glm::vec3 side = glm::cross(dir, toEye);
-    const float sideLength = glm::length(side);
-    if (sideLength < 1e-5f) return;
+    glm::vec3 side = glm::cross(dir, toEye);
+    float sideLength = glm::length(side);
+    if (sideLength < 1e-5f) {
+        side = cameraRight - dir * glm::dot(cameraRight, dir);
+        sideLength = glm::length(side);
+        if (sideLength < 1e-5f) {
+            const glm::vec3 fallback = std::abs(dir.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                                              : glm::vec3(1.0f, 0.0f, 0.0f);
+            side = glm::cross(dir, fallback);
+            sideLength = glm::length(side);
+        }
+    }
     const glm::vec3 w = side * (width / sideLength);
 
     const Vertex bl{start - w, color, 0.0f, 0.0f};

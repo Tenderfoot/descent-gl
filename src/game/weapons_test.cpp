@@ -706,6 +706,46 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
                   longest);
     }
 
+    // --- a body hit belongs to the room containing the body -----------------
+    {
+        int fromSegment = -1;
+        int targetSegment = -1;
+        for (int si = 0; si < rig.level.segmentCount() && targetSegment < 0; ++si) {
+            const Segment& room = rig.level.segments[static_cast<size_t>(si)];
+            for (const SideData& side : room.sides) {
+                if (side.isPortal() && side.door < 0) {
+                    fromSegment = si;
+                    targetSegment = side.neighbour;
+                    break;
+                }
+            }
+        }
+        ok &= expect(targetSegment >= 0, "the level has an open portal for a cross-room trace");
+
+        if (targetSegment >= 0) {
+            sim::CombatState empty;
+            sim::Body target;
+            const glm::vec3 origin =
+                rig.level.segments[static_cast<size_t>(fromSegment)].center;
+            target.position = rig.level.segments[static_cast<size_t>(targetSegment)].center;
+            target.segment = targetSegment;
+            const glm::vec3 toTarget = target.position - origin;
+
+            sim::CombatTraceParams hostile;
+            hostile.owner = 0;   // robot fire includes the player body
+            const sim::CombatHit hit = sim::traceCombatRay(
+                rig.level, empty, target, nullptr, origin, glm::normalize(toTarget),
+                glm::length(toTarget) + 20.0f, fromSegment, hostile);
+
+            ok &= expect(hit.kind == sim::CombatHit::Kind::Player,
+                         "a trace through an open portal hits the body in the next room");
+            ok &= expect(hit.segment == targetSegment,
+                         "a cross-room body hit reports the target room");
+            log::info("cross-room hit: segment {} -> {}, impact belongs to {}", fromSegment,
+                      targetSegment, hit.segment);
+        }
+    }
+
     // --- a held beam is metered per second, not per step ----------------------
     {
         rig.reset();
