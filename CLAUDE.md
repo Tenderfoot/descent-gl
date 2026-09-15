@@ -180,6 +180,36 @@ runtime.
 
 **Ask before adding anything else.**
 
+## Fixes are not milestones
+
+The checklist below is for milestones. A bugfix, a diagnosis, a one-file
+change is not one, and running the full ritual for it wastes a working
+session.
+
+For a fix, the default is: find the cause, implement the smallest change
+that addresses it, push the branch, stop. Do not build, do not run the
+headless tests, do not set up the Linux container, do not install a
+toolchain. I have the dev machine and I will test it there. Do not ask
+whether to verify — assume not, and say so.
+
+Two things are not optional even then:
+
+- **Say what you checked and what you assumed.** "Not compiled, not run"
+  is a complete answer and finishes the task; a fix described as if it
+  had been tested does not. If a claim rests on reading the code rather
+  than running it, that is worth one clause, not a paragraph.
+- **Say what would prove you wrong.** The fix is going to be tested by a
+  person who was not in the diagnosis. One line on what the symptom
+  should look like if the theory was right, and what it means if it
+  persists, is worth more than any amount of hedging.
+
+Spending more than a couple of minutes on verification means asking
+first. The shipping target is Windows and the interesting bugs are in
+the renderer, so a Linux container often cannot reproduce the thing
+under discussion at all — verifying there can be theatre that reads as
+evidence. When the container genuinely can reproduce it, say so and ask;
+that is a case where a test cycle is worth the wait.
+
 ## Before you finish a milestone
 
 1. `cmake --build --preset local-debug` and `--preset local-release` both clean.
