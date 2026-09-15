@@ -61,7 +61,22 @@ struct RobotDef {
     glm::vec3 color{1.0f, 0.4f, 0.3f};
     glm::vec3 eyeColor{1.0f, 0.25f, 0.15f};
     float eyeSize = 0.32f;
-    std::vector<glm::vec3> eyes;   // local offsets
+    // Local offsets of the emissive eye billboards, in model space.
+    //
+    // THESE MUST SIT OUTSIDE THE ROBOT'S OWN HULL. The eyes are drawn as
+    // camera-facing quads in the unlit pass, which is depth-tested against a
+    // depth prepass that draws every robot mesh unconditionally. An offset
+    // inside the hull is therefore occluded by the robot's own body - and in
+    // an unlit corridor that body is invisible, so the eyes vanish behind
+    // nothing at all, which is the exact opposite of what they are for.
+    //
+    // Place each one on the surface the eye belongs to and push it out along
+    // that surface's normal by about half of `eyeSize` (the quad's HALF
+    // extent, so the sprite is 2 * eyeSize across). That clearance is what
+    // makes the whole quad readable head-on; past roughly 30 degrees off axis
+    // the quad starts to clip into the hull again and reads as a recessed
+    // lamp, which is the intended look.
+    std::vector<glm::vec3> eyes;
     // Chance of each drop, in order: nothing, energy, shield.
     // The reactor is a robot that does not move: high health, slow bolts,
     // stationary. Reusing the robot path gives it pathing it never uses, but
