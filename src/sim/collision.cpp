@@ -2,10 +2,12 @@
 
 #include "game/level.h"
 #include "sim/geometry.h"
+#include "sim/proxy.h"
 
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace dvk::sim {
@@ -210,6 +212,174 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
 
     body.segment = trackSegment(level, body.position, body.segment);
     return total;
+}
+
+namespace {
+
+// One pair, separated. Positional push split by inverse mass, then an impulse
+// along the contact normal if they are still closing.
+//
+// The impulse goes entirely into the KNOCKBACK channel, which is what that
+// channel is for: velocity the body did not ask for. Writing it into `velocity`
+// would hand it to the flight model, which damps toward zero and clamps to
+// maxSpeed, and a shove from a brute would be gone in the step it arrived in.
+//
+// Momentum is conserved on `motion()` regardless of which channel receives it,
+// because each body's share is the same impulse scaled by its own inverse mass,
+// with opposite signs. That is what --collision-test checks.
+// Are these two close enough in the SEGMENT GRAPH to be touching at all?
+//
+// World-space distance is not enough. Segments share their vertices, so two
+// rooms side by side are separated by a wall of no thickness whatever - and two
+// bodies hugging that wall from opposite sides are well inside each other's
+// radii while having no business touching. Without this they shove each other
+// through solid rock, and the wall pass spends the rest of the step undoing it.
+//
+// Same segment, or one portal apart and that portal not shut.
+bool canTouch(const Level& level, int segA, int segB, const SolidDoors* doors) {
+    if (segA == segB) return true;
+    if (segA < 0 || segB < 0 || segA >= level.segmentCount() || segB >= level.segmentCount()) {
+        return false;
+    }
+    const Segment& seg = level.segments[static_cast<size_t>(segA)];
+    for (const SideData& sd : seg.sides) {
+        if (sd.neighbour == segB) return !doorShut(doors, segA, segB);
+    }
+    return false;
+}
+
+bool separatePair(BodyEntry& a, BodyEntry& b, float skin) {
+    Body& ba = *a.body;
+    Body& bb = *b.body;
+
+    const glm::vec3 delta = bb.position - ba.position;
+    const float sum = ba.radius + bb.radius;
+    const float distance = glm::length(delta);
+    if (distance >= sum) return false;
+
+    const float invA = ba.mass > 0.0f ? 1.0f / ba.mass : 0.0f;
+    const float invB = bb.mass > 0.0f ? 1.0f / bb.mass : 0.0f;
+    const float invSum = invA + invB;
+    if (invSum <= 0.0f) return false;   // two immovables cannot resolve
+
+    // Concentric bodies give no direction to separate along. Pick one rather
+    // than dividing by zero; the next iteration refines it.
+    const glm::vec3 normal = distance > kEpsilon ? delta / distance : glm::vec3(0.0f, 1.0f, 0.0f);
+
+    const float depth = sum - distance + skin;
+    ba.position -= normal * (depth * (invA / invSum));
+    bb.position += normal * (depth * (invB / invSum));
+
+    const float closing = glm::dot(bb.motion() - ba.motion(), normal);
+    if (closing < 0.0f) {
+        // The lower of the two, so a bouncy ball against a ship does not bounce
+        // as if the ship were bouncy too.
+        const float restitution = std::min(a.restitution, b.restitution);
+        const float impulse = -(1.0f + restitution) * closing / invSum;
+        ba.knockback -= normal * (impulse * invA);
+        bb.knockback += normal * (impulse * invB);
+    }
+    return true;
+}
+
+// A body against the level's static objects. Same response as a wall, because
+// that is what a pillar is: the object does not move, so all of the push and
+// all of the reflection land on the body.
+bool separateFromObjects(const Level& level, BodyEntry& entry, float skin,
+                         const SolidObjects* solid) {
+    Body& body = *entry.body;
+    bool touched = false;
+    if (!solid) return false;   // nothing has been said to be solid
+
+    for (size_t i = 0; i < level.objectProxies.size(); ++i) {
+        // A robot's spawn entry, or something already shot to pieces.
+        if (!solid->solid(i)) continue;
+        // Same segment only. Deliberately narrower than the body-body rule
+        // above: an object sits where a level author put it, which is in the
+        // middle of a room rather than against a portal, and widening this to
+        // neighbours would let a pillar standing against a wall push a body in
+        // the room on the other side of it. The cost is that a body straddling
+        // a portal does not collide with a pillar planted right beside that
+        // portal; no shipped level does that.
+        if (level.objects[i].segment != body.segment) continue;
+
+        ProxyContact contact;
+        if (!proxySphereContact(level.objectProxies[i], body.position, body.radius, contact)) {
+            continue;
+        }
+        body.position += contact.normal * (contact.depth + skin);
+        reflect(body, contact.normal, entry.restitution);
+        touched = true;
+    }
+    return touched;
+}
+
+} // namespace
+
+BodyResolveStats resolveBodies(const Level& level, BodySet& set, const CollisionConfig& cfg,
+                               float dt, const SolidDoors* doors, const SolidObjects* objects) {
+    BodyResolveStats stats;
+    if (set.count == 0 || level.segments.empty()) return stats;
+
+    // The wall pass inside this loop is a CORRECTION, not the primary one: each
+    // system already resolved its own bodies against the mine on the way in,
+    // with its own scrape damping and its own restitution. Bleeding speed again
+    // here would double the cost of grinding along a wall for any body that
+    // happened to touch another one.
+    CollisionConfig wallCfg = cfg;
+    wallCfg.scrapeDamping = 0.0f;
+
+    std::array<bool, kMaxCollisionBodies> moved{};
+
+    for (int iteration = 0; iteration < cfg.iterations; ++iteration) {
+        stats.iterations = iteration + 1;
+        moved.fill(false);
+        int resolvedThisPass = 0;
+
+        // 1. Bodies against each other, pairs in slot order.
+        for (int i = 0; i < set.count; ++i) {
+            for (int j = i + 1; j < set.count; ++j) {
+                if (!canTouch(level, set.entries[static_cast<size_t>(i)].body->segment,
+                              set.entries[static_cast<size_t>(j)].body->segment, doors)) {
+                    continue;
+                }
+                if (separatePair(set.entries[static_cast<size_t>(i)],
+                                 set.entries[static_cast<size_t>(j)], cfg.skin)) {
+                    moved[static_cast<size_t>(i)] = true;
+                    moved[static_cast<size_t>(j)] = true;
+                    ++stats.bodyContacts;
+                    ++resolvedThisPass;
+                }
+            }
+        }
+
+        // 2. Bodies against the level's static objects.
+        for (int i = 0; i < set.count; ++i) {
+            if (separateFromObjects(level, set.entries[static_cast<size_t>(i)], cfg.skin,
+                                    objects)) {
+                moved[static_cast<size_t>(i)] = true;
+                ++stats.objectContacts;
+                ++resolvedThisPass;
+            }
+        }
+
+        // Nothing touched anything, so nothing has been moved off the walls its
+        // own system already put it on. The common case, and it costs one
+        // sweep of cheap distance tests.
+        if (resolvedThisPass == 0) break;
+
+        // 3. The mine, last, and only for what moved. Whatever the bodies did
+        // to each other, this is the final say on where they ended up.
+        for (int i = 0; i < set.count; ++i) {
+            if (!moved[static_cast<size_t>(i)]) continue;
+            const BodyEntry& entry = set.entries[static_cast<size_t>(i)];
+            CollisionConfig perBody = wallCfg;
+            perBody.restitution = entry.restitution;
+            stats.wallContacts += resolveCollision(level, *entry.body, perBody, dt, nullptr, doors);
+        }
+    }
+
+    return stats;
 }
 
 RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& direction,

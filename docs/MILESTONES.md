@@ -1941,3 +1941,81 @@ Not fixed here, and not caused here: a gameplay run (`--frames 120` in
 `mine01`) reports `sim step SOME on 1 of 90 frames, draw path SOME on 26 of 90`.
 The same run on `main` reports the identical counts at the identical frames, so
 it is pre-existing and wants its own change.
+
+## Bodies stop bodies
+
+Ships flew through robots, robots flew through each other, and everything flew
+through the pillars. `resolveCollision` only ever saw one body and the mine;
+nothing in the project tested a body against another body.
+
+`resolveBodies` takes the whole set — the ship, every live robot, every floating
+light — and separates them from each other, from the level's objects, and from
+the mine. Phase 2 of the roadmap in `docs/ARCHITECTURE.md`, "Bodies against each
+other", building on the proxy volumes from the previous milestone.
+
+The shape of it is the part worth reading. A body-to-body resolve cannot be done
+a body at a time: it needs both masses at once, and it has to be **interleaved**
+with the wall resolve rather than run before or after it. Sequencing it before
+lets the wall correction push two bodies back into each other; sequencing it
+after pushes one of them through a wall. The loop alternates, bounded, and always
+ends on the mine.
+
+Two bugs found by re-reading the diff rather than by a test, both now covered:
+
+- **The segment gate.** Segments share their vertices, so two rooms side by side
+  are separated by a wall of no thickness at all. Two bodies hugging that wall
+  from opposite sides are inside each other's radii in world space while having
+  no business touching — they shoved each other through solid rock. A pair now
+  resolves only in the same segment, or one open portal apart.
+- **Robot spawn entries are not solid.** `Level::objects` has two owners, and an
+  entry whose type names a robot is stepped from the robot list. Without the
+  filter, every robot's spawn point became an invisible box that ships bounce
+  off — the same bug `initObjects` already fixed once for gunfire, one layer
+  down. `SolidObjects` carries the `alive` flags, which also makes a destroyed
+  object stop colliding.
+
+The proposed test invariant was wrong and was replaced. "Total speed never
+grows" holds against a wall, which is effectively infinite mass, and fails
+between two bodies of different mass: 100 into 1 at rest, elastically, takes the
+sum of speeds from 1 to 2.96 while kinetic energy does not move. The test now
+checks momentum and energy, and reports the speed sum beside them so the reason
+is in the log.
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| `--validate-assets` | ✅ 0 failures |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS |
+| `--weapons-test` | ✅ PASS |
+| `--robots-test` | ✅ PASS — now runs the shared body pass every step, so the AI is exercised against robots that can stand on each other |
+| `--loop-test` | ✅ PASS |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| Two bodies never end a step overlapping | ✅ `--collision-test`: 26 head-on approaches × 240 steps, 0 overlapping ends, deepest 0.0000 |
+| Momentum conserved, energy not increasing | ✅ 100:1 elastic contact — momentum 100.0000 → 100.0000 (drift 7.6e-08), energy 50.0000 → 50.0000 |
+| The old invariant really was wrong | ✅ measured in the same case: speed sum **1.000 → 2.960** while momentum and energy hold |
+| Separation never pushes a body out of the mine | ✅ 884 corner cases (34 segments × 26 directions, both bodies driven into the same corner), 0 escapes |
+| Bodies cannot enter a level object | ✅ 28 approaches, 11 came to rest on the column, 0 entered it |
+| Different rooms do not interact | ✅ two bodies at the same world point in segments 0 and 3 (no shared portal): 0 contacts; the same pair in one segment separates to 3.21u |
+| Fixed pair order is deterministic | ✅ four bodies, 60 steps, two runs bit-identical |
+| Tunnelling margin | ✅ smallest pair 3.5u; worst closing 80 u/s covers 0.667u per step — 5× margin, asserted |
+| Per-frame allocations | ✅ `--controls-menu` run: `sim step none on 0 of 110 frames`, `draw path none on 0 of 110` |
+| Sim-step allocations in gameplay | ✅ `sim step SOME on 1 of 90 (worst 1)` — byte-for-byte the same as `main`, which reports the identical line. Pre-existing, and this change adds nothing to it |
+| `--resize-test` | ✅ completed, 37.9 steps/s against 37.6 on the same run on `main` (median of three each; software rendering, 1920×1080, bounded by the loop's frame clamp) |
+| It actually changes the game | ✅ the same unattended 120-frame run in `mine01` keeps the player alive **18.2s instead of 13.8s**, reproducibly, because robots now get in each other's way. Both figures are stable across repeated runs |
+
+The draw path reports `SOME on 45 of 90` against `main`'s `26 of 90`. The runs
+are not comparable: the fight now lasts longer, so the run accumulates 2189 sim
+steps instead of 1652 and draws more of everything. Draw-path allocation is
+renderer-side and this change touches only `sim`; the sim-step line, which is
+the one this change could move, is identical.
+
+Known and not fixed here: a body resting against a pillar settles up to **0.92
+units** past the column's own widest radius, measured by `--collision-test`. The
+proxy is the model's bounding box and the column is a tapered octagon, so the box
+holds 79% more volume than the column. A tapered-cylinder proxy kind is the fix
+and belongs with the proxy work, not here.

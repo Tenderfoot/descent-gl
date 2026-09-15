@@ -6,6 +6,7 @@
 #include <glm/vec3.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace dvk::sim {
 
@@ -102,6 +103,72 @@ inline glm::vec3 closestPointOnProxy(const PlacedProxy& proxy, const glm::vec3& 
     const glm::quat inverse = glm::conjugate(proxy.orientation);
     const glm::vec3 local = inverse * (p - proxy.centre);
     return proxy.centre + proxy.orientation * closestPointOnBox(local, proxy.halfExtents);
+}
+
+// Where a sphere touches a proxy, and how to get it out.
+//
+// `closestPointOnProxy` above answers the ray question and returns an interior
+// point unchanged, which is the right answer for "what is the nearest point of
+// this solid" and the WRONG one for a push-out: a body whose centre has ended
+// up inside a box gets a zero-length push direction and stays there. So the
+// penetration case is handled explicitly here - the nearest face wins, and the
+// body leaves through it.
+struct ProxyContact {
+    glm::vec3 point{0.0f};    // on the proxy's surface
+    glm::vec3 normal{0.0f};   // out of the proxy, towards the sphere
+    float depth = 0.0f;       // how far the sphere has to move to clear it
+};
+
+// True if a sphere at `centre` with `radius` overlaps the proxy.
+inline bool proxySphereContact(const PlacedProxy& proxy, const glm::vec3& centre, float radius,
+                               ProxyContact& out) {
+    if (proxy.kind == ProxyVolume::Kind::Sphere) {
+        const glm::vec3 away = centre - proxy.centre;
+        const float distance = glm::length(away);
+        const float sum = proxy.halfExtents.x + radius;
+        if (distance >= sum) return false;
+        // Concentric: no direction is more correct than any other, so take one
+        // and let the caller's next iteration sort out the rest.
+        out.normal = distance > 1e-6f ? away / distance : glm::vec3(0.0f, 1.0f, 0.0f);
+        out.point = proxy.centre + out.normal * proxy.halfExtents.x;
+        out.depth = sum - distance;
+        return true;
+    }
+
+    const glm::quat inverse = glm::conjugate(proxy.orientation);
+    const glm::vec3 local = inverse * (centre - proxy.centre);
+    const glm::vec3 clamped = closestPointOnBox(local, proxy.halfExtents);
+    const glm::vec3 away = local - clamped;
+    const float distance = glm::length(away);
+
+    glm::vec3 localNormal;
+    float depth;
+    if (distance > 1e-6f) {
+        if (distance >= radius) return false;
+        localNormal = away / distance;
+        depth = radius - distance;
+    } else {
+        // Inside the box. The clamp returned the point itself, so there is no
+        // direction in it - the way out is the nearest face, which is the axis
+        // with the least room left on it.
+        int axis = 0;
+        float least = proxy.halfExtents[0] - std::abs(local[0]);
+        for (int i = 1; i < 3; ++i) {
+            const float room = proxy.halfExtents[i] - std::abs(local[i]);
+            if (room < least) {
+                least = room;
+                axis = i;
+            }
+        }
+        localNormal = glm::vec3(0.0f);
+        localNormal[axis] = local[axis] >= 0.0f ? 1.0f : -1.0f;
+        depth = radius + least;
+    }
+
+    out.normal = proxy.orientation * localNormal;
+    out.point = centre - out.normal * (radius - depth);
+    out.depth = depth;
+    return true;
 }
 
 // Distance along a unit `dir` at which the ray enters the proxy, or a negative

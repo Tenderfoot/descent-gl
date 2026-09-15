@@ -915,6 +915,112 @@ it keeps flying, the safe answer.
 
 Neither query allocates.
 
+### Bodies against each other
+
+`resolveBodies` in `src/sim/collision.h`. The ship, every live robot and every
+floating light go into one `BodySet` each step, and the pass separates them from
+each other, from the level's objects, and from the mine.
+
+**It cannot be done a body at a time.** A pair needs both masses at once, and —
+less obviously — the body pass has to be **interleaved** with the wall pass
+rather than sequenced before it. Push two ships apart and then push each out of
+the walls, and the wall correction can put them back inside each other. Do it
+the other way round and one of them goes through a wall. So the loop alternates,
+bounded, and **always ends on the mine**: a body outside the world is worse than
+two bodies overlapping, because it tunnels projectiles, walks robots through
+rock and stops doors blocking.
+
+Order within an iteration is fixed — pairs by slot index, then objects, then
+walls — because sequential resolution is order-dependent and the fixed timestep
+is meant to be reproducible. `--collision-test` runs the same four-body setup
+twice and requires bit-identical results.
+
+The wall pass inside `resolveBodies` is a **correction**, not the primary one.
+Each system still resolves its own bodies against the mine on the way in, with
+its own scrape damping and restitution; this pass re-resolves only the bodies
+that a contact actually moved, with damping zeroed so that grinding along a wall
+does not cost double for any body that happened to touch another one. When
+nothing touches anything — the common case — the whole pass is one sweep of
+distance tests and it stops.
+
+**No broadphase.** `kMaxRobots` is 32 and every body carries a segment, so the
+pair loop is gated on the segment graph and brute force over the survivors beats
+any acceleration structure.
+
+#### The segment gate, and why world distance is not enough
+
+Segments share their vertices, so two rooms side by side are separated by a wall
+of **no thickness whatever**. Two bodies hugging that wall from opposite sides
+are well inside each other's radii in world space while having no business
+touching; without the gate they shove each other through solid rock and the wall
+pass spends the rest of the step undoing it. A pair resolves only if they are in
+the same segment, or one portal apart with that portal not shut.
+
+Objects are narrower still — same segment only. An object sits where a level
+author put it, which is in the middle of a room rather than against a portal,
+and widening it to neighbours would let a pillar standing against a wall push a
+body in the room beyond. The cost is that a body straddling a portal does not
+collide with a pillar planted right beside it; no shipped level does that.
+
+#### Which entries are solid
+
+`SolidObjects` carries the `alive` flags from `ObjectHealth` as a raw pointer,
+so collision does not have to know what combat is. It does two jobs: a robot's
+spawn entry is **not** solid — the robot list owns it and the robot's own body
+is already in the set — and a destroyed object stops colliding, so you can fly
+through where a crate stood. Without the first, every robot spawn point becomes
+an invisible box that ships bounce off, which is the same bug `initObjects`
+already fixed once for gunfire.
+
+#### The impulse goes into `knockback`
+
+Not `velocity`. That channel is owned by the flight model, which damps toward
+zero and clamps to `maxSpeed`, so a shove from a brute would be gone in the step
+it arrived in. `knockback` exists for exactly this — velocity the body did not
+ask for — and momentum is conserved on `motion()` regardless of which channel
+receives it, because each body's share is one impulse scaled by its own inverse
+mass with opposite signs.
+
+`Body::mass` is new. The three authored values — `RobotDef::mass`,
+`FloatingLight::mass` and `WeaponConfig::playerMass` — stay where they are; the
+body is where the resolve reads them from, because a pair needs both at once.
+
+#### What is conserved, and what is not
+
+The first draft of this proposed asserting that **total speed never grows**.
+That is true against a wall, which is effectively infinite mass, and false
+between two bodies of different mass. 100 into 1 at rest, elastically, takes the
+sum of speeds from 1 to 2.96 while kinetic energy does not move — so the
+assertion would have failed a textbook-correct collision.
+
+What `--collision-test` checks instead:
+
+- **Momentum conserved**, for an isolated pair only. A wall is infinite mass and
+  positional push-apart injects position without touching velocity, so either
+  one present invalidates the check. Measured drift: 7.6e-08.
+- **Kinetic energy not increasing**, for restitution ≤ 1.
+- The speed sum is measured and **reported** alongside them, at 1.000 → 2.960,
+  so the reason the invariant changed is in the log rather than in a commit
+  message.
+
+#### Tunnelling, asserted rather than closed
+
+Body-against-body is a discrete overlap test, so in principle two bodies can
+cross between steps. The smallest pair in the game is the ship at 1.6 and a
+drone at 1.9. At 120 Hz, even at twice the maximum head-on closing speed — 80
+u/s, leaving headroom for knockback — they cover 0.667 units in a step against
+3.5 units of combined radius. The test asserts that margin instead of paying for
+continuous collision forever to cover a case the tuning cannot reach; it fails
+loudly the day someone raises `maxSpeed`.
+
+#### The box is still a box
+
+A body resting against `mine01`'s pillars settles up to **0.92 units** past the
+column's own widest radius, measured by `--collision-test`. The proxy is the
+model's bounding box and the column is a tapered octagon, so the box holds 79%
+more volume than the column does. A tapered-cylinder proxy kind is the fix and
+is not in this change.
+
 ### `--collision-test`, and four wrong oracles
 
 The test flies the ship into every wall of the level from all 26 face, edge and

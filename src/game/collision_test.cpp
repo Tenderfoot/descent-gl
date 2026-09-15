@@ -5,8 +5,11 @@
 #include "sim/collision.h"
 #include "sim/flight.h"
 #include "sim/geometry.h"
+#include "sim/proxy.h"
 
 #include <glm/geometric.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/vec2.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,6 +21,11 @@ namespace dvk {
 namespace {
 
 constexpr float kStep = 1.0f / 120.0f;
+
+bool expect(bool condition, const char* what) {
+    if (!condition) log::error("FAILED: {}", what);
+    return condition;
+}
 
 // Ignore an intersection at the ray's own origin. The origins here are segment
 // centres, so nothing legitimate sits this close.
@@ -398,6 +406,414 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         log::info("swept sphere: {} sweeps, {} stopped short of the ray as expected, {} wrong",
                   tested, earlier, wrong);
         if (wrong > 0) ok = false;
+    }
+
+    // ====================================================================
+    // Bodies against each other
+    // ====================================================================
+
+    // The roomiest segment in the level, so a two-body test has space to run
+    // without the walls taking part in it. Measured, not assumed: the invariants
+    // below are only meaningful while nothing else is touching.
+    int openSegment = 0;
+    float openRoom = 0.0f;
+    for (int si = 0; si < n; ++si) {
+        const glm::vec3 centre = level.segments[static_cast<size_t>(si)].center;
+        float nearest = std::numeric_limits<float>::infinity();
+        for (const glm::vec3& dir : dirs) nearest = std::min(nearest, firstWallHit(level, centre, dir));
+        if (nearest > openRoom) {
+            openRoom = nearest;
+            openSegment = si;
+        }
+    }
+    const glm::vec3 openCentre = level.segments[static_cast<size_t>(openSegment)].center;
+    log::info("open space: segment {} has {:.1f} units of clear room in every direction",
+              openSegment, openRoom);
+
+    // --- two bodies cannot end a step inside each other -------------------
+    {
+        constexpr int kSteps = 240;
+        int worstOverlap = 0;
+        float deepest = 0.0f;
+
+        for (const glm::vec3& dir : dirs) {
+            sim::Body a;
+            sim::Body b;
+            a.radius = flight.shipRadius;
+            b.radius = 1.9f;            // a drone
+            a.mass = 1.5f;              // the player
+            b.mass = 0.8f;
+            a.segment = openSegment;
+            b.segment = openSegment;
+            const float apart = (a.radius + b.radius) * 1.6f;
+            a.position = openCentre - dir * apart;
+            b.position = openCentre + dir * apart;
+
+            sim::BodySet set;
+            set.add(a);
+            set.add(b);
+
+            for (int step = 0; step < kSteps; ++step) {
+                // Driven at each other every step, so they are pressed together
+                // rather than bouncing apart once.
+                a.velocity = dir * flight.maxSpeed;
+                b.velocity = -dir * flight.maxSpeed;
+                a.position += a.motion() * kStep;
+                b.position += b.motion() * kStep;
+                // The real step order: each system resolves its own body
+                // against the mine, then the shared pass settles the contact
+                // between them. resolveBodies is a correction, not the primary
+                // containment - see main.cpp.
+                sim::resolveCollision(level, a, collision, kStep, nullptr);
+                sim::resolveCollision(level, b, collision, kStep, nullptr);
+                sim::resolveBodies(level, set, collision, kStep, nullptr, nullptr);
+
+                const float gap = glm::length(b.position - a.position) - (a.radius + b.radius);
+                if (gap < -1e-3f) {
+                    ++worstOverlap;
+                    deepest = std::min(deepest, gap);
+                }
+            }
+        }
+        ok &= expect(worstOverlap == 0, "two bodies never end a step inside each other");
+        log::info("body overlap: 26 head-on approaches x {} steps, {} overlapping ends (deepest "
+                  "{:.4f})", kSteps, worstOverlap, deepest);
+    }
+
+    // --- what is actually conserved ---------------------------------------
+    //
+    // The first draft of this phase proposed asserting that total speed never
+    // grows. That is true against a wall, which is effectively infinite mass,
+    // and FALSE between two bodies of different mass: 100 into 1 at rest,
+    // elastically, takes the sum of speeds from 1 to 2.96 while kinetic energy
+    // does not move. So the invariants are the real ones - momentum conserved,
+    // kinetic energy not increasing - and this case measures the speed sum too,
+    // to show why it was the wrong thing to assert.
+    {
+        sim::Body heavy;
+        sim::Body light;
+        heavy.radius = 2.0f;
+        light.radius = 1.0f;
+        heavy.mass = 100.0f;
+        light.mass = 1.0f;
+        heavy.segment = openSegment;
+        light.segment = openSegment;
+
+        const glm::vec3 dir(1.0f, 0.0f, 0.0f);
+        // Just touching, closing at 1 u/s.
+        light.position = openCentre;
+        heavy.position = openCentre - dir * (heavy.radius + light.radius - 0.01f);
+        heavy.velocity = dir * 1.0f;
+
+        sim::BodySet set;
+        set.add(heavy, 1.0f);   // elastic, so energy is conserved rather than lost
+        set.add(light, 1.0f);
+
+        const auto momentum = [&] {
+            return heavy.mass * heavy.motion() + light.mass * light.motion();
+        };
+        const auto energy = [&] {
+            return 0.5f * heavy.mass * glm::dot(heavy.motion(), heavy.motion()) +
+                   0.5f * light.mass * glm::dot(light.motion(), light.motion());
+        };
+        const auto speedSum = [&] {
+            return glm::length(heavy.motion()) + glm::length(light.motion());
+        };
+
+        const glm::vec3 p0 = momentum();
+        const float e0 = energy();
+        const float s0 = speedSum();
+
+        sim::resolveBodies(level, set, collision, kStep, nullptr, nullptr);
+
+        const glm::vec3 p1 = momentum();
+        const float e1 = energy();
+        const float s1 = speedSum();
+
+        const float momentumDrift = glm::length(p1 - p0) / std::max(1e-6f, glm::length(p0));
+        ok &= expect(momentumDrift < 1e-3f, "momentum is conserved for an isolated pair");
+        ok &= expect(e1 <= e0 * 1.001f, "kinetic energy does not grow");
+
+        log::info("100:1 elastic contact - momentum {:.4f} -> {:.4f} (drift {:.2e}), energy "
+                  "{:.4f} -> {:.4f}, speed sum {:.3f} -> {:.3f}",
+                  glm::length(p0), glm::length(p1), momentumDrift, e0, e1, s0, s1);
+        log::info("  the speed sum {} - which is why 'total speed never grows' is not the "
+                  "invariant to test", s1 > s0 + 1e-3f ? "GREW, as the physics requires"
+                                                       : "did not grow here");
+    }
+
+    // --- pushing bodies together never pushes one out of the mine ---------
+    //
+    // The ordering rule - body against body first, the mine last - exists for
+    // this. Two bodies pressed into the same corner want to separate along a
+    // line that leaves the room; the wall pass has to get the final say.
+    {
+        int escapes = 0;
+        int tested = 0;
+        for (int si = 0; si < n; ++si) {
+            for (const glm::vec3& dir : dirs) {
+                sim::Body a;
+                sim::Body b;
+                a.radius = flight.shipRadius;
+                b.radius = flight.shipRadius;
+                a.mass = 1.5f;
+                b.mass = 1.5f;
+                a.position = level.segments[static_cast<size_t>(si)].center;
+                b.position = a.position + dir * 0.35f;   // already overlapping
+                a.segment = si;
+                b.segment = si;
+
+                sim::BodySet set;
+                set.add(a);
+                set.add(b);
+
+                ++tested;
+                for (int step = 0; step < 120; ++step) {
+                    // Both driven into the same corner, so the wall correction
+                    // and the body separation fight each other every step.
+                    a.velocity = dir * flight.maxSpeed;
+                    b.velocity = dir * flight.maxSpeed;
+                    a.position += a.motion() * kStep;
+                    b.position += b.motion() * kStep;
+                    sim::resolveCollision(level, a, collision, kStep, nullptr);
+                    sim::resolveCollision(level, b, collision, kStep, nullptr);
+                    sim::resolveBodies(level, set, collision, kStep, nullptr, nullptr);
+                }
+                if (!insideMine(level, a.position) || !insideMine(level, b.position)) {
+                    if (escapes < 6) {
+                        log::error("body pair escaped from segment {} heading {:.2f} {:.2f} {:.2f}",
+                                   si, dir.x, dir.y, dir.z);
+                    }
+                    ++escapes;
+                }
+            }
+        }
+        ok &= expect(escapes == 0, "separating two bodies never pushes one out of the mine");
+        log::info("pair containment: {} corner cases, {} escapes", tested, escapes);
+    }
+
+    // --- a body cannot enter a level object -------------------------------
+    //
+    // And how far off the visible surface it stops, which is the honest number:
+    // the proxy is the model's bounding box, and a box around a tapered
+    // octagonal column contains empty space. Reported rather than asserted,
+    // because it is a known cost of the box and the figure is what tells anyone
+    // whether it has become intolerable.
+    {
+        int tested = 0;
+        int entered = 0;
+        int settled = 0;
+        float worstGap = 0.0f;
+
+        // Everything is solid for this test: no robots in the way of the point.
+        std::array<bool, 64> alive{};
+        alive.fill(true);
+        const sim::SolidObjects solids{alive.data(),
+                                       std::min<int>(64, static_cast<int>(level.objects.size()))};
+
+        for (size_t oi = 0; oi < level.objectProxies.size() && oi < 64; ++oi) {
+            const sim::PlacedProxy& proxy = level.objectProxies[oi];
+            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+            // Columns only: the ones where the box is a poor fit.
+            if (proxy.halfExtents.y < 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
+                continue;
+            }
+            const int segment = level.objects[oi].segment;
+
+            for (const glm::vec3& dir : dirs) {
+                sim::Body body;
+                body.radius = flight.shipRadius;
+                body.mass = 1.5f;
+                body.segment = segment;
+                body.position = proxy.centre - dir * 12.0f;
+                if (!insideMine(level, body.position)) continue;
+                body.segment = findSegment(level, body.position, segment);
+                if (body.segment < 0) continue;
+
+                sim::BodySet set;
+                set.add(body);
+                ++tested;
+
+                for (int step = 0; step < 240; ++step) {
+                    body.velocity = dir * flight.maxSpeed;
+                    body.position += body.motion() * kStep;
+                    sim::resolveCollision(level, body, collision, kStep, nullptr);
+                    sim::resolveBodies(level, set, collision, kStep, nullptr, &solids);
+                }
+
+                // Inside the box at all?
+                sim::ProxyContact contact;
+                if (sim::proxySphereContact(proxy, body.position, 0.0f, contact)) {
+                    if (entered < 4) {
+                        log::error("a body ended up inside object {} heading {:.2f} {:.2f} {:.2f}",
+                                   oi, dir.x, dir.y, dir.z);
+                    }
+                    ++entered;
+                    continue;
+                }
+                // Only a body that actually came to rest against the box says
+                // anything about the box's fit. One that stopped against a wall
+                // on the way in is measuring the room, not the column.
+                if (!sim::proxySphereContact(proxy, body.position, body.radius + 0.25f, contact)) {
+                    continue;
+                }
+                ++settled;
+                // How far it sits from the column's own surface, as opposed to
+                // its box. The column is a solid of revolution about its own Y,
+                // so compare against its radius at this height. Only meaningful
+                // beside the column, not above or below its caps.
+                const glm::vec3 local =
+                    glm::conjugate(proxy.orientation) * (body.position - proxy.centre);
+                if (std::abs(local.y) < proxy.halfExtents.y - body.radius) {
+                    const float radial = glm::length(glm::vec2(local.x, local.z));
+                    // The widest the column itself ever is, at its base.
+                    const float columnReach = std::max(proxy.halfExtents.x, proxy.halfExtents.z);
+                    worstGap = std::max(worstGap, radial - body.radius - columnReach);
+                }
+            }
+        }
+
+        if (tested == 0) {
+            log::info("object collision: SKIPPED, no column-shaped object in this level");
+        } else {
+            ok &= expect(entered == 0, "a body never ends up inside a level object");
+            log::info("object collision: {} approaches, {} came to rest on the object, {} "
+                      "entered it; worst standoff past the column's own widest radius {:.2f}u",
+                      tested, settled, entered, worstGap);
+            log::info("  NOTE the box is the model's bounds: on a tapered octagonal column it "
+                      "holds 79% more volume than the column, so a body can stop up to 1.4u "
+                      "from anything visible. A tapered-cylinder proxy is the fix; see the "
+                      "roadmap.");
+        }
+    }
+
+    // --- bodies in different rooms do not shove each other through rock ----
+    //
+    // Segments share their vertices, so two rooms side by side are separated by
+    // a wall of no thickness at all. Two bodies hugging that wall from opposite
+    // sides are well inside each other's radii in world space while having no
+    // business touching. The pair test is gated on the segment graph for this
+    // reason, and the positive control below is what keeps the gate honest -
+    // without it, a rule that rejected every pair would pass just as well.
+    {
+        // Two segments that are not neighbours.
+        int farA = -1;
+        int farB = -1;
+        for (int i = 0; i < n && farA < 0; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                bool neighbours = false;
+                for (const SideData& sd : level.segments[static_cast<size_t>(i)].sides) {
+                    if (sd.neighbour == j) neighbours = true;
+                }
+                if (!neighbours) {
+                    farA = i;
+                    farB = j;
+                    break;
+                }
+            }
+        }
+
+        if (farA < 0) {
+            log::info("cross-room: SKIPPED, every segment neighbours every other");
+        } else {
+            // Coincident in world space - the worst possible overlap - but in
+            // rooms the graph says do not meet.
+            const glm::vec3 shared = level.segments[static_cast<size_t>(farA)].center;
+            sim::Body a;
+            sim::Body b;
+            a.radius = b.radius = flight.shipRadius;
+            a.mass = b.mass = 1.5f;
+            a.position = b.position = shared;
+            a.segment = farA;
+            b.segment = farB;
+
+            sim::BodySet set;
+            set.add(a);
+            set.add(b);
+            const sim::BodyResolveStats stats =
+                sim::resolveBodies(level, set, collision, kStep, nullptr, nullptr);
+
+            const bool untouched = stats.bodyContacts == 0 && a.position == shared &&
+                                   b.position == shared;
+            ok &= expect(untouched, "bodies in non-adjacent rooms do not push each other");
+
+            // Positive control: the same two bodies, same place, one room.
+            sim::Body c;
+            sim::Body d;
+            c.radius = d.radius = flight.shipRadius;
+            c.mass = d.mass = 1.5f;
+            c.position = d.position = shared;
+            c.segment = d.segment = farA;
+            sim::BodySet together;
+            together.add(c);
+            together.add(d);
+            const sim::BodyResolveStats controlStats =
+                sim::resolveBodies(level, together, collision, kStep, nullptr, nullptr);
+            const bool separated = controlStats.bodyContacts > 0 &&
+                                   glm::length(d.position - c.position) > 1e-3f;
+            ok &= expect(separated, "the same two bodies in ONE room do separate");
+
+            log::info("cross-room: segments {} and {} share no portal - {} contacts; the same "
+                      "pair in segment {} separated to {:.2f}u apart",
+                      farA, farB, stats.bodyContacts, farA,
+                      glm::length(d.position - c.position));
+        }
+    }
+
+    // --- the same setup twice lands on the same numbers -------------------
+    //
+    // Sequential resolution is order dependent, which is fine as long as the
+    // order is fixed. The fixed timestep is meant to be reproducible, and pairs
+    // are walked by slot index precisely so that it stays that way.
+    {
+        const auto runOnce = [&](int bodies) {
+            sim::Body b[4];
+            sim::BodySet set;
+            for (int i = 0; i < bodies; ++i) {
+                b[i].radius = 1.6f + 0.1f * static_cast<float>(i);
+                b[i].mass = 0.8f + 0.4f * static_cast<float>(i);
+                b[i].segment = openSegment;
+                b[i].position = openCentre + dirs[static_cast<size_t>(i)] * 2.0f;
+                b[i].velocity = -dirs[static_cast<size_t>(i)] * 8.0f;
+                set.add(b[i], 0.25f);
+            }
+            for (int step = 0; step < 60; ++step) {
+                for (int i = 0; i < bodies; ++i) b[i].position += b[i].motion() * kStep;
+                sim::resolveBodies(level, set, collision, kStep, nullptr, nullptr);
+            }
+            glm::vec3 sum(0.0f);
+            for (int i = 0; i < bodies; ++i) sum += b[i].position + b[i].motion();
+            return sum;
+        };
+        const glm::vec3 first = runOnce(4);
+        const glm::vec3 second = runOnce(4);
+        const bool identical = first == second;
+        ok &= expect(identical, "the same body setup resolves to the same numbers twice");
+        log::info("determinism: four bodies, 60 steps, two runs {}",
+                  identical ? "bit-identical" : "DIVERGED");
+    }
+
+    // --- the tunnelling margin, reported rather than closed ----------------
+    //
+    // Body-against-body is a discrete overlap test, so in principle two bodies
+    // can cross between steps. In practice they cannot, and this is the number
+    // that says so. It is an assertion rather than a swept test because the
+    // margin is an order of magnitude: paying for continuous collision to cover
+    // a case the tuning cannot reach would be carrying cost forever.
+    {
+        // The smallest pair in the game: the ship and a drone.
+        const float smallestPair = flight.shipRadius + 1.9f;
+        // Two bodies at full speed, head on. Knockback can exceed cruising
+        // speed, so double it again for headroom.
+        const float closingSpeed = flight.maxSpeed * 2.0f * 2.0f;
+        const float crossedPerStep = closingSpeed * kStep;
+        const float margin = smallestPair / crossedPerStep;
+
+        ok &= expect(margin > 4.0f,
+                     "the smallest body pair cannot cross each other in one step");
+        log::info("tunnelling margin: smallest pair {:.1f}u, worst closing {:.0f} u/s covers "
+                  "{:.3f}u per step - {:.0f}x margin", smallestPair, closingSpeed, crossedPerStep,
+                  margin);
     }
 
     log::info("collision test: {}", ok ? "PASS" : "FAIL");

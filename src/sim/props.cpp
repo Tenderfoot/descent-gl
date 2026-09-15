@@ -53,6 +53,7 @@ void spawnProps(const Level& level, PropState& out) {
         ball.lightIntensity = def.lightIntensity;
         ball.restitution = def.restitution;
         ball.mass = def.mass;
+        ball.body.mass = def.mass;
         ball.drift = def.drift;
     }
 
