@@ -93,7 +93,7 @@ RobotConfig RobotConfig::defaults() {
     drone.color = glm::vec3(0.85f, 0.4f, 0.35f);
     drone.eyeColor = glm::vec3(1.0f, 0.3f, 0.2f);
     drone.eyeSize = 0.3f;
-    drone.eyes = {glm::vec3(-0.55f, 0.35f, -1.35f), glm::vec3(0.55f, 0.35f, -1.35f)};
+    drone.eyes = {glm::vec3(-0.55f, 0.38f, -1.64f), glm::vec3(0.55f, 0.38f, -1.64f)};
     cfg.types.push_back(drone);
 
     RobotDef gunner;
@@ -118,7 +118,7 @@ RobotConfig RobotConfig::defaults() {
     gunner.color = glm::vec3(0.5f, 0.75f, 0.95f);
     gunner.eyeColor = glm::vec3(0.5f, 0.9f, 1.0f);
     gunner.eyeSize = 0.34f;
-    gunner.eyes = {glm::vec3(-0.7f, 0.6f, -1.2f), glm::vec3(0.7f, 0.6f, -1.2f)};
+    gunner.eyes = {glm::vec3(-0.765f, 0.615f, -1.44f), glm::vec3(0.765f, 0.615f, -1.44f)};
     cfg.types.push_back(gunner);
 
     RobotDef brute;
@@ -143,8 +143,8 @@ RobotConfig RobotConfig::defaults() {
     brute.color = glm::vec3(0.95f, 0.7f, 0.3f);
     brute.eyeColor = glm::vec3(1.0f, 0.75f, 0.25f);
     brute.eyeSize = 0.46f;
-    brute.eyes = {glm::vec3(-0.9f, 1.7f, -1.4f), glm::vec3(0.9f, 1.7f, -1.4f),
-                  glm::vec3(0.0f, 1.9f, -1.5f)};
+    brute.eyes = {glm::vec3(-0.96f, 1.815f, -1.82f), glm::vec3(0.96f, 1.815f, -1.82f),
+                  glm::vec3(0.0f, 2.015f, -1.99f)};
     cfg.types.push_back(brute);
 
     RobotDef reactor;
@@ -170,7 +170,7 @@ RobotConfig RobotConfig::defaults() {
     reactor.color = glm::vec3(1.0f, 0.55f, 0.2f);
     reactor.eyeColor = glm::vec3(1.0f, 0.62f, 0.22f);
     reactor.eyeSize = 2.6f;
-    reactor.eyes = {glm::vec3(0.0f, 0.0f, 0.0f)};
+    reactor.eyes = {glm::vec3(0.0f, -0.04f, -2.9f)};
     reactor.dropNothing = 1.0f;
     reactor.dropEnergy = 0.0f;
     reactor.dropShield = 0.0f;
