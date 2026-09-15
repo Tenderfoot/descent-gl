@@ -20,7 +20,7 @@ namespace dvk {
 //   --validate-assets   run every shipped model and level through the M2 and M3
 //                       validators, print one line each, and exit. Needs no
 //                       window and no GL.
-//   --reveal            draw the automap as if every segment had been visited.
+//   --reveal            shade the automap as if every segment had been visited.
 //                       A rendering check for the map itself, in the same family
 //                       as --wireframe-volumes and --stencil-view: it changes
 //                       nothing in the simulation and the game still only

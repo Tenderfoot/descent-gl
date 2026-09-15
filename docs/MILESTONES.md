@@ -2106,3 +2106,49 @@ Two decisions taken deliberately rather than discovered:
   M8 the query said "lit" whenever a robot visually blocked a lamp, which is the
   common case, and now it agrees with the screen there. A frequent disagreement
   traded for a rare one.
+
+## The automap is a floor plan, not a memory
+
+The map drew only the rooms the ship had already been inside. Opening it in the
+first minute of a level showed one box and a cross in it, which answers "where am
+I" and nothing else, and the orbit camera framed that one box, so the view
+rescaled every time a portal was crossed.
+
+The whole mine is now drawn from the first frame, and `visited` decides how a
+segment is drawn rather than whether it is drawn at all: a room already flown is
+bright, a room not yet flown is dim, and a portal that crosses between the two
+gets the frontier outline that used to mark any portal into the unknown. A
+portal between two rooms in the same state is still drawn as nothing, so a
+corridor still reads as a gap. Nothing else was revealed: keys still appear only
+once their room has been entered, and the reactor still needs a real line of
+sight. Knowing the shape of a room is not knowing what is in it.
+
+The framing moved with it. The camera now frames the level's bounding box, and
+its distance is solved from the frustum — `radius / sin(half-angle)` with a 5%
+margin, the half-angle being whichever of vertical and horizontal is narrower on
+the current window — rather than the hand-fitted `radius * 1.7` that preceded
+it. That constant is 2.5% short of containing `mine01`'s bounding sphere, which
+was invisible while the map showed a few rooms and crops the mine's near corners
+off the bottom of the screen once it shows all 34. See `docs/ARCHITECTURE.md`,
+"The automap (M8)".
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC 13.3, Linux container) |
+| `--validate-assets` | ✅ PASS |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS |
+| `--weapons-test` | ✅ PASS |
+| `--robots-test` | ✅ PASS |
+| `--loop-test` | ✅ PASS, including the automap knowledge checks: 6 of 34 segments visited after walking 6, key unseen until its room is entered, reactor unmarked until sighted |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| `--resize-test` | ✅ completed, 73.7 steps/s against 77.7 on the same run on `main` (software rendering, 1920x1080, bounded by the loop's 0.25 s frame clamp) |
+| Whole mine drawn at the start | ✅ `--automap --no-ui` on frame 60 of a fresh level: 21,350 map pixels against 4,134 on `main`, which draws the one room the ship launched in |
+| Three tiers on screen at once | ✅ the same frame carries all of them at their exact authored values: unvisited walls peak at RGB (31, 43, 61), the frontier portals around the start room at (41, 66, 97) over 60 px, and the room the ship is in at (182, 134, 48) |
+| Visited reads brighter than unvisited | ✅ `--automap --reveal`, every segment shaded as flown: walls peak at (76, 115, 158), 2.5x the unvisited (31, 43, 61) of the same lines |
+| Nothing clipped by the frame | ✅ every `mine01` vertex projects inside NDC with 7% to spare (worst 0.93); the previous constant put the worst at 1.015, outside the frustum |
+| Per-frame allocations | ✅ `--automap` run: `sim step none on 0 of 30 frames, draw path none on 0 of 30`. The `--reveal` run's `draw path SOME on 1 of 30 (worst 11)` is byte-for-byte what `main` reports on the same run |

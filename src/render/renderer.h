@@ -137,7 +137,8 @@ struct HudData {
 //
 // Everything here is by value. The map is drawn from the segment graph the
 // renderer already has, so all the game layer has to supply is which parts of it
-// the player has earned the right to see.
+// the player has already been through, and which markers they have earned the
+// right to see.
 struct AutomapData {
     static constexpr int kMaxSegments = 128;
     static constexpr int kMaxMarkers = 16;
@@ -156,6 +157,9 @@ struct AutomapData {
 
     int segmentCount = 0;
     int visitedCount = 0;
+    // Every segment is drawn; `visited` only decides how. A segment the ship has
+    // been inside is drawn bright, one it has not is drawn dim, and the portals
+    // between the two are the frontier.
     std::array<bool, kMaxSegments> visited{};
 
     glm::vec3 shipPosition{0.0f};

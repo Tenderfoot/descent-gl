@@ -877,9 +877,11 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
 
     // --- what the automap is allowed to know ---------------------------------
     //
-    // The map is only worth having if it shows what the player found rather than
-    // what the level contains, so each of these checks the negative before the
-    // positive: nothing is on the map until the thing that reveals it happens.
+    // The layout itself is drawn from the start, but everything in it is still
+    // earned, and `visited` still has to be an honest record of where the ship
+    // went - it is what shades the rooms already flown. So each of these checks
+    // the negative before the positive: nothing is marked until the thing that
+    // marks it happens.
     // The sighting query itself is handed the shut-door set, so it inherits the
     // door blocking the loop test already proves for robot line of sight above.
     {
@@ -896,7 +898,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
             if (!rig.game.visited[static_cast<size_t>(si)]) ++unvisited;
         }
         ok &= expect(unvisited == rig.level.segmentCount() - 1,
-                     "every other segment is still unknown");
+                     "every other segment is still unflown");
 
         // Walking the graph marks exactly the rooms walked through.
         int walked = 0;
