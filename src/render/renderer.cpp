@@ -500,17 +500,27 @@ void Renderer::buildHud(const HudData& hud) {
                   barH + 3.0f * s, glm::vec4(0.85f, 0.9f, 1.0f, 0.65f));
     }
 
-    // Weapon and ammo, bottom right.
+    // Primary and secondary loadout, bottom right.
     {
-        std::string line = hud.weaponName;
-        if (hud.laserLevel > 0 && line == "laser") line += " " + std::to_string(hud.laserLevel);
-        if (hud.ammo >= 0) line += "  " + std::to_string(hud.ammo);
-        const float tw = hud_.textWidth(line, s);
-        hud_.text(line, w - left - tw, h - 8.0f * s - 7.0f * s, s, white);
+        std::string primary = "primary  ";
+        primary += hud.primaryWeaponName;
+        if (hud.primaryLaserLevel > 0 && std::string_view(hud.primaryWeaponName) == "laser") {
+            primary += " " + std::to_string(hud.primaryLaserLevel);
+        }
+        if (hud.primaryAmmo >= 0) primary += "  " + std::to_string(hud.primaryAmmo);
+        const float primaryW = hud_.textWidth(primary, s * 0.8f);
+        hud_.text(primary, w - left - primaryW, h - 8.0f * s - 7.0f * s, s * 0.8f, white);
+
+        std::string secondary = "secondary  ";
+        secondary += hud.secondaryWeaponName;
+        if (hud.secondaryAmmo >= 0) secondary += "  " + std::to_string(hud.secondaryAmmo);
+        const float secondaryW = hud_.textWidth(secondary, s * 0.8f);
+        hud_.text(secondary, w - left - secondaryW, h - 8.0f * s - 17.0f * s,
+                  s * 0.8f, white);
 
         const std::string flares = "flares " + std::to_string(hud.flares);
         const float fw = hud_.textWidth(flares, s * 0.7f);
-        hud_.text(flares, w - left - fw, h - 8.0f * s - 18.0f * s, s * 0.7f, dim);
+        hud_.text(flares, w - left - fw, h - 8.0f * s - 27.0f * s, s * 0.7f, dim);
     }
 
     // Keys, top right: lit when held, a dark outline when not, so their

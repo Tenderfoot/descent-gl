@@ -135,6 +135,35 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
                   sim::kWeaponNames[static_cast<size_t>(w)], fired, def.speed, def.damage);
     }
 
+    // --- primary and secondary selections are independent -----------------
+    {
+        rig.reset();
+        sim::FireControls select;
+        select.selectWeapon = sim::WeaponVulcan;
+        rig.run(1, select);
+        select.selectWeapon = sim::WeaponHoming;
+        rig.run(1, select);
+
+        ok &= expect(rig.state.player.primaryWeapon == sim::WeaponVulcan,
+                     "selecting a secondary preserves the primary selection");
+        ok &= expect(rig.state.player.secondaryWeapon == sim::WeaponHoming,
+                     "selecting a primary preserves the secondary selection");
+
+        sim::FireControls both;
+        both.primary = true;
+        both.secondary = true;
+        rig.run(1, both);
+        bool firedVulcan = false;
+        bool firedHoming = false;
+        for (const sim::Projectile& p : rig.state.projectiles.items) {
+            if (!p.alive || p.owner >= 0) continue;
+            firedVulcan = firedVulcan || p.kind == sim::ProjectileKind::Vulcan;
+            firedHoming = firedHoming || p.kind == sim::ProjectileKind::Homing;
+        }
+        ok &= expect(firedVulcan, "primary fire uses the selected primary weapon");
+        ok &= expect(firedHoming, "secondary fire uses the selected secondary weapon");
+    }
+
     // --- bolts hit walls rather than passing through them -------------------
     {
         rig.reset();

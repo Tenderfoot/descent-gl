@@ -388,7 +388,7 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             //    because the player is holding the gun.
             place();
             rig.combat.player.headlightOn = false;
-            rig.combat.player.weapon = sim::WeaponLaser;
+            rig.combat.player.primaryWeapon = sim::WeaponLaser;
             sim::FireControls trigger;
             trigger.primary = true;
             bool litByOwnFire = false;

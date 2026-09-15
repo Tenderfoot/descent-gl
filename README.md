@@ -93,9 +93,10 @@ to enter the selected level directly.
 | F1 | Toggle chase camera |
 | F3 | Toggle the ImGui debug panels |
 | Tab | Toggle the automap (mouse orbits it; the simulation keeps running) |
-| 1 / 2 / 3 / 4 | Select laser, vulcan, concussion, homing |
-| Left mouse | Fire the selected gun |
-| Right mouse | Launch a missile |
+| 1 / 2 | Select laser or vulcan for primary fire |
+| 3 / 4 | Select concussion or homing for secondary fire |
+| Left mouse | Fire the selected primary weapon |
+| Right mouse | Fire the selected secondary weapon |
 | F | Throw a flare |
 | H | Toggle the headlight |
 | Escape | Pause / resume |

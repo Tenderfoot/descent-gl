@@ -395,6 +395,8 @@ int main(int argc, char** argv) {
     const double loopStart = clock.seconds();
     double lastTime = loopStart;
     double accumulator = 0.0;
+    int pendingWeaponSelection = -1;
+    bool pendingFlare = false;
     long long totalSteps = 0;
     int frame = 0;
     double frameMs = 0.0;
@@ -648,7 +650,24 @@ int main(int argc, char** argv) {
             dvk::savePlayerSettings(settingsPath, settings);
         }
 
-        if (!session.advancesSimulation()) accumulator = 0.0;
+        if (!session.advancesSimulation()) {
+            accumulator = 0.0;
+            pendingWeaponSelection = -1;
+            pendingFlare = false;
+        } else if (!bindingCaptureActive) {
+            // A fast render frame can have no fixed simulation step. Preserve
+            // one-shot gameplay input until a step actually consumes it.
+            pendingFlare = pendingFlare ||
+                           dvk::bindingPressed(input, settings.bindings,
+                                               dvk::PlayerAction::Flare);
+            for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
+                const dvk::PlayerAction action = static_cast<dvk::PlayerAction>(
+                    static_cast<int>(dvk::PlayerAction::Weapon1) + w);
+                if (dvk::bindingPressed(input, settings.bindings, action)) {
+                    pendingWeaponSelection = w;
+                }
+            }
+        }
 
         dvk::alloc::Scope simAllocs;
         glm::vec2 mouseDelta = input.consumeMouseDelta();
@@ -699,14 +718,8 @@ int main(int argc, char** argv) {
                                                 dvk::PlayerAction::PrimaryFire);
                 fire.secondary = dvk::bindingDown(input, settings.bindings,
                                                   dvk::PlayerAction::SecondaryFire);
-                fire.flare = dvk::bindingPressed(input, settings.bindings,
-                                                 dvk::PlayerAction::Flare);
-                for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
-                    const dvk::PlayerAction action =
-                        static_cast<dvk::PlayerAction>(static_cast<int>(dvk::PlayerAction::Weapon1) +
-                                                       w);
-                    if (dvk::bindingPressed(input, settings.bindings, action)) fire.selectWeapon = w;
-                }
+                fire.flare = pendingFlare;
+                fire.selectWeapon = pendingWeaponSelection;
                 if (opts.autofire >= 0) {
                     if (opts.autofire >= dvk::sim::WeaponCount) {
                         fire.flare = true;
@@ -720,6 +733,10 @@ int main(int argc, char** argv) {
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
                                  fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
                                  &soundEvents);
+            if (!consumedMouse) {
+                pendingFlare = false;
+                pendingWeaponSelection = -1;
+            }
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
                                  &soundEvents);
@@ -983,16 +1000,19 @@ int main(int argc, char** argv) {
                    session.mode() != dvk::AppMode::RunSummary;
         hud.shields = cur.combat.player.shields;
         hud.energy = cur.combat.player.energy;
-        hud.weaponName = dvk::sim::kWeaponNames[static_cast<size_t>(cur.combat.player.weapon)];
-        hud.laserLevel = cur.combat.player.weapon == dvk::sim::WeaponLaser
-                             ? cur.combat.player.laserLevel
-                             : 0;
-        switch (cur.combat.player.weapon) {
-            case dvk::sim::WeaponVulcan: hud.ammo = cur.combat.player.vulcanAmmo; break;
-            case dvk::sim::WeaponConcussion: hud.ammo = cur.combat.player.concussionAmmo; break;
-            case dvk::sim::WeaponHoming: hud.ammo = cur.combat.player.homingAmmo; break;
-            default: hud.ammo = -1; break;
-        }
+        hud.primaryWeaponName = dvk::sim::kWeaponNames[
+            static_cast<size_t>(cur.combat.player.primaryWeapon)];
+        hud.primaryLaserLevel = cur.combat.player.primaryWeapon == dvk::sim::WeaponLaser
+                                    ? cur.combat.player.laserLevel
+                                    : 0;
+        hud.primaryAmmo = cur.combat.player.primaryWeapon == dvk::sim::WeaponVulcan
+                              ? cur.combat.player.vulcanAmmo
+                              : -1;
+        hud.secondaryWeaponName = dvk::sim::kWeaponNames[
+            static_cast<size_t>(cur.combat.player.secondaryWeapon)];
+        hud.secondaryAmmo = cur.combat.player.secondaryWeapon == dvk::sim::WeaponHoming
+                                ? cur.combat.player.homingAmmo
+                                : cur.combat.player.concussionAmmo;
         hud.flares = cur.combat.player.flares;
         for (int k = 0; k < 3; ++k) hud.keys[k] = cur.game.keys[static_cast<size_t>(k)];
         hud.countdown = cur.game.phase == dvk::sim::GamePhase::Countdown ? cur.game.countdown
@@ -1136,12 +1156,14 @@ int main(int argc, char** argv) {
             ImGui::Separator();
             const dvk::sim::PlayerState& pl = cur.combat.player;
             ImGui::Text("shields %5.1f   energy %5.1f", pl.shields, pl.energy);
-            ImGui::Text("weapon: %s%s", dvk::sim::kWeaponNames[static_cast<size_t>(pl.weapon)],
-                        pl.weapon == dvk::sim::WeaponLaser ? "" : "");
-            if (pl.weapon == dvk::sim::WeaponLaser) {
+            ImGui::Text("primary: %s",
+                        dvk::sim::kWeaponNames[static_cast<size_t>(pl.primaryWeapon)]);
+            if (pl.primaryWeapon == dvk::sim::WeaponLaser) {
                 ImGui::SameLine();
                 ImGui::Text("level %d", pl.laserLevel);
             }
+            ImGui::Text("secondary: %s",
+                        dvk::sim::kWeaponNames[static_cast<size_t>(pl.secondaryWeapon)]);
             ImGui::Text("vulcan %d   concussion %d   homing %d   flares %d", pl.vulcanAmmo,
                         pl.concussionAmmo, pl.homingAmmo, pl.flares);
             ImGui::Text("%d bolts, %d flares burning, %d effects, %d deaths",
