@@ -93,6 +93,8 @@ milestone rather than describing what the code should do:
 | `--no-sound` | Do not open a playback device. |
 | `--volume V` | Master volume, 0..1. Default 0.8. |
 | `--start-menu` | Show the player main menu even during a frame-limited or screenshot run. |
+| `--level-select` | Open the main menu on the level list, so a screenshot can show it without navigating there. Implies `--start-menu`. |
+| `--level-switch-test` | Drive the level list to a second level, load it, fly it, and report whether the switch took. Exits non-zero if the new level is not loaded and playing. Needs a window; its step rate is below 120 by construction, because the first twenty frames are spent in the menu. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how
 many heap allocations the sim step and the draw path made after a 30-frame

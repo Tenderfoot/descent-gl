@@ -11,6 +11,10 @@ namespace dvk {
 //   --resize-test       drive a scripted sequence of window resizes, an
 //                       iconify and a restore, exercising the framebuffer
 //                       callback and render-target rebuild
+//   --level-select      open the main menu on the level list, so a screenshot can
+//                       show it without navigating there.
+//   --level-switch-test drive the level list to a second level, load it, play it and
+//                       report whether the switch took. Needs a window.
 //   --automap           start with the automap open (Tab at runtime), so a
 //                       screenshot can show it without flying the level first.
 //   --validate-assets   run every shipped model and level through the M2 and M3
@@ -102,6 +106,8 @@ struct Options {
     bool noUi = false;
     bool debugUi = false;
     bool startMenu = false;
+    bool levelSelect = false;
+    bool levelSwitchTest = false;
     int width = 1600;
     int height = 900;
 
