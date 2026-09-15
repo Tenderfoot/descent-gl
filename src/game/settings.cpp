@@ -21,7 +21,7 @@ namespace dvk {
 
 namespace {
 
-constexpr int kSettingsVersion = 2;
+constexpr int kSettingsVersion = 3;
 
 template <typename T>
 void readIf(const nlohmann::json& source, const char* name, T& destination) {
@@ -56,6 +56,10 @@ bool expect(bool condition, const char* message) {
 PlayerSettings normalizedPlayerSettings(PlayerSettings settings) {
     settings.masterVolume = std::clamp(settings.masterVolume, 0.0f, 1.0f);
     settings.mouseSensitivity = std::clamp(settings.mouseSensitivity, 0.2f, 3.0f);
+    settings.firstPersonFov =
+        std::clamp(settings.firstPersonFov, kMinVerticalFov, kMaxVerticalFov);
+    settings.thirdPersonFov =
+        std::clamp(settings.thirdPersonFov, kMinVerticalFov, kMaxVerticalFov);
     settings.windowWidth = std::clamp(settings.windowWidth, 640, 7680);
     settings.windowHeight = std::clamp(settings.windowHeight, 360, 4320);
     settings.bindings = normalizedInputBindings(settings.bindings);
@@ -92,6 +96,8 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         const nlohmann::json source = nlohmann::json::parse(input);
         readIf(source, "masterVolume", settings.masterVolume);
         readIf(source, "mouseSensitivity", settings.mouseSensitivity);
+        readIf(source, "firstPersonFov", settings.firstPersonFov);
+        readIf(source, "thirdPersonFov", settings.thirdPersonFov);
         readIf(source, "invertMouseY", settings.invertMouseY);
         readIf(source, "muted", settings.muted);
         readIf(source, "fullscreen", settings.fullscreen);
@@ -144,6 +150,8 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"version", kSettingsVersion},
         {"masterVolume", settings.masterVolume},
         {"mouseSensitivity", settings.mouseSensitivity},
+        {"firstPersonFov", settings.firstPersonFov},
+        {"thirdPersonFov", settings.thirdPersonFov},
         {"invertMouseY", settings.invertMouseY},
         {"muted", settings.muted},
         {"fullscreen", settings.fullscreen},
@@ -184,9 +192,19 @@ int runSettingsTest() {
     ok &= expect(defaults.masterVolume == 0.8f && defaults.windowWidth == 1600,
                  "missing file uses defaults");
 
+    PlayerSettings outsideLimits;
+    outsideLimits.firstPersonFov = 10.0f;
+    outsideLimits.thirdPersonFov = 180.0f;
+    const PlayerSettings clamped = normalizedPlayerSettings(outsideLimits);
+    ok &= expect(clamped.firstPersonFov == kMinVerticalFov &&
+                     clamped.thirdPersonFov == kMaxVerticalFov,
+                 "field of view stays inside its supported range");
+
     PlayerSettings written;
     written.masterVolume = 0.35f;
     written.mouseSensitivity = 1.7f;
+    written.firstPersonFov = 85.0f;
+    written.thirdPersonFov = 95.0f;
     written.invertMouseY = true;
     written.muted = true;
     written.fullscreen = true;
@@ -199,6 +217,8 @@ int runSettingsTest() {
     const PlayerSettings loaded = loadPlayerSettings(path);
     ok &= expect(loaded.masterVolume == written.masterVolume &&
                      loaded.mouseSensitivity == written.mouseSensitivity && loaded.invertMouseY &&
+                     loaded.firstPersonFov == written.firstPersonFov &&
+                     loaded.thirdPersonFov == written.thirdPersonFov &&
                      loaded.muted && loaded.fullscreen && !loaded.vsync &&
                      loaded.windowWidth == 1920 && loaded.windowHeight == 1080,
                  "saved values round trip");

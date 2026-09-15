@@ -1322,7 +1322,8 @@ every frame a menu is up, so it works in `string_view` and never builds a
 
 `src/game/settings.h` owns the player-facing configuration that is independent
 of authored flight tuning: master volume, mute, mouse sensitivity, mouse-Y
-inversion, fullscreen, window size and vsync. On Windows it lives under
+inversion, first- and third-person vertical field of view, fullscreen, window
+size and vsync. On Windows it lives under
 `%LOCALAPPDATA%/descent-gl/settings.json`; other desktop builds use the XDG
 configuration directory when one is available. `--settings PATH` redirects it
 for automated and portable runs.
@@ -1345,7 +1346,7 @@ runs.
 Settings rows carry their rendered values in fixed-size character storage in
 `MenuView`. The renderer therefore draws the screen through the existing HUD
 batch without formatting into heap-backed strings. At small resolutions the
-nine rows reduce their height and gap together so the final row remains
+eleven rows reduce their height and gap together so the final row remains
 inside the panel.
 
 ### Player input actions and rebinding
