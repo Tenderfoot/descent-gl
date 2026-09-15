@@ -565,7 +565,7 @@ void Renderer::buildDoorSigns(const RenderState& rs, const Level& level, const P
     doorSigns_.upload();
 }
 
-void Renderer::buildHud(const HudData& hud) {
+void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // Four bands per edge with falling alpha, because Hud::rect is a flat
     // colour and this is cheaper and more predictable than a gradient shader
     // for something on screen for a third of a second.
@@ -613,18 +613,39 @@ void Renderer::buildHud(const HudData& hud) {
     const glm::vec4 white(1.0f, 1.0f, 1.0f, 0.92f);
     const glm::vec4 dim(0.75f, 0.8f, 0.9f, 0.8f);
 
-    // Reticle: a gap in the middle so it frames the target rather than
-    // covering it.
     const float cx = w * 0.5f;
     const float cy = h * 0.5f;
+
+    // Reticle: a gap in the middle so it frames the target rather than
+    // covering it.
+    //
+    // It goes over the aim point, not over the centre of the window. Those
+    // coincide in first person and do not in the chase camera, which watches
+    // the ship from above and behind; see HudData::aimPoint. The projection is
+    // the same matrix the scene is drawn with, so the reticle lands on the same
+    // pixel as the thing it marks. Everything else centred below - the
+    // countdown, the end-of-level card - stays on the window, because those are
+    // screen furniture and not part of the world.
+    float rx = cx;
+    float ry = cy;
+    if (hud.hasAimPoint) {
+        const glm::vec4 clip = viewProj * glm::vec4(hud.aimPoint, 1.0f);
+        // w is the distance in front of the camera under this projection. At or
+        // behind the eye there is no sane pixel to draw on, so fall back to the
+        // centre rather than mirroring the reticle to the wrong side.
+        if (clip.w > 1e-3f) {
+            rx = (clip.x / clip.w * 0.5f + 0.5f) * w;
+            ry = (0.5f - clip.y / clip.w * 0.5f) * h;
+        }
+    }
     const float arm = 5.0f * s;
     const float gap = 3.0f * s;
     const float thin = std::max(1.0f, s * 0.6f);
     const glm::vec4 reticle(0.6f, 1.0f, 0.7f, 0.75f);
-    hud_.rect(cx - gap - arm, cy - thin * 0.5f, arm, thin, reticle);
-    hud_.rect(cx + gap, cy - thin * 0.5f, arm, thin, reticle);
-    hud_.rect(cx - thin * 0.5f, cy - gap - arm, thin, arm, reticle);
-    hud_.rect(cx - thin * 0.5f, cy + gap, thin, arm, reticle);
+    hud_.rect(rx - gap - arm, ry - thin * 0.5f, arm, thin, reticle);
+    hud_.rect(rx + gap, ry - thin * 0.5f, arm, thin, reticle);
+    hud_.rect(rx - thin * 0.5f, ry - gap - arm, thin, arm, reticle);
+    hud_.rect(rx - thin * 0.5f, ry + gap, thin, arm, reticle);
 
     // Shields and energy, bottom left.
     const float barW = 44.0f * s;
@@ -1564,7 +1585,7 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     buildDoors(rs, level);
     buildDoorSigns(rs, level, walk);
     buildBillboards(rs);
-    buildHud(hud);
+    buildHud(hud, cam.proj * cam.view);
     buildMenu(menu);
     hud_.upload();
     buildShadowVolumes(rs, walk);
@@ -1652,7 +1673,9 @@ void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
 void Renderer::drawAutomap(const AutomapData& map, const Level& level, const HudData& hud,
                            const MenuView& menu) {
     buildAutomapLines(map, level);
-    buildHud(hud);
+    // The map has its own camera and no firing line in it, so the reticle stays
+    // on the centre of the window; HudData::hasAimPoint is false here.
+    buildHud(hud, glm::mat4(1.0f));
     buildMenu(menu);
     hud_.upload();
 
