@@ -621,6 +621,42 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
                   rig.state.player.shields, sim::kHurtFlashTime);
     }
 
+    // --- a disabled ship has no guns and no headlight -------------------------
+    {
+        rig.reset();
+        for (sim::Robot& robot : rig.robots.robots) robot.alive = false;
+        rig.robots.count = 0;
+        rig.state.player.headlightOn = true;
+
+        // Under the threshold, still alive.
+        rig.state.player.shields = sim::kPlayerMaxShields * 0.09f;
+        ok &= expect(sim::playerDisabled(rig.state.player), "9% shields disables the ship");
+
+        const int boltsBefore = rig.state.projectiles.count();
+        sim::FireControls everything;
+        everything.selectWeapon = sim::WeaponLaser;
+        everything.primary = true;
+        everything.secondary = true;
+        everything.flare = true;
+        const int flaresBefore = rig.state.player.flares;
+        rig.run(120, everything);
+
+        ok &= expect(rig.state.projectiles.count() == boltsBefore,
+                     "a disabled ship fires nothing");
+        ok &= expect(rig.state.beams.count() == 0, "a disabled ship raises no beam");
+        ok &= expect(rig.state.player.flares == flaresBefore, "a disabled ship throws no flare");
+        ok &= expect(!rig.state.player.headlightOn, "a disabled ship's headlight goes out");
+
+        // A shield pickup hands it straight back: the state is derived from
+        // shields every step, never latched.
+        rig.state.player.shields = sim::kPlayerMaxShields * 0.5f;
+        ok &= expect(!sim::playerDisabled(rig.state.player), "repairing past 10% restores control");
+        rig.run(1, everything);
+        ok &= expect(rig.state.projectiles.count() > boltsBefore, "and the guns work again");
+
+        log::info("disabled player: one second of every trigger at 9% shields fired nothing");
+    }
+
     // --- a hitscan shot never leaves the mine --------------------------------
     //
     // The projectile equivalent of this is the no-tunnelling case: a bolt fast

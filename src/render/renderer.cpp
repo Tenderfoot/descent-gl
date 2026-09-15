@@ -413,7 +413,15 @@ void Renderer::buildHud(const HudData& hud) {
     // colour and this is cheaper and more predictable than a gradient shader
     // for something on screen for a third of a second.
     const auto damageTint = [&]() {
-        if (hud.damageFlash <= 0.0f) return;
+        // A disabled ship holds the vignette on rather than letting it fade:
+        // the flinch is an event, being disabled is a state, and the player
+        // needs to be able to tell at a glance which one they are in.
+        float flash = hud.damageFlash;
+        if (hud.shipDisabled) {
+            flash = std::max(flash,
+                             0.55f + 0.45f * std::sin(hud.shipDisabledTime * 5.5f));
+        }
+        if (flash <= 0.0f) return;
         const float w = static_cast<float>(target_.width());
         const float h = static_cast<float>(target_.height());
         const float depth = h * 0.16f;
@@ -423,8 +431,7 @@ void Renderer::buildHud(const HudData& hud) {
         for (int b = 0; b < kBands; ++b) {
             const float t = static_cast<float>(b) / kBands;
             const float band = depth * (1.0f - t);
-            const glm::vec4 red(0.9f, 0.12f, 0.1f,
-                                hud.damageFlash * 0.055f * (1.0f - t * 0.5f));
+            const glm::vec4 red(0.9f, 0.12f, 0.1f, flash * 0.055f * (1.0f - t * 0.5f));
             hud_.rect(0.0f, 0.0f, w, band, red);
             hud_.rect(0.0f, h - band, w, band, red);
             hud_.rect(0.0f, 0.0f, band, h, red);
@@ -736,6 +743,15 @@ void Renderer::hudPass() {
     glEnable(GL_DEPTH_TEST);
 }
 
+// The red a disabled ship shows, pulsing. One function so the robot's albedo,
+// the robot's eyes and the player's own hull all pulse together.
+namespace {
+glm::vec3 disabledTint(float seconds) {
+    const float pulse = 0.5f + 0.5f * std::sin(seconds * 5.5f);
+    return glm::mix(glm::vec3(0.55f, 0.16f, 0.13f), glm::vec3(1.0f, 0.28f, 0.20f), pulse);
+}
+}   // namespace
+
 void Renderer::buildBillboards(const RenderState& rs) {
     billboards_.clear();
 
@@ -781,9 +797,19 @@ void Renderer::buildBillboards(const RenderState& rs) {
             }
             const sim::RobotDef& def = robotConfig_->types[static_cast<size_t>(robot.type)];
             const glm::mat3 basis = glm::mat3_cast(robot.orientation);
+
+            // A disabled robot's eyes go red and dim. This is the cue that
+            // matters: the albedo tint below only shows where light already
+            // falls, and there is no ambient term, so a robot drifting in an
+            // unlit corridor would otherwise give no sign at all.
+            glm::vec3 eyeColor = def.eyeColor;
+            float eyeSize = def.eyeSize;
+            if (robot.disabledTime > 0.0f) {
+                eyeColor = disabledTint(robot.disabledTime) * 0.8f;
+                eyeSize = def.eyeSize * 0.7f;
+            }
             for (const glm::vec3& eye : def.eyes) {
-                billboards_.add(robot.position + basis * eye, right, up, def.eyeSize,
-                                def.eyeColor);
+                billboards_.add(robot.position + basis * eye, right, up, eyeSize, eyeColor);
             }
         }
     }
@@ -1153,6 +1179,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         }
 
         wallShader_->setInt("uLayerOverride", -1);
+        wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));
         wallShader_->setMat4("uModel", glm::mat4(1.0f));
         levelMesh_->bind();
         for (int segment : lit_) {
@@ -1185,10 +1212,14 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             }
             wallShader_->setInt("uLayerOverride",
                                 robotTypes_[static_cast<size_t>(view.type)].textureLayer);
+            wallShader_->setVec3("uAlbedoTint", view.disabledTime > 0.0f
+                                                    ? disabledTint(view.disabledTime)
+                                                    : glm::vec3(1.0f));
             wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
                                                 glm::mat4_cast(view.orientation));
             robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
         }
+        wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));
 
         for (const DoorSlab& slab : doorSlabs_) {
             if (slab.segmentA < 0) continue;
@@ -1207,8 +1238,12 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         if (rs.camera == CameraMode::Chase && walk.isVisible(rs.shipSegment) &&
             std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
             wallShader_->setInt("uLayerOverride", WallHull);
+            wallShader_->setVec3("uAlbedoTint",
+                                 rs.shipDisabled ? disabledTint(rs.shipDisabledTime)
+                                                 : glm::vec3(1.0f));
             wallShader_->setMat4("uModel", shipModelMatrix(rs));
             ship_->draw();
+            wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));
         }
         timers_.lightEnd(timed);
     }

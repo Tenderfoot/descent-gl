@@ -464,6 +464,48 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             robot.strafeSign = randUnit() < 0.5f ? -1.0f : 1.0f;
         }
 
+        // --- disabled ----------------------------------------------------
+        //
+        // Under the threshold a robot stops being a robot: it does not look,
+        // path, steer or shoot. It keeps exactly the momentum it had and
+        // tumbles, and it can still be finished off.
+        //
+        // Expressed as "skip everything else" rather than as a desired velocity
+        // of zero, because steer() would read that as a request to stop and
+        // brake it to a halt against the very momentum it is supposed to keep.
+        const float health0 = def.health > 0.0f ? robot.health / def.health : 1.0f;
+        if (health0 <= kDisabledHealthFraction) {
+            if (robot.mode != RobotMode::Disabled) {
+                setMode(robot, RobotMode::Disabled);
+                robot.awareness = 0.0f;
+                robot.burstLeft = 0;
+                // Folded in, not left to decay: with nothing flying the robot,
+                // a shove and a drift are the same thing, and the drift is
+                // meant to last.
+                robot.body.velocity += robot.body.knockback;
+                robot.body.knockback = glm::vec3(0.0f);
+                robot.tumble = glm::vec3(randSigned() * 1.1f, randSigned() * 1.1f,
+                                         randSigned() * 1.6f);
+            }
+
+            robot.body.velocity += robot.body.knockback;
+            robot.body.knockback = glm::vec3(0.0f);
+            robot.orientation =
+                glm::normalize(robot.orientation *
+                               glm::quat(0.0f, robot.tumble * 0.5f * dt) + robot.orientation);
+            robot.body.position += robot.body.velocity * dt;
+            resolveCollision(level, robot.body, collision, dt, nullptr, doors);
+
+            if (robot.health <= 0.0f) {
+                robot.alive = false;
+                emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
+                spawnDebris(state, robot, def);
+                spawnDrop(level, state, def, robot);
+            }
+            continue;
+        }
+        robot.tumble = glm::vec3(0.0f);
+
         // --- perception --------------------------------------------------
         const glm::vec3 toPlayer = player.position - robot.body.position;
         const float distance = glm::length(toPlayer);
@@ -546,6 +588,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                     setMode(robot, robot.awareness > 0.0f ? RobotMode::Chase : RobotMode::Idle);
                 }
                 break;
+            case RobotMode::Disabled:
             case RobotMode::Count:
                 break;
         }
@@ -659,6 +702,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 if (distance > 1e-3f) desired = -(toPlayer / distance);
                 break;
             }
+            case RobotMode::Disabled:
             case RobotMode::Count:
                 break;
         }

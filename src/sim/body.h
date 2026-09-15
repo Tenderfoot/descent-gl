@@ -44,6 +44,11 @@ struct Body {
 // the ship is made to coast further.
 inline constexpr float kKnockbackDamping = 1.6f;   // 1/s
 
+// A ship at or below this fraction of its health is disabled: it stops flying
+// itself and drifts on whatever momentum it had, tumbling. Robots and the
+// player alike - the same number governs both, because it is the same idea.
+inline constexpr float kDisabledHealthFraction = 0.10f;
+
 // Adds an impulse to a body. `strength` is the velocity change it would impart
 // at mass 1, so heavier things shrug the same hit off. `direction` need not be
 // normalised.

@@ -527,6 +527,58 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
         }
     }
 
+    // --- a robot under 10% health drifts, blind and harmless -------------------
+    {
+        rig.reset();
+        rig.combat.player.headlightOn = true;
+
+        sim::Robot& victim = rig.robots.robots[0];
+        const sim::RobotDef& def = rig.robotCfg.types[static_cast<size_t>(victim.type)];
+
+        // Wake it and give it a push, so it has momentum to keep.
+        victim.awareness = 1.0f;
+        victim.lastKnown = rig.player.position;
+        victim.hasLastKnown = true;
+        rig.run(60);
+
+        // Down to 9%: under the threshold, still alive.
+        victim.health = def.health * 0.09f;
+        victim.body.velocity = glm::vec3(6.0f, 0.0f, 0.0f);
+        const glm::quat attitudeBefore = victim.orientation;
+        const int boltsBefore = rig.combat.projectiles.count();
+        rig.run(1);
+
+        ok &= expect(victim.mode == sim::RobotMode::Disabled, "9% health disables the robot");
+        ok &= expect(victim.awareness == 0.0f, "a disabled robot stops paying attention");
+
+        // Two seconds of drifting, with the player parked in front of it.
+        const glm::vec3 driftFrom = victim.body.position;
+        const glm::vec3 keptVelocity = victim.body.velocity;
+        rig.player.position = victim.body.position + glm::vec3(0.0f, 0.0f, 8.0f);
+        rig.run(240);
+
+        ok &= expect(victim.alive, "it is disabled, not destroyed");
+        ok &= expect(rig.combat.projectiles.count() <= boltsBefore,
+                     "a disabled robot does not shoot");
+        ok &= expect(glm::length(victim.body.position - driftFrom) > 0.5f,
+                     "a disabled robot keeps moving");
+        ok &= expect(victim.orientation != attitudeBefore, "a disabled robot tumbles");
+        ok &= expect(findSegment(rig.level, victim.body.position, victim.body.segment) >= 0,
+                     "a disabled robot stays inside the mine");
+
+        // It keeps what it had rather than coasting to a stop: only a wall may
+        // take it away.
+        const float speedNow = glm::length(victim.body.velocity);
+        log::info("disabled: drifted {:.1f}u in 2.0s, {:.1f} u/s of {:.1f} kept",
+                  glm::length(victim.body.position - driftFrom), speedNow,
+                  glm::length(keptVelocity));
+
+        // And it can still be finished off.
+        victim.health = -1.0f;
+        rig.run(1);
+        ok &= expect(!victim.alive, "a disabled robot can still be destroyed");
+    }
+
     // --- robots stay inside the mine ------------------------------------------
     {
         rig.reset();

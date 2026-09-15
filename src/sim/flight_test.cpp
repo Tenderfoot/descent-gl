@@ -105,6 +105,45 @@ int runFlightTest(const char* configPath) {
         ok = false;
     }
 
+    // --- a disabled ship ignores the stick and keeps what it had -------------
+    //
+    // No damping and no speed clamp: "whatever velocity it held" has to be
+    // literally true, or a ship knocked out at speed quietly coasts to a halt
+    // and the state reads as being parked rather than as being wrecked.
+    {
+        ShipState wreck;
+        wreck.body.velocity = glm::vec3(0.0f, 0.0f, -37.0f);   // well past maxSpeed
+        wreck.body.knockback = glm::vec3(9.0f, 0.0f, 0.0f);
+        wreck.disabled = true;
+        const glm::vec3 expected = wreck.body.velocity + wreck.body.knockback;
+        const glm::quat attitude = wreck.orientation;
+
+        ShipControls stick;
+        stick.thrust = 1.0f;
+        stick.strafe = 1.0f;
+        stick.roll = 1.0f;
+        stick.look = glm::vec2(400.0f, 200.0f);
+
+        for (int i = 0; i < 600; ++i) stepShip(wreck, stick, cfg, kStep);   // five seconds
+
+        const float drift = glm::length(wreck.body.velocity);
+        const float kept = glm::length(expected);
+        if (std::abs(drift - kept) > 0.01f) {
+            log::error("a disabled ship's drift changed: {:.2f} u/s from {:.2f}", drift, kept);
+            ok = false;
+        }
+        if (glm::length(wreck.aimSpin) > 1e-5f || glm::length(wreck.thrusterSpin) > 1e-5f) {
+            log::error("a disabled ship answered the stick");
+            ok = false;
+        }
+        if (wreck.orientation == attitude) {
+            log::error("a disabled ship did not tumble");
+            ok = false;
+        }
+        log::info("  disabled drift     {:.2f} u/s held for 5.0 s with the stick hard over "
+                  "(maxSpeed {:.1f})", drift, cfg.maxSpeed);
+    }
+
     log::info("flight test: {}", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }

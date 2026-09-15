@@ -87,6 +87,10 @@ struct RenderState {
         glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
         int type = 0;
         int slot = 0;
+        // Seconds this robot has been disabled, or 0 while it is healthy. It
+        // drives the red pulse, and it comes from the simulation rather than a
+        // render clock so every robot's pulse is its own.
+        float disabledTime = 0.0f;
     };
     std::array<RobotView, sim::kMaxRobots> robots{};
     // Indexed by robot slot, so the light and shadow passes can cull a robot
@@ -112,6 +116,12 @@ struct RenderState {
     // to the camera, and a multiplier on every static light so they flicker.
     glm::vec3 shakeOffset{0.0f};
     float staticLightScale = 1.0f;
+
+    // The player's ship is under the disabled threshold: tinted in the chase
+    // camera, and the reason the HUD is showing a warning. The clock is the
+    // level's own elapsed time, used only to give the pulse a phase.
+    bool shipDisabled = false;
+    float shipDisabledTime = 0.0f;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
@@ -183,6 +193,7 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         RenderState::RobotView view;
         view.type = cur.type;
         view.slot = i;
+        view.disabledTime = cur.mode == sim::RobotMode::Disabled ? cur.modeTime : 0.0f;
         view.position =
             prev.alive ? glm::mix(prev.body.position, cur.body.position, t) : cur.body.position;
         view.orientation =
@@ -219,6 +230,8 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
                      b.game.doors[static_cast<size_t>(i)].openness, t);
     }
 
+    r.shipDisabled = b.ship.disabled;
+    r.shipDisabledTime = b.game.elapsed;
     r.objectCount = b.combat.objects.count;
     for (int i = 0; i < r.objectCount; ++i) {
         r.objectAlive[static_cast<size_t>(i)] = b.combat.objects.alive[static_cast<size_t>(i)];

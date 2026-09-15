@@ -276,6 +276,13 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     player.recoilTimer = std::max(0.0f, player.recoilTimer - dt);
     player.beamCueTimer = std::max(0.0f, player.beamCueTimer - dt);
 
+    // A disabled ship has no power for anything the player might ask of it:
+    // the guns are dead and the headlight goes out. Drifting through a mine
+    // with no ambient light and nothing to see by is most of what being
+    // disabled means. See playerDisabled().
+    const bool disabled = playerDisabled(player);
+    if (disabled) player.headlightOn = false;
+
     // --- resources -------------------------------------------------------
     if (player.headlightOn) {
         player.energy = std::max(0.0f, player.energy - cfg.headlightDrain * dt);
@@ -532,9 +539,9 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         }
     };
 
-    if (controls.primary) fire(player.primaryWeapon);
-    if (controls.secondary) fire(player.secondaryWeapon);
-    if (controls.flare && player.flareCooldown <= 0.0f && player.flares > 0) {
+    if (controls.primary && !disabled) fire(player.primaryWeapon);
+    if (controls.secondary && !disabled) fire(player.secondaryWeapon);
+    if (controls.flare && !disabled && player.flareCooldown <= 0.0f && player.flares > 0) {
         const int slot = state.projectiles.spawn();
         if (slot >= 0) {
             --player.flares;

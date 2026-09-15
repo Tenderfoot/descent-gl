@@ -97,6 +97,12 @@ struct HudData {
     // screenshot taken with the HUD hidden should still show the player being
     // shot at.
     float damageFlash = 0.0f;
+
+    // The ship is under the disabled threshold and the player has no control of
+    // it. Held rather than fading, because unlike the flinch it is a state and
+    // not an event: the edges stay red and pulsing until something changes.
+    bool shipDisabled = false;
+    float shipDisabledTime = 0.0f;
 };
 
 // The automap, gathered by the game layer for the same reason `HudData` is: the

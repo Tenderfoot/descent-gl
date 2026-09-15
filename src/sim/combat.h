@@ -40,6 +40,13 @@ constexpr ProjectileKind projectileFor(int weaponId) {
             return ProjectileKind::Concussion;
         case WeaponHoming:
             return ProjectileKind::Homing;
+        case WeaponRailgun:
+        case WeaponLightning:
+            // Hitscan: launches nothing at all. Never reached, because the
+            // firing path branches on weaponFire() before it asks - the cases
+            // are here so the next weapon cannot slip past this switch, which
+            // is the whole reason this is not a cast.
+            break;
         case WeaponCount:
             break;
     }
@@ -178,6 +185,16 @@ struct PlayerState {
     // fault in the program rather than like an empty gun.
     float emptyClickTimer = 0.0f;
 };
+
+// Full shields. The number the disabled threshold is a fraction of.
+inline constexpr float kPlayerMaxShields = 100.0f;
+
+// True while the ship is too badly damaged to fly itself. At or below this the
+// player has no thrust, no steering, no guns and no headlight: the ship drifts
+// on what it had. Robots use the same fraction - see kDisabledHealthFraction.
+inline bool playerDisabled(const PlayerState& player) {
+    return player.shields <= kPlayerMaxShields * kDisabledHealthFraction;
+}
 
 // How long after an out-of-ammo click before another one is allowed.
 inline constexpr float kEmptyClickInterval = 0.4f;

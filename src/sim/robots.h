@@ -27,11 +27,12 @@ enum class RobotMode : uint8_t {
     Chase,     // pathing towards the player through the segment graph
     Attack,    // in line of sight and in range: face, fire a burst, strafe
     Retreat,   // hurt, or just finished a burst: back off, wait, return
+    Disabled,  // under kDisabledHealthFraction: drifting, blind, harmless
     Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(RobotMode::Count)> kRobotModeNames{
-    "idle", "alert", "chase", "attack", "retreat"};
+    "idle", "alert", "chase", "attack", "retreat", "disabled"};
 
 // Per-type data, from assets/config/robots.json.
 struct RobotDef {
@@ -142,6 +143,10 @@ struct Robot {
     // simply sit still and trade shots.
     float strafeSign = 1.0f;
     float strafeTimer = 0.0f;
+    // The aimless spin a disabled robot picks up, in its local frame. Chosen
+    // once when it goes under and kept, so it tumbles steadily rather than
+    // jittering to a new random attitude every step.
+    glm::vec3 tumble{0.0f};
     int homeSegment = 0;
 };
 

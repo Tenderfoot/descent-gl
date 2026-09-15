@@ -700,6 +700,9 @@ int main(int argc, char** argv) {
             dvk::sim::ShipControls controls =
                 dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta,
                                   settings.bindings);
+            // Recomputed every step rather than latched, so a shield pickup
+            // hands the ship straight back.
+            cur.ship.disabled = dvk::sim::playerDisabled(cur.combat.player);
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -1030,6 +1033,8 @@ int main(int argc, char** argv) {
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
+        hud.shipDisabled = cur.ship.disabled;
+        hud.shipDisabledTime = cur.game.elapsed;
         // Both the bar and the word come from `playerSeen` rather than from
         // `playerLight`, even though the latter is the better-behaved number.
         // They have to agree: a bar sitting under its own threshold tick beside

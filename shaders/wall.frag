@@ -23,12 +23,16 @@ uniform vec3 uEyePos;
 // >= 0 overrides the per-vertex layer, for meshes that carry no layer
 // attribute. Lets the ship and the walls share one lit pass.
 uniform int uLayerOverride;
+// Multiplies the albedo. White for everything healthy. There is no ambient
+// term, so this only shows where light already falls - a disabled robot in an
+// unlit corridor is marked by its emissive eyes instead, not by this.
+uniform vec3 uAlbedoTint;
 
 out vec4 oColor;
 
 void main() {
     int layer = uLayerOverride >= 0 ? uLayerOverride : vLayer;
-    vec3 albedo = texture(uWalls, vec3(vUV, float(layer))).rgb;
+    vec3 albedo = texture(uWalls, vec3(vUV, float(layer))).rgb * uAlbedoTint;
 
     vec3 n = normalize(vNormal);
     vec3 toLight = uLightPos - vWorldPos;
