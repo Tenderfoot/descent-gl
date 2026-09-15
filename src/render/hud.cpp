@@ -63,6 +63,19 @@ void Hud::bar(float x, float y, float w, float h, float fill, const glm::vec4& c
     if (clamped > 0.0f) rect(x, y, w * clamped, h, color);
 }
 
+void Hud::image(float x, float y, float w, float h, int layer, const glm::vec4& color) {
+    // x > 1.5 selects uHudImages in hud.frag. Each layer owns a two-unit band
+    // in y so interpolation across the quad cannot round into its neighbour.
+    const float band = static_cast<float>(std::max(0, layer)) * 2.0f;
+    const glm::vec2 uv0(2.0f, band);
+    const glm::vec2 uv1(3.0f, band + 1.0f);
+    const Vertex a{{x, y}, {uv0.x, uv0.y}, color};
+    const Vertex b{{x + w, y}, {uv1.x, uv0.y}, color};
+    const Vertex c{{x + w, y + h}, {uv1.x, uv1.y}, color};
+    const Vertex d{{x, y + h}, {uv0.x, uv1.y}, color};
+    vertices_.insert(vertices_.end(), {a, b, c, a, c, d});
+}
+
 void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color) {
     float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
     if (!font::glyphUv(c, u0, v0, u1, v1)) return;

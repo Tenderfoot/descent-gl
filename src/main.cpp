@@ -21,6 +21,7 @@
 #include "game/weapons_test.h"
 #include "game/world_test.h"
 #include "render/debug.h"
+#include "render/comm_clip.h"
 #include "render/gl.h"
 #include "core/alloc_count.h"
 #include "render/renderer.h"
@@ -70,6 +71,7 @@ constexpr const char* kLevelDir = "assets/levels";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
+constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
 
 // How the ship's drive is heard.
 //
@@ -149,6 +151,7 @@ int main(int argc, char** argv) {
 
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
+    if (opts.commTest) return dvk::gl::runCommTest(kCommManifestPath);
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -1134,6 +1137,10 @@ int main(int argc, char** argv) {
         hud.message = cur.game.endReason;
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
+        hud.commActive = opts.comm || cur.game.comm.active;
+        // Forced mode holds on a useful, repeatable frame even when a
+        // frame-limited render runs faster than the fixed simulation clock.
+        hud.commTime = opts.comm ? 1.0f : cur.game.comm.elapsed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.
         hud.aimPoint = rs.shipPos + shipForward * aimDistance;

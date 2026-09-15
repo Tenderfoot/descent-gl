@@ -77,6 +77,11 @@ struct HudData {
     int robotsDestroyed = 0;
     int robotsTotal = 0;
 
+    // The level-opening transmission is simulation-timed. The renderer turns
+    // the time into a texture-array layer; no video decode happens per frame.
+    bool commActive = false;
+    float commTime = 0.0f;
+
     // Darkness, as the simulation understands it rather than as the screen
     // shows it. `illumination` is the light reaching the player and
     // `darkThreshold` is the value it has to stay under for the mine to hide
@@ -295,6 +300,12 @@ private:
 
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<TextureArray> pickupSprites_;
+    std::unique_ptr<TextureArray> commFrames_;
+    int commFrameCount_ = 0;
+    int commWidth_ = 1;
+    int commHeight_ = 1;
+    float commFramesPerSecond_ = 1.0f;
+    float commDisplaySeconds_ = 0.0f;
     std::unique_ptr<LevelMesh> levelMesh_;
     std::unique_ptr<Mesh> ship_;
     std::unique_ptr<Mesh> gizmo_;

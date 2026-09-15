@@ -8,6 +8,7 @@
 #include "sim/collision.h"
 #include "sim/robots.h"
 #include "render/camera.h"
+#include "render/comm_clip.h"
 #include "render/procedural.h"
 #include "render/sprites.h"
 
@@ -28,6 +29,7 @@ constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
+constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
 
 constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
 constexpr float kChaseLookAhead = 6.0f;
@@ -114,6 +116,20 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     pickupSprites_ = std::make_unique<TextureArray>(
         kPickupSpriteSize, loadPickupSprites(kPickupSpriteSize), "pickups",
         TextureArray::Wrap::ClampToEdge);
+    {
+        CommClip clip = loadCommClip(kCommManifestPath);
+        commFrameCount_ = static_cast<int>(clip.frames.size());
+        commWidth_ = clip.width;
+        commHeight_ = clip.height;
+        commFramesPerSecond_ = clip.framesPerSecond;
+        commDisplaySeconds_ = clip.displaySeconds;
+        commFrames_ = std::make_unique<TextureArray>(
+            clip.width, clip.height, clip.frames, "comm intro", TextureArray::Wrap::ClampToEdge);
+        // hud.frag is also used by world-space door signs. Bind the optional
+        // sampler immediately so that shared program never observes an
+        // incomplete texture on unit 3 before the first HUD pass.
+        commFrames_->bind(3);
+    }
 
     shipModel_ = loadObj("assets/models/ship.obj");
     ship_ = std::make_unique<Mesh>(toMesh(shipModel_));
@@ -616,6 +632,30 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     const float cx = w * 0.5f;
     const float cy = h * 0.5f;
 
+    // Incoming transmission, below the key row in the otherwise open upper
+    // right. The authored frames loop for the duration of the message; the
+    // short fades keep it from arriving and vanishing as a hard rectangle.
+    if (hud.commActive && hud.commTime < commDisplaySeconds_ && commFrameCount_ > 0) {
+        const float fadeIn = std::clamp(hud.commTime / 0.18f, 0.0f, 1.0f);
+        const float fadeOut = std::clamp((commDisplaySeconds_ - hud.commTime) / 0.45f,
+                                         0.0f, 1.0f);
+        const float alpha = std::min(fadeIn, fadeOut);
+        const float panelW = std::min(w * 0.28f, 92.0f * s);
+        const float panelH = panelW * static_cast<float>(commHeight_) /
+                             static_cast<float>(commWidth_);
+        const float x = w - 8.0f * s - panelW;
+        const float y = 20.0f * s;
+        const float frame = 1.5f * s;
+        const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
+        hud_.rect(x - frame, y - frame, panelW + frame * 2.0f,
+                  panelH + frame * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
+        const int layer = static_cast<int>(std::floor(hud.commTime * commFramesPerSecond_)) %
+                          commFrameCount_;
+        hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
+        hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
+        hud_.text("incoming transmission", x, y + panelH + 3.0f * s, s * 0.62f, cyan);
+    }
+
     // Reticle: a gap in the middle so it frames the target rather than
     // covering it.
     //
@@ -910,6 +950,7 @@ void Renderer::hudPass() {
     // Drawn on the resolved framebuffer, after the blit, for the same reason
     // ImGui is: it is axis-aligned and gains nothing from multisampling.
     hudShader_->bind();
+    if (commFrames_) commFrames_->bind(3);
     hudShader_->setVec2("uScreen", glm::vec2(static_cast<float>(target_.width()),
                                              static_cast<float>(target_.height())));
     glDisable(GL_DEPTH_TEST);
