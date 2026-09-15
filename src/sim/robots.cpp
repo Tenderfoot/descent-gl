@@ -434,7 +434,7 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
-                const SolidDoors* doors, EventQueue* events) {
+                const SolidDoors* doors, EventQueue* events, const PropState* props) {
     (void)weapons;
 
     const int shutDoors = doors ? doors->count : 0;
@@ -448,7 +448,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
     // Asked once for the whole step, not once per robot: it is a property of
     // where the player is standing, identical for every robot looking at them.
     const PlayerVisibility visibility =
-        playerVisibility(level, combat, weapons, player.position, player.segment, doors);
+        playerVisibility(level, combat, weapons, player.position, player.segment, doors, props);
 
     for (int ri = 0; ri < state.count; ++ri) {
         Robot& robot = state.robots[static_cast<size_t>(ri)];

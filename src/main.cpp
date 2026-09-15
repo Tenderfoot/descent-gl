@@ -750,7 +750,7 @@ int main(int argc, char** argv) {
             }
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
-                                 &soundEvents);
+                                 &soundEvents, &cur.props);
             dvk::sim::stepProps(level, cur.props, static_cast<float>(kSimStep), &solidDoors);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
@@ -1018,7 +1018,7 @@ int main(int argc, char** argv) {
         // one answer instead of two, and so it is still asked with the panel
         // shut.
         playerSeen = dvk::sim::playerVisibility(level, cur.combat, weapons, rs.shipPos,
-                                                rs.shipSegment, &solidDoors);
+                                                rs.shipSegment, &solidDoors, &cur.props);
 
         // A ray straight out of the nose, for the debug overlay and as a live
         // check that the query everything from M5 on depends on agrees with
