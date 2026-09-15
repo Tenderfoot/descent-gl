@@ -1,10 +1,12 @@
 #pragma once
 
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace dvk::sim {
 
@@ -63,6 +65,57 @@ inline glm::vec3 closestPointOnTriangle(const glm::vec3& p, const glm::vec3& a,
     const float v = vb / denom;
     const float w = vc / denom;
     return a + ab * v + ac * w;    // face region
+}
+
+// Closest point to p on an axis-aligned box centred on the origin with the
+// given half extents. The oriented case rotates p into the box's own frame,
+// calls this, and rotates the answer back.
+//
+// One clamp, where the triangle above needs seven regions. That is the whole
+// argument for giving a column a box rather than its own 28 triangles: a box
+// is convex in its own space, so there is no edge case to get wrong and no
+// branch to get wrong it in.
+inline glm::vec3 closestPointOnBox(const glm::vec3& p, const glm::vec3& halfExtents) {
+    return glm::clamp(p, -halfExtents, halfExtents);
+}
+
+// Distance along a unit `dir` at which the ray enters an axis-aligned box
+// centred on the origin, or a negative number if it misses. An origin already
+// inside the box returns 0.
+//
+// The slab test, written with an explicit guard for a direction component of
+// zero rather than leaning on infinities. A ray exactly parallel to a slab
+// produces 0 * inf = NaN in the reciprocal form, and a NaN loses every
+// comparison it takes part in, so the miss is reported as a hit at whatever
+// distance the other two axes happened to leave in the accumulator. Two extra
+// lines here, instead of a bolt that stops in mid-air beside a pillar.
+inline float rayBoxDistance(const glm::vec3& origin, const glm::vec3& dir,
+                            const glm::vec3& halfExtents) {
+    constexpr float kParallel = 1e-8f;
+    // Not `near` and `far`: those are macros in <windef.h>, and the shipping
+    // build is MSVC.
+    float tNear = 0.0f;
+    float tFar = std::numeric_limits<float>::max();
+
+    for (int axis = 0; axis < 3; ++axis) {
+        const float d = dir[axis];
+        const float o = origin[axis];
+        const float h = halfExtents[axis];
+        if (std::abs(d) < kParallel) {
+            // Parallel to this pair of planes: either always between them or
+            // never.
+            if (o < -h || o > h) return -1.0f;
+            continue;
+        }
+        const float inv = 1.0f / d;
+        float t0 = (-h - o) * inv;
+        float t1 = (h - o) * inv;
+        if (t0 > t1) std::swap(t0, t1);
+        tNear = std::max(tNear, t0);
+        tFar = std::min(tFar, t1);
+        if (tNear > tFar) return -1.0f;
+    }
+    return tFar < 0.0f ? -1.0f : tNear;
 }
 
 // Moller-Trumbore. Returns the distance along a unit `dir`, or a negative

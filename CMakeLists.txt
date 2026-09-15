@@ -43,6 +43,7 @@ add_executable(descent
     src/game/loop_test.cpp
     src/game/menu.cpp
     src/game/progress.cpp
+    src/game/proxies.cpp
     src/game/robots_test.cpp
     src/game/session.cpp
     src/game/settings.cpp

@@ -6,6 +6,7 @@
 #include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/props.h"
+#include "sim/proxy.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
@@ -405,6 +406,109 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
             log::info("phantom: bolt reached {:.1f} units past a spawn point with {:.1f} units of "
                       "clear run ({})",
                       furthest - back, clear, passed ? "passed through" : "STOPPED");
+        }
+    }
+
+    // --- a tall object is solid over its whole height -----------------------
+    //
+    // Every level object used to be hit-tested as one 2.4 unit sphere on its
+    // origin. `pillar.obj` is a column 4.4 x 18 x 4.4, so only the middle 4.8
+    // units of it stopped a shot: aim at the top of a pillar and the bolt went
+    // through it and hit the wall behind, in full view of the player. The proxy
+    // volume is the fix, and this is the case that was failing silently.
+    {
+        rig.reset();
+        rig.state.player.headlightOn = false;
+
+        // The tall one, whichever object that is: twice as high as it is wide.
+        // Named by shape rather than by type so a second column of a different
+        // name is covered too, and so a level without one reports SKIPPED
+        // instead of quietly passing.
+        int tall = -1;
+        for (size_t i = 0; i < rig.level.objectProxies.size(); ++i) {
+            if (!rig.state.objects.alive[i]) continue;
+            const sim::PlacedProxy& proxy = rig.level.objectProxies[i];
+            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+            if (proxy.halfExtents.y > 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
+                tall = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (tall < 0) {
+            log::info("tall object: SKIPPED, no column-shaped object in this level");
+        } else {
+            const sim::PlacedProxy& proxy = rig.level.objectProxies[static_cast<size_t>(tall)];
+            const glm::vec3 centre = proxy.centre;
+            const int segment = rig.level.objects[static_cast<size_t>(tall)].segment;
+
+            // Robots stand in rooms and would take the shot first. This test is
+            // about the column.
+            for (int i = 0; i < rig.robots.count; ++i) rig.robots.robots[static_cast<size_t>(i)].alive = false;
+
+            // The horizontal direction with the most room to back off into.
+            const glm::vec3 axes[4] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+            glm::vec3 away(1.0f, 0.0f, 0.0f);
+            float room = 0.0f;
+            for (const glm::vec3& axis : axes) {
+                const sim::RayHit hit = sim::raycast(rig.level, centre, axis, 200.0f, segment);
+                const float run = hit.hit ? hit.distance : 200.0f;
+                if (run > room) {
+                    room = run;
+                    away = axis;
+                }
+            }
+            const float back = std::min(9.0f, room - 1.5f);
+            const glm::vec3 from = centre + away * back;
+            const int fromSegment = findSegment(rig.level, from, segment);
+            ok &= expect(fromSegment >= 0, "the firing position beside the column is in the mine");
+
+            // Bottom, middle and top. 0.8 of the half height keeps the aim
+            // point inside the column rather than on its cap, where a shot
+            // grazing the corner is a fair miss either way.
+            const float reach = proxy.halfExtents.y * 0.8f;
+            const float heights[3] = {-reach, 0.0f, reach};
+            const char* names[3] = {"bottom", "middle", "top"};
+            constexpr float kOldRadius = 2.4f;   // what every object used to be
+
+            for (int h = 0; h < 3; ++h) {
+                const glm::vec3 target = centre + glm::vec3(0.0f, heights[h], 0.0f);
+                const glm::vec3 direction = glm::normalize(target - from);
+
+                sim::CombatTraceParams params;
+                params.radius = 0.3f;   // a laser bolt's own thickness
+                const sim::CombatHit hit =
+                    sim::traceCombatRay(rig.level, rig.state, rig.ship, &rig.robots, from,
+                                        direction, 200.0f, fromSegment, params, nullptr,
+                                        &rig.props);
+
+                const bool struck =
+                    hit.kind == sim::CombatHit::Kind::Object && hit.index == tall;
+                ok &= expect(struck, "a shot at a column hits the column");
+
+                // How far the old sphere test was from this shot, so the two
+                // ends are provably cases it got wrong rather than cases that
+                // happened to work. The perpendicular distance from the
+                // object's centre to the ray.
+                const glm::vec3 toCentre = centre - from;
+                const float alongRay = glm::dot(toCentre, direction);
+                const float miss = glm::length(toCentre - direction * alongRay);
+
+                log::info("column {:6}: {} at {:.1f}u; old 2.4u sphere was {:.1f}u off the ray ({})",
+                          names[h], struck ? "hit" : "MISSED", hit.distance, miss,
+                          miss > kOldRadius + params.radius ? "used to miss" : "used to hit");
+
+                if (h != 1) {
+                    ok &= expect(miss > kOldRadius + params.radius,
+                                 "the end of the column really is outside the old hit sphere");
+                }
+            }
+
+            log::info("column: {:.1f} x {:.1f} x {:.1f} at ({:.0f} {:.0f} {:.0f}), solid over all "
+                      "{:.0f} units of its height",
+                      proxy.halfExtents.x * 2.0f, proxy.halfExtents.y * 2.0f,
+                      proxy.halfExtents.z * 2.0f, centre.x, centre.y, centre.z,
+                      proxy.halfExtents.y * 2.0f);
         }
     }
 

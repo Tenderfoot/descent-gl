@@ -4,6 +4,7 @@
 #include "game/level.h"
 #include "sim/collision.h"
 #include "sim/props.h"
+#include "sim/proxy.h"
 #include "sim/robots.h"
 #include "sim/ship.h"
 
@@ -145,11 +146,6 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
     return hits;
 }
 
-// Objects are spheres for hit purposes. Their meshes are small and roughly
-// round, and a projectile test against 20 triangles per object per step is not
-// worth the accuracy.
-constexpr float kObjectRadius = 2.4f;
-
 // `events` is the sound queue and may be null. Only the explosion is emitted
 // here: a bolt landing on a wall, a robot or a crate is a different noise each
 // time, and the caller is the only place that knows which of those it was.
@@ -250,6 +246,24 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         body.index = index;
     };
 
+    // The same decision for a volume that is not a sphere. Kept beside
+    // `consider` rather than folded into it: the sphere path is the one every
+    // body takes, it runs per robot per shot, and it should not grow a branch
+    // for the handful of objects that are boxes.
+    const auto considerProxy = [&](const PlacedProxy& proxy, int bodySegment,
+                                   CombatHit::Kind kind, int index) {
+        const float along = rayProxyDistance(proxy, origin, direction, params.radius);
+        if (along < 0.0f || along > maxDistance) return;
+        if (haveBody ? along >= bestBody : along > bestBody) return;
+        bestBody = along;
+        haveBody = true;
+        body.kind = kind;
+        body.distance = along;
+        body.point = origin + direction * along;
+        body.segment = bodySegment;
+        body.index = index;
+    };
+
     // The player, for robot fire. Checked first so that where a robot's bolt
     // reaches the player and a crate at the same instant, the player is hit.
     if (params.owner >= 0) {
@@ -267,10 +281,17 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
     }
 
     // Destructible scenery, which either side can hit.
+    //
+    // Against the object's own proxy volume, not a nominal radius. Every object
+    // used to be a 2.4 unit sphere on its origin, which for `pillar.obj` - a
+    // column 4.4 x 18 x 4.4 - meant a shot anywhere but its middle passed
+    // through and hit the wall behind. See `sim::ProxyVolume`.
     for (int i = 0; i < state.objects.count; ++i) {
         if (!state.objects.alive[static_cast<size_t>(i)]) continue;
+        if (static_cast<size_t>(i) >= level.objectProxies.size()) continue;
         const LevelObject& object = level.objects[static_cast<size_t>(i)];
-        consider(object.position, kObjectRadius, object.segment, CombatHit::Kind::Object, i);
+        considerProxy(level.objectProxies[static_cast<size_t>(i)], object.segment,
+                      CombatHit::Kind::Object, i);
     }
 
     // Floating lights. They take no damage - shooting one moves it, which is

@@ -88,7 +88,7 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     // pattern, and under GL_GREATER those pixels stop counting the cap. The
     // slab's +Z face was bit-identical and clean; its -Z face fizzed with
     // false self-shadow wherever a light was close enough to make it visible.
-    // Hence one cube: see cubeModel() in render/model.h.
+    // Hence one cube: see cubeModel() in render/model_data.h.
     {
         const ModelData slab = cubeModel();
         slabMesh_ = std::make_unique<Mesh>(toMesh(slab));

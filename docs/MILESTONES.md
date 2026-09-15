@@ -1889,3 +1889,55 @@ comes back as its default. The cycle itself belongs to `stepCombat`, through
 | Old weapon bindings do not carry over | ✅ `--settings-test`: a file with `weapon1`/`weapon3`/`weapon5` loads with all five weapon keys at their defaults |
 | The controls screen shows them | ✅ `--loop-test` reads `1`, `2`, `3`, `4`, `G` off the rebinding rows; `--controls-menu` at 1600x900 reports `1-7 of 25` actions |
 | Per-frame allocations | ✅ `--controls-menu` run: `sim step none on 0 of 110 frames`, `draw path none on 0 of 110` |
+
+## Proxy volumes: a column is solid over all 18 units of it
+
+Every entry in `Level::objects` was hit-tested as one hardcoded 2.4-unit sphere
+on its origin — `kObjectRadius` in `src/sim/combat.cpp`. `pillar.obj` is a
+tapered octagonal column 4.4 × 18 × 4.4, and `mine01` places both of its
+pillars at `y = 9`, so each spans `y = 0…18`. Only the middle 4.8 units of an
+18-unit column stopped a shot: aim at the top of a pillar and the bolt passed
+through it and hit the wall behind, in full view of the player.
+
+Objects now carry a `sim::PlacedProxy` — a sphere or an oriented box derived
+from the model's own bounds at load — in `Level::objectProxies`, parallel to
+`Level::objects`. The combat trace asks that instead of a nominal radius.
+
+The seam matters as much as the fix. `sim` still never reads an asset:
+`src/sim/proxy.h` is glm and nothing else, `src/render/model_data.h` is the
+GL-free half of `render/model.h` split out so a model's geometry can be had
+without its drawable form, and `src/game/proxies.cpp` is the only place that
+sees both. `resolveObjectProxies` is called from `loadLevel` rather than from
+each caller, because eleven headless tests, the asset validator and the game
+all load levels, and a table one of them can forget to build is a table that is
+empty in exactly the test meant to catch it.
+
+Not the mesh: a pillar is 28 triangles and the renderer already extrudes every
+one of them into a stencil volume, but nobody resolves an octagon's facets at
+flying speed, and a box is one clamp where the triangle test needs seven
+barycentric regions. See `docs/ARCHITECTURE.md`, "Proxy volumes".
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| `--validate-assets` | ✅ 0 failures |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS |
+| `--weapons-test` | ✅ PASS |
+| `--robots-test` | ✅ PASS |
+| `--loop-test` | ✅ PASS |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| A column is solid end to end | ✅ `--weapons-test`: `column bottom: hit at 8.3u`, `column middle: hit at 6.5u`, `column top: hit at 8.3u` |
+| The two ends really were broken before | ✅ `--weapons-test` asserts it: the old 2.4u sphere sat **5.6u off the ray** at both the bottom and the top, so both used to miss |
+| Proxies come from the models | ✅ level load reports `proxy 'pillar': box 4.4 x 18.0 x 4.4`, matching `pillar.obj`'s bounds exactly |
+| `--resize-test` | ✅ completed, 67.0 steps/s against 67.9 on the same run on `main` (median of three each; software rendering, 1920×1080, bounded by the loop's frame clamp) |
+| Per-frame allocations | ✅ `--controls-menu` run: `sim step none on 0 of 110 frames`, `draw path none on 0 of 110` |
+
+Not fixed here, and not caused here: a gameplay run (`--frames 120` in
+`mine01`) reports `sim step SOME on 1 of 90 frames, draw path SOME on 26 of 90`.
+The same run on `main` reports the identical counts at the identical frames, so
+it is pre-existing and wants its own change.

@@ -1042,6 +1042,58 @@ carries the mapping for the alive check.
 Homing acquires **robots first**, then destructible scenery, and steers at
 whichever it locked; a target that dies is flown past.
 
+### Proxy volumes
+
+`src/sim/proxy.h`. Every object carries a `PlacedProxy` — a sphere or an
+oriented box, derived from its own model's bounds at load and parallel to
+`Level::objects` in `Level::objectProxies`.
+
+Before it, the combat trace tested every object as one hardcoded 2.4-unit
+sphere on its origin. `pillar.obj` is a column 4.4 × 18 × 4.4, and `mine01`
+places both of its pillars at `y = 9`, so each spans `y = 0…18` — **only the
+middle 4.8 units of an 18-unit column stopped a shot.** Aim at the top of a
+pillar and the bolt went through it and hit the wall behind, in full view of
+the player. One radius cannot serve both a crate and a column.
+
+Not the mesh, though. A pillar is 28 triangles and the renderer already
+extrudes every one of them into a stencil volume, but nobody can resolve an
+octagon's facets at the speed a ship crosses a room, and per-triangle queries
+in the sim step are where a projectile system finds its bugs. The box is one
+clamp where the triangle test needs seven barycentric regions, and it has no
+edge or vertex case to get wrong.
+
+The seam is deliberate, and it is the reason this took a new file rather than
+an include:
+
+- **`sim` still never reads an asset.** `ProxyVolume` is glm and nothing else.
+- **`render/model_data.h`** is the GL-free half of `render/model.h`, split out
+  so that something can have a model's geometry without its drawable form.
+  `model.h` pulls in `render/mesh.h` and therefore `render/gl.h`.
+- **`game/proxies.cpp`** is the only place that sees both. It reads OBJ bounds
+  and writes finished `PlacedProxy` values into the level.
+
+`resolveObjectProxies` is called from **`loadLevel`**, not from each caller.
+Eleven headless tests, the asset validator and the game all load levels, and a
+proxy table one of them can forget to build is a table that is empty in exactly
+the test meant to catch it being empty.
+
+Robot entries get a proxy too, and it is never read: `initObjects` marks them
+dead so the robot list owns them, and a robot's body carries its authored
+`def.radius` rather than its model's bounds. Resolving them anyway keeps the
+function independent of the robot config, which `loadLevel` does not have.
+
+A projectile with a thickness of its own inflates the volume by its radius.
+For a sphere that is exact; for a box the true swept shape has rounded corners,
+so a shot passing within the bolt's radius of a corner counts as a hit where
+strictly it grazed past. That errs towards stopping at something the player can
+plainly see, which is the direction to be wrong in.
+
+`--weapons-test` fires at the bottom, middle and top of the level's
+column-shaped object and requires all three to hit. It also reports how far the
+old 2.4-unit sphere sat from each ray and **asserts that the two ends really
+were outside it** — 5.6 units off in `mine01` — so the test is provably about
+the bug rather than three shots that happened to work.
+
 ### Fire points
 
 `kShipFirePoints` in `src/sim/ship.h` must stay on the ship model's widest

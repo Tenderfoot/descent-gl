@@ -1,6 +1,7 @@
 #include "game/level.h"
 
 #include "core/log.h"
+#include "game/proxies.h"
 #include "sim/gameflow.h"
 #include "sim/geometry.h"
 
@@ -609,6 +610,10 @@ Level loadLevel(const std::string& path) {
                        obj.type, obj.position.x, obj.position.y, obj.position.z);
         }
     }
+
+    // After the objects have their segments, because a proxy is only useful
+    // once the thing it belongs to is known to be somewhere real.
+    resolveObjectProxies(level);
 
     int portals = 0;
     int altDiagonals = 0;
