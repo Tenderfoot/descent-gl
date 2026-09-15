@@ -1954,9 +1954,53 @@ to one per `fireInterval` while the beam itself is drawn every step.
 
 Beams are quads turned about their own axis to face the viewer, built into the
 same buffer as the sprites so the unlit pass keeps to one draw. Looking straight
-down a beam the side vector degenerates and it vanishes, which is correct.
-`RenderState` does not interpolate them: a beam is struck at one instant and
-lives a tenth of a second, so blending it between steps would smear it.
+down a beam the side vector degenerates; the camera's own right vector is the
+stable answer there, because a beam pointed at the eye must stay visible rather
+than vanish or flip. `RenderState` does not interpolate them: a beam is struck
+at one instant and lives a tenth of a second, so blending it between steps
+would smear it.
+
+### Hand-drawn pickup sprites
+
+Most of what the unlit pass draws is a glow, and a glow is cheaper to compute
+than to store: `billboard.frag` makes a squared radial falloff out of the quad's
+own UVs and no texture is involved. Pickups are the exception, because a health
+cross and a key are shapes rather than blobs, and no falloff function is going
+to produce them.
+
+`render/sprites.h` is the counterpart to `render/procedural.h`: that file makes
+tiles because nobody drew any, this one reads the ones somebody did. The three
+images in `assets/images/` become the layers of a second `TextureArray`, and a
+pickup kind names a layer. The health and energy art carries its own colour and
+is tinted white; the key is a white template, and blue, yellow and red keys
+differ by nothing but the tint applied to it. The four kinds with no art —
+laser, concussion, homing, flares — still take the procedural path, so both
+kinds of quad coexist.
+
+They coexist in one draw call, which is the constraint the design is built
+around. The layer index rides in the vertex alongside the colour and the UV, and
+a negative layer is the sentinel for "no texture, use the falloff" — the same
+trick `hud.frag` plays with a negative UV to keep bars and glyphs in one draw. A
+texture array rather than an atlas because the layers are same-sized squares
+already, so there are no atlas seams for the mip chain to bleed across.
+
+Two things about the pixels. They are **premultiplied** at load, because the
+pass is additive (`GL_ONE, GL_ONE`) and additive blending never looks at alpha:
+the fade at a sprite's edge has to be carried in the colour or it is not carried
+at all. Premultiplying also fixes the dark fringe that averaging straight alpha
+produces — both in the load-time box filter and again in the mip chain the GPU
+builds — because a transparent pixel's RGB is black and would otherwise be
+averaged in as if it were visible. And they are **resampled to 256** to match
+`kWallTileSize`: the art is 1254 square, which is twenty-four times the pixels a
+quad a hundred across on screen can show, and the mip chain would carry all of
+them.
+
+`stbi_set_flip_vertically_on_load` is the mirror of the
+`stbi_flip_vertically_on_write` in `screenshot.cpp`, and for the same reason: a
+PNG's first row is its top and a GL texture's first row is its bottom. Nothing
+else in the project reads an image file, so the global flag has no other caller
+to surprise — the comment in `sprites.cpp` says so, because the next image
+loader will need to know.
 
 ### Disabled ships
 

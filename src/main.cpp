@@ -25,6 +25,7 @@
 #include "core/alloc_count.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
+#include "render/sprites.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/flight.h"
@@ -884,20 +885,47 @@ int main(int argc, char** argv) {
             view.position = pickup.position;
             const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(clock.seconds()) * 3.0f +
                                                          static_cast<float>(i));
+            // A kind with hand-drawn art names its sprite layer and tints it;
+            // the rest keep the colour-only glow and leave `sprite` at -1. The
+            // health and energy sprites carry their own colour, so white is
+            // what shows them as drawn - the pulse still rides on top. The key
+            // art is a white template, so there the tint is the whole point and
+            // the three keys differ by nothing else.
+            view.sprite = -1;
             switch (pickup.kind) {
-                case dvk::PickupKind::Shield: view.color = glm::vec3(0.4f, 1.0f, 0.55f); break;
-                case dvk::PickupKind::Energy: view.color = glm::vec3(0.35f, 0.8f, 1.0f); break;
+                case dvk::PickupKind::Shield:
+                    view.sprite = dvk::gl::SpriteHealth;
+                    view.color = glm::vec3(1.0f);
+                    break;
+                case dvk::PickupKind::Energy:
+                    view.sprite = dvk::gl::SpriteEnergy;
+                    view.color = glm::vec3(1.0f);
+                    break;
                 case dvk::PickupKind::LaserUpgrade: view.color = glm::vec3(1.0f, 0.55f, 0.9f); break;
                 case dvk::PickupKind::Concussion: view.color = glm::vec3(1.0f, 0.6f, 0.3f); break;
                 case dvk::PickupKind::Homing: view.color = glm::vec3(0.6f, 0.85f, 1.0f); break;
                 case dvk::PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
-                case dvk::PickupKind::KeyBlue: view.color = glm::vec3(0.35f, 0.55f, 1.0f); break;
-                case dvk::PickupKind::KeyYellow: view.color = glm::vec3(1.0f, 0.9f, 0.3f); break;
-                case dvk::PickupKind::KeyRed: view.color = glm::vec3(1.0f, 0.35f, 0.3f); break;
+                case dvk::PickupKind::KeyBlue:
+                    view.sprite = dvk::gl::SpriteKey;
+                    view.color = glm::vec3(0.35f, 0.55f, 1.0f);
+                    break;
+                case dvk::PickupKind::KeyYellow:
+                    view.sprite = dvk::gl::SpriteKey;
+                    view.color = glm::vec3(1.0f, 0.9f, 0.3f);
+                    break;
+                case dvk::PickupKind::KeyRed:
+                    view.sprite = dvk::gl::SpriteKey;
+                    view.color = glm::vec3(1.0f, 0.35f, 0.3f);
+                    break;
                 case dvk::PickupKind::Count: break;
             }
             view.color *= pulse;
-            view.size = pickup.kind >= dvk::PickupKind::KeyBlue ? 1.1f : 0.85f;
+            // A sprite is drawn larger than a glow of the same weight: the art
+            // is padded inside its square, so the shape itself covers rather
+            // less of the quad than the falloff does.
+            view.size = pickup.kind >= dvk::PickupKind::KeyBlue ? 1.6f
+                        : view.sprite >= 0                      ? 1.3f
+                                                                : 0.85f;
         }
 
         // Every light that is not baked into the level, rebuilt each frame.

@@ -12,7 +12,12 @@ namespace dvk::gl {
 // calls never have to be split by material.
 class TextureArray {
 public:
-    TextureArray(int size, const std::vector<std::vector<uint8_t>>& layers, const char* label);
+    // Tiles repeat across a surface; sprites are a picture with an edge, and
+    // wrapping one samples the far side of it along that edge.
+    enum class Wrap { Repeat, ClampToEdge };
+
+    TextureArray(int size, const std::vector<std::vector<uint8_t>>& layers, const char* label,
+                 Wrap wrap = Wrap::Repeat);
     ~TextureArray();
     TextureArray(const TextureArray&) = delete;
     TextureArray& operator=(const TextureArray&) = delete;

@@ -9,6 +9,7 @@
 #include "sim/robots.h"
 #include "render/camera.h"
 #include "render/procedural.h"
+#include "render/sprites.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -26,6 +27,7 @@ namespace {
 constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr int kWallTileSize = 256;
+constexpr int kPickupSpriteSize = 256;
 
 constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
 constexpr float kChaseLookAhead = 6.0f;
@@ -96,6 +98,13 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     }
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
+    // Clamped rather than repeating: a sprite is a picture with an edge, and
+    // the art is authored far larger than kPickupSpriteSize, so it is resampled
+    // once here instead of carrying twenty times the pixels for a quad that is
+    // a hundred across on screen.
+    pickupSprites_ = std::make_unique<TextureArray>(
+        kPickupSpriteSize, loadPickupSprites(kPickupSpriteSize), "pickups",
+        TextureArray::Wrap::ClampToEdge);
 
     shipModel_ = loadObj("assets/models/ship.obj");
     ship_ = std::make_unique<Mesh>(toMesh(shipModel_));
@@ -809,7 +818,12 @@ void Renderer::buildBillboards(const RenderState& rs) {
     for (int i = 0; i < rs.pickupCount; ++i) {
         const RenderState::PickupView& pickup = rs.pickups[static_cast<size_t>(i)];
         if (!pickup.present) continue;
-        billboards_.add(pickup.position, right, up, pickup.size, pickup.color);
+        if (pickup.sprite >= 0) {
+            billboards_.addSprite(pickup.position, right, up, pickup.size, pickup.color,
+                                  pickup.sprite);
+        } else {
+            billboards_.add(pickup.position, right, up, pickup.size, pickup.color);
+        }
     }
 
     // Robot eyes. Emissive, so they read in total darkness - which matters
@@ -1328,6 +1342,7 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         // Additive, depth-tested but not depth-writing: a bolt lights what is
         // behind it and never occludes anything.
         billboardShader_->bind();
+        pickupSprites_->bind(2);
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE);
         glDepthMask(GL_FALSE);

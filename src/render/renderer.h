@@ -279,6 +279,7 @@ private:
     std::unique_ptr<Shader> debugLineShader_;
 
     std::unique_ptr<TextureArray> walls_;
+    std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<LevelMesh> levelMesh_;
     std::unique_ptr<Mesh> ship_;
     std::unique_ptr<Mesh> gizmo_;

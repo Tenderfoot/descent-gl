@@ -33,6 +33,15 @@ public:
     void add(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up, float size,
              const glm::vec3& color);
 
+    // The same quad, but painted from a layer of the sprite array bound to the
+    // pass rather than from the shader's radial falloff. The layer rides in the
+    // vertex so textured and untextured quads still share one buffer and one
+    // draw; `kNoTexture` is what add() writes, and the shader branches on it.
+    void addSprite(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                   float size, const glm::vec3& tint, int layer);
+
+    static constexpr float kNoTexture = -1.0f;
+
     // A beam between two points: a quad turned about its own axis to face the
     // viewer. Same vertex format and same buffer as the sprites above, so a
     // corridor full of tracers still costs the unlit pass one draw.
@@ -49,7 +58,11 @@ private:
         glm::vec3 position;
         glm::vec3 color;
         float u, v;
+        float layer;
     };
+
+    void quad(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up, float size,
+              const glm::vec3& color, float layer);
 
     std::vector<Vertex> vertices_;
     GLuint vao_ = 0, vbo_ = 0;
