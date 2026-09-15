@@ -35,8 +35,8 @@ private:
     GLsizei indexCount_ = 0;
 };
 
-// A unit cube centred on the origin, 24 vertices (per-face normals and UVs),
-// 12 triangles, closed.
-Mesh makeCube();
+// There is no cube factory here. A cube comes from cubeModel() in
+// render/model.h through toMesh(), so that anything drawing one can build its
+// shadow occluder from the same triangles - see cubeModel().
 
 } // namespace dvk::gl

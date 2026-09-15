@@ -754,6 +754,29 @@ software GL a pillar under the headlight rendered almost entirely black before
 this and fully lit after, and the chase-camera ship's hull went from speckled
 to clean.
 
+Matching the matrix and the expression is **necessary but not sufficient**.
+It makes the cap's *vertices* bit-identical, and the depth test compares the
+*rasterized interior* — which the hardware derives from whichever three corners
+the triangle was built from. So the occluder has to be built from the same
+triangle list, in the same corner order, as the mesh that is drawn. Every
+caster derives both from one `ModelData`: the ship and the props from their
+OBJ, the mine from its own wall triangles, and now the door slabs from
+`cubeModel()`.
+
+The door slabs were the exception and the last place this artifact lived. They
+were drawn from `makeCube()` and cast from a second cube typed out beside them
+in `Renderer`. Both were ±0.5 cubes, so every vertex matched to the bit; they
+agreed on the +Z and −Y faces, rotated the corner order on +Y, and split −Z,
++X and −X across the *opposite diagonal*. Two triangulations of one flat quad
+describe the same plane and still disagree by an ulp across the middle of it,
+so under `GL_GREATER` scattered interior pixels stopped counting the cap, kept
+the uncancelled back cap at infinity, and read as shadowed. A door slab's two
+large faces are its ±Z: the +Z face was bit-identical and clean, and the −Z
+face — always the same side of every door, since `Door::corners` is wound from
+the owning segment's side — fizzed wherever a light sat close enough to make
+the difference visible. The blob tracked the light's own falloff, because an
+unlit pixel that goes further unlit shows nothing.
+
 ### `GL_GREATER`, and why it is not `GL_GEQUAL`
 
 The volume pass uses `glDepthFunc(GL_GREATER)` where the rest of the frame uses

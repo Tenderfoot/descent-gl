@@ -61,32 +61,4 @@ void Mesh::draw() const {
     glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
 }
 
-Mesh makeCube() {
-    const glm::vec3 n[6] = {{0, 0, 1}, {0, 0, -1}, {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}};
-    // Corner offsets per face, counter-clockwise when seen from outside.
-    const glm::vec3 corners[6][4] = {
-        {{-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}},        // +Z
-        {{1, -1, -1}, {-1, -1, -1}, {-1, 1, -1}, {1, 1, -1}},    // -Z
-        {{1, -1, 1}, {1, -1, -1}, {1, 1, -1}, {1, 1, 1}},        // +X
-        {{-1, -1, -1}, {-1, -1, 1}, {-1, 1, 1}, {-1, 1, -1}},    // -X
-        {{-1, 1, 1}, {1, 1, 1}, {1, 1, -1}, {-1, 1, -1}},        // +Y
-        {{-1, -1, -1}, {1, -1, -1}, {1, -1, 1}, {-1, -1, 1}},    // -Y
-    };
-    const glm::vec2 uv[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-
-    std::vector<Vertex> vertices;
-    std::vector<GLuint> indices;
-    vertices.reserve(24);
-    indices.reserve(36);
-
-    for (int f = 0; f < 6; ++f) {
-        const auto base = static_cast<GLuint>(vertices.size());
-        for (int c = 0; c < 4; ++c) {
-            vertices.push_back({corners[f][c] * 0.5f, n[f], uv[c]});
-        }
-        indices.insert(indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
-    }
-    return Mesh(vertices, indices);
-}
-
 } // namespace dvk::gl

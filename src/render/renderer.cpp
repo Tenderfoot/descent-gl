@@ -72,14 +72,21 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
 
     // One unit cube reused for every door half. A door is a box; there is no
     // reason for it to be anything else.
-    slabMesh_ = std::make_unique<Mesh>(makeCube());
+    //
+    // The drawn mesh and the occluder come from ONE ModelData, the same way the
+    // ship, the robots and the props do. They used to be two separately
+    // hand-written cubes that happened to agree on four of the six faces and
+    // split the other two across the opposite diagonal. Every vertex matched,
+    // so the volume's front cap started from the same corners - but a quad
+    // triangulated the other way has its depth plane set up from different
+    // corners, the rasterized interior lands an ulp apart in a scattered
+    // pattern, and under GL_GREATER those pixels stop counting the cap. The
+    // slab's +Z face was bit-identical and clean; its -Z face fizzed with
+    // false self-shadow wherever a light was close enough to make it visible.
+    // Hence one cube: see cubeModel() in render/model.h.
     {
-        ModelData slab;
-        slab.positions = {
-            {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f},
-            {-0.5f, -0.5f, 0.5f},  {0.5f, -0.5f, 0.5f},  {0.5f, 0.5f, 0.5f},  {-0.5f, 0.5f, 0.5f}};
-        slab.triangles = {{0, 2, 1}, {0, 3, 2}, {4, 5, 6}, {4, 6, 7}, {0, 1, 5}, {0, 5, 4},
-                          {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+        const ModelData slab = cubeModel();
+        slabMesh_ = std::make_unique<Mesh>(toMesh(slab));
         slabOccluderMesh_ = buildOccluder(slab.positions, slab.triangles, {}, "door slab");
     }
     doorSlabs_.resize(static_cast<size_t>(sim::kMaxDoors) * 2);
@@ -96,7 +103,7 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         buildOccluder(shipModel_.positions, shipModel_.triangles, {}, "assets/models/ship.obj");
     shipOccluder_.reset(&shipOccluderMesh_, glm::mat4(1.0f));
 
-    gizmo_ = std::make_unique<Mesh>(makeCube());
+    gizmo_ = std::make_unique<Mesh>(toMesh(cubeModel()));
 
     loadRobotMeshes(robots);
     setLevel(level);

@@ -6,6 +6,8 @@
 
 #include <glm/geometric.hpp>
 
+#include <cstdint>
+
 namespace dvk::gl {
 
 ModelData loadObj(const std::string& path) {
@@ -80,6 +82,36 @@ Mesh toMesh(const ModelData& model) {
     }
 
     return Mesh(vertices, indices);
+}
+
+ModelData cubeModel() {
+    ModelData cube;
+    cube.positions = {
+        {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f}, {-0.5f, 0.5f, -0.5f},
+        {-0.5f, -0.5f, 0.5f},  {0.5f, -0.5f, 0.5f},  {0.5f, 0.5f, 0.5f},  {-0.5f, 0.5f, 0.5f}};
+
+    // Four corners per face, counter-clockwise seen from outside, split across
+    // the c0-c2 diagonal. One table, so the drawn triangles and the cast ones
+    // cannot drift apart.
+    const uint32_t faces[6][4] = {
+        {4, 5, 6, 7},   // +Z
+        {1, 0, 3, 2},   // -Z
+        {5, 1, 2, 6},   // +X
+        {0, 4, 7, 3},   // -X
+        {7, 6, 2, 3},   // +Y
+        {0, 1, 5, 4},   // -Y
+    };
+    const glm::vec2 uv[4] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+
+    cube.triangles.reserve(12);
+    cube.uvs.reserve(36);
+    for (const auto& f : faces) {
+        cube.triangles.push_back({f[0], f[1], f[2]});
+        cube.uvs.insert(cube.uvs.end(), {uv[0], uv[1], uv[2]});
+        cube.triangles.push_back({f[0], f[2], f[3]});
+        cube.uvs.insert(cube.uvs.end(), {uv[0], uv[2], uv[3]});
+    }
+    return cube;
 }
 
 } // namespace dvk::gl

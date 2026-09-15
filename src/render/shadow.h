@@ -116,6 +116,18 @@ private:
 // last bit differs - which is what the ship, the robots, the pillars and the
 // door slabs all showed. The mine's transform is the identity, so for it the
 // two approaches coincide and it never had the problem.
+//
+// Matching the matrix and the expression is NECESSARY BUT NOT SUFFICIENT. It
+// makes the cap's VERTICES bit-identical; the depth test compares the
+// RASTERIZED INTERIOR, and the hardware derives that from whichever three
+// corners the triangle was built from. So the occluder must also be built from
+// the same triangle list, in the same corner order, as the mesh that is drawn -
+// which is why every caster here derives both from one ModelData. Two
+// triangulations of the same flat quad across opposite diagonals describe the
+// same plane and still disagree by an ulp across the middle of it. That was the
+// door slab: drawn from one hand-written cube and cast from another, identical
+// vertices, opposite diagonal on three of the six faces, and one face of every
+// door fizzed with false self-shadow while the other stayed clean.
 int appendShadowVolume(const Occluder& occluder, const glm::vec3& lightPos,
                        std::vector<glm::vec4>& vertices, std::vector<uint8_t>& facesLight);
 
