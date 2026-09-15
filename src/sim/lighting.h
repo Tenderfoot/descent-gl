@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/level.h"
+#include "sim/occluders.h"
 
 #include <glm/vec3.hpp>
 
@@ -29,10 +30,10 @@ struct PropState;
 //
 // Two deliberate differences from what ends up on screen:
 //
-//  1. Only the mine occludes. The renderer also casts shadows from robots,
-//     props, door slabs and the ship; this query traces the wall triangles and
-//     the door faces and nothing else. A robot standing between the player and
-//     a lamp darkens the picture but not this number.
+//  1. As of M8 the mine is no longer the only occluder - pass an OccluderSet
+//     and robots, props, the ship and the level's objects block light here too,
+//     the way they always have on screen. Without one the query falls back to
+//     walls and door faces alone, which is what every caller did before.
 //  2. The shadow budget does not apply. A light past the renderer's cap still
 //     lights but stops casting, so on screen it shines through walls. Here it
 //     never does. That makes this query the stricter of the two, and the one
@@ -71,6 +72,12 @@ struct IlluminationQuery {
     // useful for telling "no light reaches here" apart from "a wall is in the
     // way".
     bool shadows = true;
+    // WHOSE light this is being measured. Left out of the occluder set, because
+    // a body cannot shadow itself: the samples start at its own centre, so
+    // including its proxy puts every shadow ray inside solid geometry and the
+    // answer is always dark. Default means "a point in the air, belonging to
+    // nobody" and excludes nothing.
+    OccluderId owner{};
 };
 
 struct Illumination {
@@ -110,19 +117,25 @@ struct Illumination {
 // other. Start from a default-constructed Illumination, add each list, read the
 // result. Allocates nothing.
 void addIllumination(Illumination& out, const IlluminationQuery& query, const Level& level,
-                     const std::vector<Light>& lights, const SolidDoors* doors = nullptr);
+                     const std::vector<Light>& lights, const SolidDoors* doors = nullptr,
+                     const OccluderSet* occluders = nullptr);
 
 // The single-list convenience, for callers that have only one.
 Illumination illuminationAt(const IlluminationQuery& query, const Level& level,
-                            const std::vector<Light>& lights, const SolidDoors* doors = nullptr);
+                            const std::vector<Light>& lights, const SolidDoors* doors = nullptr,
+                            const OccluderSet* occluders = nullptr);
 
 // Adds a light the simulation owns directly - a bolt in flight, a burning
 // flare, the flash off a gun - which carries no precomputed segment set to cull
 // with. Falloff plus one shadow ray is the whole answer; there are only ever a
 // handful of these near any one point, so skipping the cull costs nothing.
+// `emitter` is the thing carrying the light, left out of the occluder set for
+// the same reason `query.owner` is: a floating light inside its own housing
+// would otherwise put itself out.
 void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
                    const glm::vec3& position, float radius, float intensity,
-                   const SolidDoors* doors = nullptr);
+                   const SolidDoors* doors = nullptr, const OccluderSet* occluders = nullptr,
+                   const OccluderId& emitter = OccluderId{});
 
 // The same, for a loose light with a cone. A swinging lamp is a spot, and the
 // cone is the whole point of it: standing outside the circle it throws is
@@ -130,7 +143,9 @@ void addLooseLight(Illumination& out, const IlluminationQuery& query, const Leve
 // in exactly the place the player is relying on.
 void addLooseSpot(Illumination& out, const IlluminationQuery& query, const Level& level,
                   const glm::vec3& position, const glm::vec3& direction, float coneDegrees,
-                  float radius, float intensity, const SolidDoors* doors = nullptr);
+                  float radius, float intensity, const SolidDoors* doors = nullptr,
+                  const OccluderSet* occluders = nullptr,
+                  const OccluderId& emitter = OccluderId{});
 
 // Whether the player can be seen at all.
 //
@@ -165,7 +180,8 @@ struct PlayerVisibility {
 PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
                                   const WeaponConfig& weapons, const glm::vec3& position,
                                   int segment, const SolidDoors* doors = nullptr,
-                                  const PropState* props = nullptr);
+                                  const PropState* props = nullptr,
+                                  const OccluderSet* occluders = nullptr);
 
 // The kinds of light the simulation owns, as distinct from the level's authored
 // ones: a bolt in flight, a burning flare, an explosion flash, a floating light

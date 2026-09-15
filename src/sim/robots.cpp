@@ -436,7 +436,8 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
-                const SolidDoors* doors, EventQueue* events, const PropState* props) {
+                const SolidDoors* doors, EventQueue* events, const PropState* props,
+                const OccluderSet* occluders) {
     (void)weapons;
 
     const int shutDoors = doors ? doors->count : 0;
@@ -519,6 +520,20 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             // The ray stops at the first wall or shut door; if that is farther
             // than the player, nothing is in the way.
             canSee = !hit.hit || hit.distance >= distance - 0.5f;
+
+            // And now the things that are not the mine. This is where hiding
+            // behind a pillar became real: until M8 the ray above was the whole
+            // test, so a column broke nothing, and an alert robot tracked the
+            // player straight through it.
+            //
+            // The robot doing the looking and the player being looked at are
+            // both left out, or every robot would be blinded by its own hull
+            // and nothing would ever see anybody.
+            if (canSee && occluders) {
+                canSee = !occluded(*occluders, robot.body.position, player.position,
+                                   OccluderId{OccluderKind::Robot, ri},
+                                   OccluderId{OccluderKind::Ship, -1});
+            }
         }
 
         // Line of sight is necessary but no longer sufficient. A robot that has

@@ -85,7 +85,8 @@ void accumulateSource(Illumination& out, std::array<float, kIlluminationSamples>
                       const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
                       const IlluminationQuery& query, const Level& level, LightType type,
                       const glm::vec3& position, float radius, float intensity,
-                      const glm::vec3& direction, float coneDegrees, const SolidDoors* doors) {
+                      const glm::vec3& direction, float coneDegrees, const SolidDoors* doors,
+                      const OccluderSet* occluders, const OccluderId& emitter) {
     bool reaches = false;
     bool visible = false;
     for (int s = 0; s < sampleCount; ++s) {
@@ -103,6 +104,10 @@ void accumulateSource(Illumination& out, std::array<float, kIlluminationSamples>
                 const RayHit hit =
                     raycast(level, p, toLight / distance, distance, query.segment, doors);
                 if (hit.hit && hit.distance < distance - kShadowSkin) continue;
+                // The mine did not stop it; something standing in the mine
+                // still might. The body being asked about and the thing
+                // carrying the light are both left out - see OccluderId.
+                if (occluders && occluded(*occluders, p, position, query.owner, emitter)) continue;
             }
         }
 
@@ -118,16 +123,17 @@ void accumulateSource(Illumination& out, std::array<float, kIlluminationSamples>
 void accumulateLight(Illumination& out, std::array<float, kIlluminationSamples>& perSample,
                      const std::array<glm::vec3, kIlluminationSamples>& samples, int sampleCount,
                      const IlluminationQuery& query, const Level& level, const Light& light,
-                     const SolidDoors* doors) {
+                     const SolidDoors* doors, const OccluderSet* occluders) {
     accumulateSource(out, perSample, samples, sampleCount, query, level, light.type,
                      light.position, light.radius, light.intensity, light.direction,
-                     light.coneDegrees, doors);
+                     light.coneDegrees, doors, occluders, OccluderId{});
 }
 
 } // namespace
 
 void addIllumination(Illumination& out, const IlluminationQuery& query, const Level& level,
-                     const std::vector<Light>& lights, const SolidDoors* doors) {
+                     const std::vector<Light>& lights, const SolidDoors* doors,
+                     const OccluderSet* occluders) {
     if (query.segment < 0 || query.segment >= level.segmentCount()) return;
 
     std::array<glm::vec3, kIlluminationSamples> samples{};
@@ -144,7 +150,8 @@ void addIllumination(Illumination& out, const IlluminationQuery& query, const Le
             light.segments.end()) {
             continue;
         }
-        accumulateLight(out, perSample, samples, sampleCount, query, level, light, doors);
+        accumulateLight(out, perSample, samples, sampleCount, query, level, light, doors,
+                        occluders);
     }
 
     float total = 0.0f;
@@ -156,7 +163,8 @@ namespace {
 
 void addLooseSource(Illumination& out, const IlluminationQuery& query, const Level& level,
                     LightType type, const glm::vec3& position, float radius, float intensity,
-                    const glm::vec3& direction, float coneDegrees, const SolidDoors* doors) {
+                    const glm::vec3& direction, float coneDegrees, const SolidDoors* doors,
+                    const OccluderSet* occluders, const OccluderId& emitter) {
     if (query.segment < 0 || query.segment >= level.segmentCount()) return;
     if (radius <= 0.0f || intensity <= 0.0f) return;
 
@@ -166,7 +174,7 @@ void addLooseSource(Illumination& out, const IlluminationQuery& query, const Lev
     std::array<float, kIlluminationSamples> perSample{};
 
     accumulateSource(out, perSample, samples, sampleCount, query, level, type, position, radius,
-                     intensity, direction, coneDegrees, doors);
+                     intensity, direction, coneDegrees, doors, occluders, emitter);
 
     float total = 0.0f;
     for (int s = 0; s < sampleCount; ++s) total += perSample[static_cast<size_t>(s)];
@@ -177,30 +185,39 @@ void addLooseSource(Illumination& out, const IlluminationQuery& query, const Lev
 
 void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
                    const glm::vec3& position, float radius, float intensity,
-                   const SolidDoors* doors) {
+                   const SolidDoors* doors, const OccluderSet* occluders,
+                   const OccluderId& emitter) {
     addLooseSource(out, query, level, LightType::Point, position, radius, intensity,
-                   glm::vec3(0.0f, 0.0f, -1.0f), 45.0f, doors);
+                   glm::vec3(0.0f, 0.0f, -1.0f), 45.0f, doors, occluders, emitter);
 }
 
 void addLooseSpot(Illumination& out, const IlluminationQuery& query, const Level& level,
                   const glm::vec3& position, const glm::vec3& direction, float coneDegrees,
-                  float radius, float intensity, const SolidDoors* doors) {
+                  float radius, float intensity, const SolidDoors* doors,
+                  const OccluderSet* occluders, const OccluderId& emitter) {
     addLooseSource(out, query, level, LightType::Spot, position, radius, intensity, direction,
-                   coneDegrees, doors);
+                   coneDegrees, doors, occluders, emitter);
 }
 
 PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
                                  const WeaponConfig& weapons, const glm::vec3& position,
-                                 int segment, const SolidDoors* doors, const PropState* props) {
+                                 int segment, const SolidDoors* doors, const PropState* props,
+                                 const OccluderSet* occluders) {
     PlayerVisibility out;
     out.headlight = combat.player.headlightOn;
 
     IlluminationQuery query;
     query.point = position;
     query.segment = segment;
+    // THE SHIP IS NOT ALLOWED TO SHADOW ITSELF. This is a point query at the
+    // hull's own centre, so without this every shadow ray starts inside the
+    // ship's proxy, the player reads unlit against every light in the mine, and
+    // nothing ever notices them again. Not a flicker - the mechanic simply
+    // stops.
+    query.owner = OccluderId{OccluderKind::Ship, -1};
 
     Illumination lit;
-    addIllumination(lit, query, level, level.lights, doors);
+    addIllumination(lit, query, level, level.lights, doors, occluders);
 
     // Everything the player's own fight throws off. The muzzle flash is the one
     // that matters most: firing from the dark lights you up for as long as the
@@ -208,20 +225,21 @@ PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
     // any rule saying so.
     for (const Projectile& p : combat.projectiles.items) {
         if (!p.alive) continue;
-        addLooseLight(lit, query, level, p.position, p.lightRadius, p.lightIntensity, doors);
+        addLooseLight(lit, query, level, p.position, p.lightRadius, p.lightIntensity, doors,
+                      occluders);
     }
     for (const Flare& f : combat.flares.items) {
         if (!f.alive) continue;
         const float remaining = f.lifetime - f.age;
         const float fade = std::clamp(remaining / weapons.flareFade, 0.0f, 1.0f);
         addLooseLight(lit, query, level, f.position, weapons.flareRadius,
-                      weapons.flareIntensity * fade, doors);
+                      weapons.flareIntensity * fade, doors, occluders);
     }
     for (const Effect& e : combat.effects.items) {
         if (!e.alive || e.lightIntensity <= 0.0f) continue;
         const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
         addLooseLight(lit, query, level, e.position, e.lightRadius,
-                      e.lightIntensity * std::max(0.0f, 1.0f - k), doors);
+                      e.lightIntensity * std::max(0.0f, 1.0f - k), doors, occluders);
     }
 
     // The lights that are furniture rather than fire. A ball floating in a room
@@ -233,8 +251,11 @@ PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
         for (int i = 0; i < props->floatingCount; ++i) {
             const FloatingLight& ball = props->floating[static_cast<size_t>(i)];
             if (!ball.alive) continue;
+            // The ball IS an occluder and it is also the light: without naming
+            // it here it sits inside its own housing and puts itself out.
             addLooseLight(lit, query, level, ball.body.position, ball.lightRadius,
-                          ball.lightIntensity, doors);
+                          ball.lightIntensity, doors, occluders,
+                          OccluderId{OccluderKind::Prop, i});
         }
         // A lamp is a SPOT, and the cone is the whole point of it: standing
         // outside the circle it throws is standing in the dark, and reporting
@@ -243,8 +264,11 @@ PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
         for (int i = 0; i < props->swingingCount; ++i) {
             const SwingingLight& lamp = props->swinging[static_cast<size_t>(i)];
             if (!lamp.alive) continue;
+            // A swinging lamp hangs from the ceiling and is not in the
+            // occluder set at all, so it has nothing of its own to be blocked
+            // by; it still has to be blocked by everything else.
             addLooseSpot(lit, query, level, lamp.position, lamp.direction, lamp.coneDegrees,
-                         lamp.lightRadius, lamp.lightIntensity, doors);
+                         lamp.lightRadius, lamp.lightIntensity, doors, occluders);
         }
     }
 
@@ -254,9 +278,10 @@ PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
 }
 
 Illumination illuminationAt(const IlluminationQuery& query, const Level& level,
-                            const std::vector<Light>& lights, const SolidDoors* doors) {
+                            const std::vector<Light>& lights, const SolidDoors* doors,
+                            const OccluderSet* occluders) {
     Illumination result;
-    addIllumination(result, query, level, lights, doors);
+    addIllumination(result, query, level, lights, doors, occluders);
     return result;
 }
 

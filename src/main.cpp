@@ -316,6 +316,9 @@ int main(int argc, char** argv) {
     // nothing. See kMaxCollisionBodies.
     dvk::sim::BodySet bodies;
     dvk::sim::BodyResolveStats bodyStats;
+    // What stands between a light and a surface, or an eye and its target, and
+    // is not the mine. Rebuilt every step, never resized.
+    dvk::sim::OccluderSet occluders;
 
     // Sound. A container with no sound card is the ordinary case for this and
     // is a warning, not an error: the mixer still runs, nothing pulls from it,
@@ -786,9 +789,38 @@ int main(int argc, char** argv) {
                 pendingWeaponSelection = -1;
                 pendingSecondaryCycle = false;
             }
+            // Built before the robots look, because their sight ray is the
+            // first thing that consumes it. Robots and props go in as spheres
+            // of their own body radius rather than their model bounds, so what
+            // blocks a line of sight is the same size as what stops a bullet.
+            occluders.clear();
+            occluders.addBody(cur.ship.body.position, cur.ship.body.radius,
+                              {dvk::sim::OccluderKind::Ship, -1}, cur.ship.body.segment);
+            for (int i = 0; i < cur.robots.count; ++i) {
+                const dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(i)];
+                if (!robot.alive) continue;
+                occluders.addBody(robot.body.position, robot.body.radius,
+                                  {dvk::sim::OccluderKind::Robot, i}, robot.body.segment);
+            }
+            for (int i = 0; i < cur.props.floatingCount; ++i) {
+                const dvk::sim::FloatingLight& ball = cur.props.floating[static_cast<size_t>(i)];
+                if (!ball.alive) continue;
+                occluders.addBody(ball.body.position, ball.body.radius,
+                                  {dvk::sim::OccluderKind::Prop, i}, ball.body.segment);
+            }
+            // Pillars and crates, on the same `alive` flags that decide whether
+            // they stop a bullet: shoot a crate away and it stops casting too.
+            for (int i = 0; i < cur.combat.objects.count &&
+                            static_cast<size_t>(i) < level.objectProxies.size(); ++i) {
+                if (!cur.combat.objects.alive[static_cast<size_t>(i)]) continue;
+                occluders.add(level.objectProxies[static_cast<size_t>(i)],
+                              {dvk::sim::OccluderKind::Object, i},
+                              level.objects[static_cast<size_t>(i)].segment);
+            }
+
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,
-                                 &soundEvents, &cur.props);
+                                 &soundEvents, &cur.props, &occluders);
             dvk::sim::stepProps(level, cur.props, static_cast<float>(kSimStep), &solidDoors);
 
             // Bodies against each other, once everything has integrated and
@@ -1097,9 +1129,14 @@ int main(int argc, char** argv) {
         lightQuery.point = rs.shipPos;
         lightQuery.segment = rs.shipSegment;
         lightQuery.bodyRadius = cur.ship.body.radius;
+        // Same exclusion as playerVisibility: this is a query about the ship,
+        // sampled on the ship, so the ship's own proxy has to be left out.
+        lightQuery.owner = dvk::sim::OccluderId{dvk::sim::OccluderKind::Ship, -1};
         playerLight = dvk::sim::Illumination{};
-        dvk::sim::addIllumination(playerLight, lightQuery, level, level.lights, &solidDoors);
-        dvk::sim::addIllumination(playerLight, lightQuery, level, dynamicLights, &solidDoors);
+        dvk::sim::addIllumination(playerLight, lightQuery, level, level.lights, &solidDoors,
+                                  &occluders);
+        dvk::sim::addIllumination(playerLight, lightQuery, level, dynamicLights, &solidDoors,
+                                  &occluders);
 
         // And the conclusion the robots draw from it, which is a different
         // question with a different answer: a point rather than the hull, and
@@ -1108,7 +1145,8 @@ int main(int argc, char** argv) {
         // one answer instead of two, and so it is still asked with the panel
         // shut.
         playerSeen = dvk::sim::playerVisibility(level, cur.combat, weapons, rs.shipPos,
-                                                rs.shipSegment, &solidDoors, &cur.props);
+                                                rs.shipSegment, &solidDoors, &cur.props,
+                                                &occluders);
 
         // A ray straight out of the nose, for the debug overlay and as a live
         // check that the query everything from M5 on depends on agrees with

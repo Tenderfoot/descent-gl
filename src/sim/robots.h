@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/body.h"
+#include "sim/occluders.h"
 #include "sim/events.h"
 
 #include <array>
@@ -216,9 +217,13 @@ bool objectIsRobot(const RobotConfig& cfg, const std::string& type);
 // `props` is the level's moving lights, and is what lets a robot see the player
 // standing under one. Null means the caller has none, not that they do not
 // count - see playerVisibility.
+// `occluders` is what stands between a robot and the player besides the mine -
+// pillars, other robots, the floating lights. Null keeps the pre-M8 behaviour,
+// where only walls and shut doors broke line of sight and a column was a
+// decoration you could be shot through.
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
                 const SolidDoors* doors = nullptr, EventQueue* events = nullptr,
-                const PropState* props = nullptr);
+                const PropState* props = nullptr, const OccluderSet* occluders = nullptr);
 
 } // namespace dvk::sim

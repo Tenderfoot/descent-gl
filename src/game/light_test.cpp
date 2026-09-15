@@ -8,17 +8,38 @@
 #include "sim/weapons.h"
 #include "sim/lighting.h"
 #include "sim/props.h"
+#include "sim/geometry.h"
+#include "sim/occluders.h"
 
 #include <glm/geometric.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <vector>
 
 namespace dvk {
 
 namespace {
+
+// A spread of directions around a point: the six axes and the eight corners.
+// Enough to hit a box on its faces, its edges and its corners without the full
+// 26, which would make the oracle loop below four times longer for no new cases.
+std::array<glm::vec3, 14> makeSpread() {
+    std::array<glm::vec3, 14> out{};
+    size_t k = 0;
+    const glm::vec3 axes[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    for (const glm::vec3& a : axes) out[k++] = a;
+    for (int x = -1; x <= 1; x += 2) {
+        for (int y = -1; y <= 1; y += 2) {
+            for (int z = -1; z <= 1; z += 2) {
+                out[k++] = glm::normalize(glm::vec3(x, y, z));
+            }
+        }
+    }
+    return out;
+}
 
 bool expect(bool condition, const char* what) {
     log::info("  {:<58} {}", what, condition ? "ok" : "FAILED");
@@ -471,6 +492,288 @@ int runLightTest(const char* levelPath) {
         }
     }
 
+    // ====================================================================
+    // Dynamic occluders (M8)
+    // ====================================================================
+
+    // Build the level's objects into a set, the way the game does.
+    sim::OccluderSet objectOccluders;
+    for (size_t oi = 0; oi < level.objectProxies.size(); ++oi) {
+        objectOccluders.add(level.objectProxies[oi],
+                            sim::OccluderId{sim::OccluderKind::Object, static_cast<int>(oi)},
+                            level.objects[oi].segment);
+    }
+
+    // --- the slab test against brute-force ray/triangle --------------------
+    //
+    // `rayProxyDistance` is an analytic slab test on a box. The independent
+    // method is the box's own twelve triangles through Moller-Trumbore - the
+    // same routine the mine's walls use, entirely different arithmetic. If the
+    // two disagree, one of them is wrong and it is not obvious which, so this
+    // runs before anything built on top of the slab test is trusted.
+    {
+        int tested = 0;
+        int disagreed = 0;
+        int grazing = 0;
+        float worst = 0.0f;
+
+        // The 8 corners of a box, and the 12 triangles over them.
+        // Corner c has sign x = (c&1), y = (c&2), z = (c&4), so the six faces
+        // are the corner sets sharing one bit. Getting this wrong makes
+        // triangles that slice through the box's interior rather than skin it,
+        // and the oracle then reports a hit where the box has no surface - which
+        // is exactly what the first draft of this did.
+        static constexpr int kFaces[12][3] = {
+            {0, 2, 1}, {1, 2, 3},   // -z: 0 1 2 3
+            {4, 5, 6}, {5, 7, 6},   // +z: 4 5 6 7
+            {0, 1, 5}, {0, 5, 4},   // -y: 0 1 4 5
+            {2, 6, 7}, {2, 7, 3},   // +y: 2 3 6 7
+            {1, 3, 7}, {1, 7, 5},   // +x: 1 3 5 7
+            {0, 4, 6}, {0, 6, 2},   // -x: 0 2 4 6
+        };
+
+        for (int oi = 0; oi < objectOccluders.count; ++oi) {
+            const sim::OccluderEntry& e = objectOccluders.entries[static_cast<size_t>(oi)];
+            if (e.proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+
+            std::array<glm::vec3, 8> corner{};
+            for (int c = 0; c < 8; ++c) {
+                const glm::vec3 sign((c & 1) ? 1.0f : -1.0f, (c & 2) ? 1.0f : -1.0f,
+                                     (c & 4) ? 1.0f : -1.0f);
+                corner[static_cast<size_t>(c)] =
+                    e.proxy.centre + e.proxy.orientation * (sign * e.proxy.halfExtents);
+            }
+
+            // Rays from all around the box, aimed at a spread of points on and
+            // near it, so faces, edges, corners and clean misses all appear.
+            for (const glm::vec3& dir : makeSpread()) {
+                for (float aim = -1.0f; aim <= 1.0f; aim += 0.5f) {
+                    const glm::vec3 from = e.proxy.centre + dir * 40.0f;
+                    const glm::vec3 at =
+                        e.proxy.centre + glm::vec3(0.0f, aim * e.proxy.halfExtents.y * 1.1f, 0.0f);
+                    const glm::vec3 ray = glm::normalize(at - from);
+
+                    const float slab = sim::rayProxyDistance(e.proxy, from, ray);
+
+                    float brute = -1.0f;
+                    for (const auto& f : kFaces) {
+                        // With the same edge slack the project already gives
+                        // portal quads, and for the same reason. A ray down a
+                        // box's corner enters exactly where two faces meet, and
+                        // with no slack Moller-Trumbore misses BOTH triangles
+                        // and reports the far side instead - on mine01's reactor
+                        // that is an 18.7 unit error. The slab test has no such
+                        // seam, which is the point of using it in the first
+                        // place.
+                        const float t = sim::rayTriangleDistance(
+                            from, ray, corner[static_cast<size_t>(f[0])],
+                            corner[static_cast<size_t>(f[1])], corner[static_cast<size_t>(f[2])],
+                            1e-4f);
+                        if (t > 1e-4f && (brute < 0.0f || t < brute)) brute = t;
+                    }
+
+                    ++tested;
+                    const bool slabHit = slab >= 0.0f;
+                    const bool bruteHit = brute >= 0.0f;
+                    if (slabHit != bruteHit) {
+                        if (disagreed < 4) {
+                            log::error("slab says {} but the triangles say {} from {:.1f} {:.1f} "
+                                       "{:.1f}", slabHit ? "hit" : "miss",
+                                       bruteHit ? "hit" : "miss", from.x, from.y, from.z);
+                        }
+                        ++disagreed;
+                    } else if (slabHit) {
+                        // A ray aimed past the box's own half-height clips an
+                        // edge, and which triangle catches it comes down to the
+                        // last bit. The verdict still has to agree - asserted
+                        // above, for every ray - but comparing entry distances
+                        // there measures floating point, not correctness.
+                        if (std::abs(aim) > 0.9f) {
+                            ++grazing;
+                        } else {
+                            worst = std::max(worst, std::abs(slab - brute));
+                        }
+                    }
+                }
+            }
+        }
+
+        if (tested == 0) {
+            log::info("occluder oracle: SKIPPED, no box occluder in this level");
+        } else {
+            ok &= expect(disagreed == 0, "the slab test and the box's own triangles agree");
+            ok &= expect(worst < 0.01f, "and they agree on the distance, not only the verdict");
+            log::info("occluder oracle: {} rays, {} disagreements, worst distance gap {:.6f}u over "
+                      "{} square hits ({} grazing rays agreed on the verdict but are not compared "
+                      "on distance)", tested, disagreed, worst, tested - grazing, grazing);
+        }
+    }
+
+    // --- a pillar casts into the light query -------------------------------
+    //
+    // The case the whole milestone is for. Stand a point in a light's beam, then
+    // stand it behind a column, and require the second to be darker. The first
+    // half is the positive control: without it a query that returned zero for
+    // everything would pass.
+    {
+        int tested = 0;
+        int failed = 0;
+        float worstDrop = 1.0f;
+
+        for (size_t oi = 0; oi < level.objectProxies.size(); ++oi) {
+            const sim::PlacedProxy& proxy = level.objectProxies[oi];
+            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+            const int segment = level.objects[oi].segment;
+
+            // A light that actually reaches this column.
+            for (const Light& light : level.lights) {
+                if (std::find(light.segments.begin(), light.segments.end(), segment) ==
+                    light.segments.end()) {
+                    continue;
+                }
+                const glm::vec3 toObject = proxy.centre - light.position;
+                const float span = glm::length(toObject);
+                if (span < 1e-3f) continue;
+                const glm::vec3 dir = toObject / span;
+
+                // Just past the column, on the far side from the light.
+                const glm::vec3 behind =
+                    proxy.centre + dir * (std::max(proxy.halfExtents.x, proxy.halfExtents.z) + 2.5f);
+                // The same distance out, but off to one side of it.
+                const glm::vec3 across = glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)));
+                const glm::vec3 beside =
+                    behind + across * (std::max(proxy.halfExtents.x, proxy.halfExtents.z) + 6.0f);
+
+                if (!insideMine(level, behind) || !insideMine(level, beside)) continue;
+                const int behindSeg = findSegment(level, behind, segment);
+                const int besideSeg = findSegment(level, beside, segment);
+                if (behindSeg < 0 || besideSeg < 0) continue;
+
+                const std::vector<Light> one{light};
+
+                sim::IlluminationQuery q;
+                q.segment = besideSeg;
+                q.point = beside;
+                const float lit = sim::illuminationAt(q, level, one, nullptr, &objectOccluders).value;
+                if (lit <= 0.0f) continue;   // the column is not between them here
+
+                q.segment = behindSeg;
+                q.point = behind;
+                const float shadowed =
+                    sim::illuminationAt(q, level, one, nullptr, &objectOccluders).value;
+                const float open = sim::illuminationAt(q, level, one, nullptr, nullptr).value;
+                if (open <= 0.0f) continue;   // a wall was in the way regardless
+
+                ++tested;
+                if (shadowed >= open) {
+                    ++failed;
+                    if (failed < 4) {
+                        log::error("object {} cast no shadow: {:.3f} with occluders, {:.3f} "
+                                   "without", oi, shadowed, open);
+                    }
+                } else {
+                    worstDrop = std::min(worstDrop, shadowed / open);
+                }
+            }
+        }
+
+        if (tested == 0) {
+            log::info("object shadows: SKIPPED, no column stands in a light in this level");
+        } else {
+            ok &= expect(failed == 0, "a column casts a shadow into the light query");
+            log::info("object shadows: {} light/column pairs, {} failed; behind a column the "
+                      "reading falls to {:.0f}% of the unoccluded value",
+                      tested, failed, worstDrop * 100.0f);
+        }
+    }
+
+    // --- nothing shadows itself --------------------------------------------
+    //
+    // The trap this milestone was most likely to fall into. playerVisibility
+    // samples the ship's own centre, so putting the ship's proxy in the set
+    // without excluding it starts every shadow ray inside solid geometry: the
+    // player reads unlit against every light in the mine and nothing ever
+    // notices them again. Not a flicker - the mechanic simply stops.
+    {
+        sim::CombatState combat;
+        const sim::WeaponConfig weapons;
+
+        // The brightest place in the level, so "dark" can only mean a bug.
+        int brightest = -1;
+        float best = 0.0f;
+        for (int si = 0; si < n; ++si) {
+            sim::IlluminationQuery q;
+            q.point = level.segments[static_cast<size_t>(si)].center;
+            q.segment = si;
+            const float v = sim::illuminationAt(q, level, level.lights).value;
+            if (v > best) {
+                best = v;
+                brightest = si;
+            }
+        }
+
+        if (brightest < 0 || best < sim::kDarkThreshold) {
+            log::info("self-occlusion: SKIPPED, nowhere in this level is lit");
+        } else {
+            const glm::vec3 stand = level.segments[static_cast<size_t>(brightest)].center;
+
+            sim::OccluderSet withShip = objectOccluders;
+            withShip.addBody(stand, sim::Body{}.radius, {sim::OccluderKind::Ship, -1}, brightest);
+
+            const sim::PlayerVisibility seen = sim::playerVisibility(
+                level, combat, weapons, stand, brightest, nullptr, nullptr, &withShip);
+
+            ok &= expect(seen.illumination > 0.0f,
+                         "the ship does not shadow itself into the dark");
+            ok &= expect(seen.visible, "a player in the brightest room is still visible");
+            log::info("self-occlusion: standing in the brightest room ({:.2f} unoccluded), with "
+                      "the ship's own proxy in the set the reading is {:.2f}",
+                      best, seen.illumination);
+
+            // And the control: something ELSE in the same place does block.
+            sim::OccluderSet withRobot = objectOccluders;
+            withRobot.addBody(stand, 2.2f, {sim::OccluderKind::Robot, 0}, brightest);
+            const sim::PlayerVisibility blocked = sim::playerVisibility(
+                level, combat, weapons, stand, brightest, nullptr, nullptr, &withRobot);
+            ok &= expect(blocked.illumination < seen.illumination,
+                         "a robot in the same place DOES block the light");
+            log::info("  a robot standing in the same spot drops it to {:.2f}",
+                      blocked.illumination);
+        }
+    }
+
+    // --- a floating light does not put itself out --------------------------
+    {
+        sim::PropState props;
+        sim::spawnProps(level, props);
+        if (props.floatingCount == 0) {
+            log::info("emitter exclusion: SKIPPED, no floating lights in this level");
+        } else {
+            sim::CombatState combat;
+            const sim::WeaponConfig weapons;
+            const sim::FloatingLight& ball = props.floating[0];
+
+            // Standing right beside the ball, where its own housing is between
+            // the sample and nothing else.
+            const glm::vec3 stand = ball.body.position + glm::vec3(0.0f, 0.0f, 3.5f);
+            const int segment = findSegment(level, stand, ball.body.segment);
+            if (segment < 0) {
+                log::info("emitter exclusion: SKIPPED, no room beside the ball");
+            } else {
+                sim::OccluderSet set = objectOccluders;
+                set.addBody(ball.body.position, ball.body.radius, {sim::OccluderKind::Prop, 0},
+                            ball.body.segment);
+
+                const sim::PlayerVisibility seen = sim::playerVisibility(
+                    level, combat, weapons, stand, segment, nullptr, &props, &set);
+                ok &= expect(seen.illumination > 0.0f,
+                             "a floating light is not extinguished by its own proxy");
+                log::info("emitter exclusion: beside a floating light, reading {:.2f}",
+                          seen.illumination);
+            }
+        }
+    }
+
     // --- the query allocates nothing --------------------------------------
     //
     // CLAUDE.md forbids per-frame heap allocation in the sim step, and this is
@@ -517,6 +820,7 @@ int runLightTest(const char* levelPath) {
         (void)warmV;
 
         alloc::Scope visScope;
+        const auto visBefore = std::chrono::steady_clock::now();
         int seen = 0;
         for (int i = 0; i < 1000; ++i) {
             for (int si = 0; si < n; ++si) {
@@ -525,9 +829,48 @@ int runLightTest(const char* levelPath) {
             }
         }
         const uint64_t visAllocations = visScope.count();
-        log::info("  {} visibility queries: {} allocation(s), {} visible", 1000 * n,
-                  visAllocations, seen);
+        const double visMicros =
+            std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - visBefore)
+                .count();
+        log::info("  {} visibility queries: {} allocation(s), {} visible, {:.2f} us each",
+                  1000 * n, visAllocations, seen, visMicros / static_cast<double>(1000 * n));
         ok &= expect(visAllocations == 0, "1000 sweeps of playerVisibility allocate nothing");
+
+        // The same again with a full occluder set, which is what the game
+        // actually passes. This is the phase where per-step cost was the stated
+        // risk: playerVisibility runs 120 times a second, and every shadow ray
+        // that clears the mine now also walks the set. Measured, both for
+        // allocations and for what it costs.
+        sim::OccluderSet full = objectOccluders;
+        for (int i = 0; i < 24; ++i) {
+            full.addBody(level.segments[static_cast<size_t>(i % n)].center, 2.2f,
+                         {sim::OccluderKind::Robot, i}, i % n);
+        }
+        sim::PlayerVisibility warmO = sim::playerVisibility(
+            level, combat, weapons, level.segments[0].center, 0, nullptr, nullptr, &full);
+        (void)warmO;
+
+        alloc::Scope occScope;
+        const auto before = std::chrono::steady_clock::now();
+        int occSeen = 0;
+        for (int i = 0; i < 1000; ++i) {
+            for (int si = 0; si < n; ++si) {
+                const glm::vec3 p = level.segments[static_cast<size_t>(si)].center;
+                occSeen += sim::playerVisibility(level, combat, weapons, p, si, nullptr, nullptr,
+                                                 &full).visible ? 1 : 0;
+            }
+        }
+        const uint64_t occAllocations = occScope.count();
+        const double micros =
+            std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - before)
+                .count();
+        log::info("  {} visibility queries with {} occluders: {} allocation(s), {} visible, "
+                  "{:.2f} us each", 1000 * n, full.count, occAllocations, occSeen,
+                  micros / static_cast<double>(1000 * n));
+        log::info("  occluders cost {:+.2f} us per query at {} of them, against a 8333 us step",
+                  (micros - visMicros) / static_cast<double>(1000 * n), full.count);
+        ok &= expect(occAllocations == 0,
+                     "1000 sweeps of playerVisibility WITH occluders allocate nothing");
     }
 
     log::info("light test: {}", ok ? "PASS" : "FAIL");
