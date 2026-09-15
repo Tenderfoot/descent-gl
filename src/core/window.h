@@ -19,6 +19,7 @@ public:
         const char* title = "descent";
         bool debugContext = false;   // GL_CONTEXT_FLAG_DEBUG_BIT: enables KHR_debug output
         bool vsync = true;
+        bool fullscreen = false;
     };
 
     explicit Window(const Desc& desc);
@@ -30,6 +31,9 @@ public:
     void requestClose();
     void poll();
     void swap();
+    void setVsync(bool enabled);
+    void setDisplay(bool fullscreen, int windowWidth, int windowHeight);
+    bool fullscreen() const { return fullscreen_; }
 
     glm::ivec2 framebufferSize() const { return fbSize_; }
     glm::ivec2 windowSize() const;
@@ -49,6 +53,9 @@ private:
     Input* input_ = nullptr;
     glm::ivec2 fbSize_{0, 0};
     bool resized_ = false;
+    bool fullscreen_ = false;
+    glm::ivec2 windowedPosition_{100, 100};
+    glm::ivec2 windowedSize_{1600, 900};
 };
 
 } // namespace dvk

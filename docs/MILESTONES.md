@@ -1613,3 +1613,123 @@ No campaign, no progression, no unlock state: the list is flat and every level
 in the directory is playable from it. A level that fails to parse is still
 listed, under its filename, and `loadLevel` is still fatal when it is picked -
 the menu does not get to decide that a broken level is invisible.
+
+---
+
+## Player shell — Phase 3 ✅
+
+Player settings now persist independently of the authored flight model. The
+main and pause menus expose master volume, mouse sensitivity, mouse-Y
+inversion, fullscreen, window size and vsync. Applying display changes starts a
+fifteen-second confirmation; cancel, Escape and timeout restore the previous
+mode and size.
+
+The settings file is versioned JSON in the platform user configuration
+directory. It accepts partial files, preserves valid fields when another field
+has the wrong type, recovers from malformed input, clamps numeric values, and
+uses a temporary sibling plus replace for an atomic save. `--settings PATH`
+keeps automated runs away from the player's real file, `--settings-test`
+exercises persistence without a window, and `--settings-menu` exposes the
+screen directly for visual verification. Command-line volume and size remain
+run-local overrides.
+
+The milestone gate also exposed a Debug-only allocation in the recently added
+player-visibility query: constructing a temporary `Light` constructed its
+empty segment vector and MSVC's debug container bookkeeping allocated once per
+query. Loose lights now pass their source data directly through the same
+contribution path as level lights, restoring zero allocations without changing
+the lighting result.
+
+| Check | Result |
+| --- | --- |
+| Missing settings file | ✅ defaults |
+| Save and reload every field | ✅ exact round trip |
+| Partial file with a wrong-typed field | ✅ valid field kept, invalid field defaulted |
+| Malformed JSON | ✅ warning and defaults |
+| Main and pause settings entry | ✅ same screen, returns to its parent |
+| Settings layout at 1600×900 | ✅ visually verified |
+| Settings layout at 640×360 | ✅ all eight rows inside the panel |
+| Display safety | ✅ keep, explicit revert, Escape and 15-second timeout paths |
+| Debug and Release builds | ✅ clean |
+| Debug and Release headless suites | ✅ all ten pass |
+| Player-visibility allocation check | ✅ 34,000 queries, 0 allocations in both configurations |
+| Release settings-menu draw after warm-up | ✅ fixed-capacity view and HUD path |
+| Release resize test | ✅ 1,800 frames, 901 steps, 119.8 steps/s |
+| Release rendered run | ✅ 120 frames, clean exit, sim and draw allocations none |
+
+The Debug renderer still reports allocations inside its whole-frame draw
+instrumentation while the same Release path reports none. The Phase 3 menu path
+is not entered during that run, and its fixed-capacity rendering is covered
+separately; the count remains a renderer/debug-runtime diagnostic rather than a
+Phase 3 regression.
+
+---
+
+## Player shell — Phase 4 ✅
+
+Gameplay input now resolves through 24 named player actions backed by
+persistent keyboard and mouse bindings. Flight, fire, weapon selection, flare,
+headlight, automap, chase camera, mute and pause all sample the same binding
+set. The debug UI and menu navigation remain application controls rather than
+player bindings.
+
+The settings screen opens a scrolling controls page. Confirming or clicking an
+action captures the next keyboard or mouse press, Escape cancels capture, and
+reset restores the complete default set. Assigning an occupied input swaps the
+two actions instead of leaving a hidden conflict. Binding capture also blocks
+the old action for that frame, so pressing M to bind it cannot mute the game
+behind the menu.
+
+The settings schema advanced to version 2 and writes every binding under the
+action's stable name. Version 1 files load unchanged with defaults, partial
+binding maps are accepted, invalid codes return to defaults, and unknown
+fields remain ignored.
+
+| Check | Result |
+| --- | --- |
+| Player actions represented | ✅ 24 keyboard/mouse actions |
+| Configured keyboard action reaches `ShipControls` | ✅ forward rebound to I, thrust 1.0 |
+| Configured mouse action reaches gameplay | ✅ primary fire rebound to mouse 4 |
+| Existing-input conflict | ✅ forward → S swaps back to W |
+| Binding save and reload | ✅ exact round trip through settings JSON |
+| Controls at 1600×900 | ✅ seven action rows, reset and back, visually verified |
+| Controls at 640×360 | ✅ three action rows, reset and back, all inside the panel |
+| Debug and Release builds | ✅ clean |
+| Debug and Release headless suites | ✅ all ten pass |
+| Release controls-menu allocations after warm-up | ✅ sim none, draw none on 0 of 90 frames |
+| Release rendered run | ✅ 120 frames, clean exit, sim and draw allocations none |
+| Release resize test | ✅ 1,801 frames, 900 steps, 119.7 steps/s |
+
+---
+
+## Player shell — Phase 5 ✅
+
+Finished runs now leave a persistent record without turning the flat level
+list into a campaign. Every level remains selectable. A completed level shows
+its fastest winning time in the list, and the run summary highlights a first
+completion, new best time or new robot record.
+
+`progress.json` is versioned separately from preferences and keyed by the
+level filename, so changing the level's display name does not orphan its
+history. It stores finished runs, wins, fastest winning time and highest robot
+tally. Missing and malformed files start empty, partial and newer documents
+keep valid data, numeric fields normalize, and saves replace through a fully
+written temporary file. Automated runs do not update real player history, and
+`--progress PATH` gives verification an isolated destination.
+
+| Check | Result |
+| --- | --- |
+| Missing progress file | ✅ empty history |
+| First completion | ✅ establishes win, time and robot records |
+| Slower completion | ✅ leaves existing records intact |
+| Loss after a win | ✅ can improve robot tally, cannot set winning time |
+| Save and reload | ✅ exact round trip for 3 runs and 2 wins |
+| Partial, newer and malformed documents | ✅ valid data retained; malformed starts empty |
+| Stable level identity | ✅ `assets/levels/mine01.json` → `mine01.json` |
+| Completed level list row | ✅ `best 1:23`, visually verified at 1600×900 |
+| Summary record highlight | ✅ carried in the fixed-capacity menu view |
+| Progress writes from automated runs | ✅ disabled |
+| Debug and Release builds | ✅ clean |
+| Debug and Release verification suites | ✅ all 11 tests pass |
+| Release rendered run and level list after warm-up | ✅ sim none, draw none on 0 of 90 frames |
+| Release resize test | ✅ 1,788 frames, 902 steps, 119.8 steps/s; draw allocations limited to 7 resize-resource frames |

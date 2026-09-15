@@ -1318,6 +1318,79 @@ the renderer elides what still does not fit at a word boundary. That path runs
 every frame a menu is up, so it works in `string_view` and never builds a
 `std::string`.
 
+### Persistent player settings
+
+`src/game/settings.h` owns the player-facing configuration that is independent
+of authored flight tuning: master volume, mute, mouse sensitivity, mouse-Y
+inversion, fullscreen, window size and vsync. On Windows it lives under
+`%LOCALAPPDATA%/descent-gl/settings.json`; other desktop builds use the XDG
+configuration directory when one is available. `--settings PATH` redirects it
+for automated and portable runs.
+
+The file is loaded before the window is created because fullscreen, size and
+vsync affect construction. Missing files use defaults. A malformed file emits
+a warning and uses defaults, while a partial or newer file keeps every field
+that can be read and ignores fields this build does not know. Numeric values
+are normalized before use. Saving writes a complete versioned document to a
+temporary sibling and replaces the destination only after the write succeeds.
+
+The main and pause menus both open the same settings screen, which keeps the
+screen that opened it as its return destination. Volume, mute and look settings
+take effect without rebuilding game state. Display settings go through
+`Window::setDisplay` and `Window::setVsync`; a fifteen-second confirmation owns
+the previous display values and restores them on cancel, Escape or timeout.
+Command-line `--volume` and `--size` remain authoritative for verification
+runs.
+
+Settings rows carry their rendered values in fixed-size character storage in
+`MenuView`. The renderer therefore draws the screen through the existing HUD
+batch without formatting into heap-backed strings. At small resolutions the
+nine rows reduce their height and gap together so the final row remains
+inside the panel.
+
+### Player input actions and rebinding
+
+`src/game/input_actions.h` is the stable vocabulary between devices, settings
+and gameplay. Its 24 actions cover the six flight axes, primary and secondary
+fire, flare, headlight, automap, four weapon selections, chase camera, mute and
+pause. Each action has a stable JSON name, a player-facing label and a default
+keyboard or mouse binding. The simulation still receives only
+`sim::ShipControls`; `src/game/bindings.h` translates the current bindings at
+the edge of the fixed step.
+
+Bindings are part of the versioned player settings document. Each entry stores
+a device and code under the action's stable name, so adding an action gives old
+files its default and unknown future actions remain harmless. Invalid device
+codes normalize to the action default. Assigning an input that another action
+already owns swaps the two bindings, keeping every action reachable without a
+separate conflict dialog.
+
+The controls screen is a window over the action list rather than a fixed page.
+At 1600×900 it shows seven actions plus reset and back; at 640×360 it shows
+three plus those two permanent rows. The cursor traverses all 24 actions and
+the window follows it. Confirming or clicking an action enters capture mode,
+where the next keyboard or mouse press becomes the binding and Escape cancels.
+Gameplay shortcuts are suppressed for the capture frame, so binding the old
+mute or camera key cannot also trigger that action behind the menu.
+
+### Persistent run history
+
+`src/game/progress.h` stores finished-run history separately from preferences.
+Each level record contains finished runs, wins, the fastest winning time and
+the highest robot tally. The stable identity is the level filename rather than
+its player-facing `name`, so changing display copy does not erase a record.
+The progress document uses the same platform configuration directory and
+temporary-file replacement discipline as settings; `--progress PATH` redirects
+it for isolated runs.
+
+Progress loads before the level list is built. Completed rows carry their best
+time in the fixed-capacity button value, while uncompleted levels remain plain
+and equally selectable. When a session reaches Won or Lost, the app records it
+once before opening the frozen summary, saves the document and updates the
+in-memory level row. The summary highlights a first completion, faster time or
+higher robot tally. Automated command-line, frame-limited, screenshot, resize
+and level-switch runs never write player history.
+
 ### Loading a second mine
 
 Until this point the level was loaded once, before the renderer existed, and

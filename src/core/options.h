@@ -108,8 +108,16 @@ struct Options {
     bool startMenu = false;
     bool levelSelect = false;
     bool levelSwitchTest = false;
+    bool settingsTest = false;
+    bool settingsMenu = false;
+    bool controlsMenu = false;
+    bool progressTest = false;
+    std::string progressPath;
+    std::string settingsPath;
     int width = 1600;
     int height = 900;
+    bool volumeOverride = false;
+    bool sizeOverride = false;
 
     static Options parse(int argc, char** argv);
 };

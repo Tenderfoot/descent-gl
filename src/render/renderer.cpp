@@ -630,6 +630,19 @@ void Renderer::buildMenu(const MenuView& menu) {
                       menu.robotsDestroyed, menu.robotsTotal);
         const float statsWidth = hud_.textWidth(stats, scale);
         hud_.text(stats, (width - statsWidth) * 0.5f, height * 0.45f, scale, white);
+        if (menu.recordNote[0] != '\0') {
+            const float noteWidth = hud_.textWidth(menu.recordNote, scale);
+            hud_.text(menu.recordNote, (width - noteWidth) * 0.5f, height * 0.51f, scale,
+                      accent);
+        }
+    }
+
+    if (menu.screen == MenuScreen::DisplayConfirmation) {
+        char countdown[64];
+        std::snprintf(countdown, sizeof(countdown), "reverting in %d seconds",
+                      menu.confirmationSeconds);
+        const float countdownWidth = hud_.textWidth(countdown, scale);
+        hud_.text(countdown, (width - countdownWidth) * 0.5f, height * 0.39f, scale, dim);
     }
 
     // Only when the list is longer than the rows on screen: which slice of it
@@ -656,10 +669,27 @@ void Renderer::buildMenu(const MenuView& menu) {
                       button.bounds.height, accent);
         }
         const float labelScale = scale * 0.9f;
+        const bool hasValue = button.value[0] != '\0';
         const float labelWidth = hud_.textWidth(button.label, labelScale);
-        const float labelX = button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
+        const float labelX = hasValue ? button.bounds.x + button.bounds.width * 0.06f
+                                      : button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
         const float labelY = button.bounds.y + (button.bounds.height - 7.0f * labelScale) * 0.5f;
         hud_.text(button.label, labelX, labelY, labelScale, text);
+        if (hasValue) {
+            const float valueWidth = hud_.textWidth(button.value.data(), labelScale);
+            const float valueX = button.bounds.x + button.bounds.width * 0.94f - valueWidth;
+            hud_.text(button.value.data(), valueX, labelY, labelScale, text);
+        }
+    }
+
+    if (menu.screen == MenuScreen::Controls && menu.controlsShown > 0 &&
+        menu.controlCount > menu.controlsShown) {
+        char range[64];
+        std::snprintf(range, sizeof(range), "%d-%d of %d", menu.firstControlShown + 1,
+                      menu.firstControlShown + menu.controlsShown, menu.controlCount);
+        const float rangeScale = scale * 0.7f;
+        hud_.text(range, (width - hud_.textWidth(range, rangeScale)) * 0.5f, height * 0.335f,
+                  rangeScale, dim);
     }
 }
 

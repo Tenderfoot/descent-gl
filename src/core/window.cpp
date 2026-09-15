@@ -5,6 +5,8 @@
 
 #include <GLFW/glfw3.h>
 
+#include <algorithm>
+
 namespace dvk {
 
 namespace {
@@ -41,6 +43,9 @@ Window::Window(const Desc& desc) {
     glfwMakeContextCurrent(win_);
     glfwSwapInterval(desc.vsync ? 1 : 0);
 
+    windowedSize_ = {desc.width, desc.height};
+    if (desc.fullscreen) setDisplay(true, desc.width, desc.height);
+
     glfwGetFramebufferSize(win_, &fbSize_.x, &fbSize_.y);
     resized_ = true;
 }
@@ -54,6 +59,40 @@ bool Window::shouldClose() const { return glfwWindowShouldClose(win_); }
 void Window::requestClose() { glfwSetWindowShouldClose(win_, GLFW_TRUE); }
 void Window::poll() { glfwPollEvents(); }
 void Window::swap() { glfwSwapBuffers(win_); }
+
+void Window::setVsync(bool enabled) {
+    glfwMakeContextCurrent(win_);
+    glfwSwapInterval(enabled ? 1 : 0);
+}
+
+void Window::setDisplay(bool fullscreen, int windowWidth, int windowHeight) {
+    windowWidth = std::max(windowWidth, 640);
+    windowHeight = std::max(windowHeight, 360);
+    if (fullscreen && !fullscreen_) {
+        glfwGetWindowPos(win_, &windowedPosition_.x, &windowedPosition_.y);
+        glfwGetWindowSize(win_, &windowedSize_.x, &windowedSize_.y);
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = monitor ? glfwGetVideoMode(monitor) : nullptr;
+        if (!monitor || !mode) {
+            log::warn("could not enter fullscreen because the primary monitor is unavailable");
+            return;
+        }
+        glfwSetWindowMonitor(win_, monitor, 0, 0, mode->width, mode->height, mode->refreshRate);
+        fullscreen_ = true;
+        return;
+    }
+    if (!fullscreen && fullscreen_) {
+        windowedSize_ = {windowWidth, windowHeight};
+        glfwSetWindowMonitor(win_, nullptr, windowedPosition_.x, windowedPosition_.y,
+                             windowedSize_.x, windowedSize_.y, GLFW_DONT_CARE);
+        fullscreen_ = false;
+        return;
+    }
+    if (!fullscreen) {
+        windowedSize_ = {windowWidth, windowHeight};
+        glfwSetWindowSize(win_, windowedSize_.x, windowedSize_.y);
+    }
+}
 
 glm::ivec2 Window::windowSize() const {
     glm::ivec2 size;

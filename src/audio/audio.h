@@ -86,8 +86,8 @@ public:
     // engine is made to rise with the throttle.
     void setAmbient(Ambient channel, float gain, float pitch = 1.0f);
 
-    void setMasterGain(float gain) { mixer_.setMasterGain(gain); }
-    float masterGain() const { return mixer_.masterGain(); }
+    void setMasterGain(float gain);
+    float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }
 
     // Muting keeps the device open and the ambient channels running, so
     // unmuting is instant and does not restart the engine loop mid-note.

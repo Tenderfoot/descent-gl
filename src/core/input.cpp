@@ -26,6 +26,20 @@ bool Input::anyKeyPressed() const {
     return false;
 }
 
+int Input::firstPressedKey() const {
+    for (size_t i = 0; i < kMaxKeys; ++i) {
+        if (cur_[i] && !prev_[i]) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int Input::firstPressedMouseButton() const {
+    for (size_t i = 0; i < kMaxButtons; ++i) {
+        if (buttonCur_[i] && !buttonPrev_[i]) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 bool Input::mouseDown(int button) const {
     return button >= 0 && button < kMaxButtons && buttonCur_[static_cast<size_t>(button)];
 }
