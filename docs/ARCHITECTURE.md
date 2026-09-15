@@ -482,14 +482,15 @@ out along each axis, and reports `litFraction()` alongside the value. A single
 point flips the instant a shadow edge crosses it; a body straddling that edge
 is the case the fraction exists to describe.
 
-**Two deliberate disagreements with the screen**, both of which make this the
-stricter answer:
+**One deliberate disagreement with the screen** — and, as of M8, one fewer than
+there used to be:
 
-1. **Only the mine occludes.** The renderer also casts shadows from robots,
-   props, door slabs and the ship. This traces wall triangles and door faces
-   and nothing else, so a robot standing in a beam darkens the picture but not
-   this number. Closing that gap would mean reaching into the occluder meshes,
-   which live behind `render/gl.h` and are therefore off-limits to `sim`.
+1. ~~Only the mine occludes.~~ **Closed in M8.** Pass an `OccluderSet` and
+   robots, props, the ship and the level's objects block light here too. The
+   old note said closing the gap would mean reaching into the occluder meshes
+   behind `render/gl.h`; proxy volumes made that untrue, because `sim` is handed
+   finished shapes and never reads an asset. Without a set the query still falls
+   back to walls and door faces, which is what every caller did before.
 2. **The shadow budget does not apply.** A light past the renderer's cap still
    lights but stops casting, so on screen it shines through walls; here it
    never does. That is the point: a mechanic built on this does not change
@@ -525,6 +526,91 @@ Two things separate it from a plain illumination reading:
 Both are measured: `--light-test` checks that 34 000 visibility queries allocate
 nothing, because the stack `Light` it builds per loose light costs nothing only
 while its segment vector is left alone.
+
+### Dynamic occluders
+
+`src/sim/occluders.h`. An `OccluderSet` is everything that stands between a
+light and a surface, or an eye and its target, and is not the mine: the ship,
+every live robot, every floating light, and every solid level object. Rebuilt
+every step, fixed-capacity, allocation-free.
+
+**Bodies go in as spheres of their own radius, not their model's bounds.** The
+body radius is the authored, tuned number that collision and gunfire already
+agree on, and a robot that blocks sight over a different extent than it blocks
+bullets is a robot the player cannot aim at. Objects go in as their
+`PlacedProxy`, on the same `alive` flags that decide whether they stop a
+bullet — shoot a crate away and it stops casting too.
+
+#### Robot sight is where the mechanic lives
+
+This is the correction that mattered most, and the roadmap had it wrong. The
+plan was to improve `addIllumination` and call the payoff "pillars become
+cover". Robot perception does not work the way that assumed:
+
+```cpp
+const bool alreadyOnToThem = robot.awareness > 0.0f;
+if (canSee && (visibility.visible || alreadyOnToThem)) {
+```
+
+`visibility.visible` — the value the plan was going to improve — is **bypassed
+entirely** once a robot is alert. For every robot already on to the player, only
+`canSee` matters, and `canSee` was a `raycast` against walls and shut doors with
+no level objects in it at all. Improving the light query would have changed
+exactly one case: a robot that had never seen the player deciding whether to
+notice them.
+
+So the occluders go into that ray first. `--robots-test` measures the result:
+awareness **0.00** behind a column, **1.00** on a clear line, and **1.00** with
+the column simply not in the set — that last one proving the line is otherwise
+clear. An already-alert robot held two seconds behind a column decays from
+**1.00 to 0.33**.
+
+#### Nothing shadows itself
+
+`OccluderId` is not bookkeeping; it is the difference between working and
+broken. `playerVisibility` samples the ship's own centre, so including the
+ship's proxy starts every shadow ray inside it: the player reads unlit against
+every light in the mine and nothing ever notices them again. Not a flicker — the
+mechanic simply stops. `IlluminationQuery::owner` names the body being asked
+about, and `addLooseLight` takes an `emitter`, because a floating light inside
+its own housing would otherwise put itself out.
+
+`--light-test` covers both, each with a positive control: with the ship's own
+proxy in the set the reading in the brightest room is unchanged at 2.87, and a
+robot standing in the same spot drops it to 0.00.
+
+#### The slab test, checked against triangles
+
+`rayProxyDistance` is an analytic slab test. `--light-test` cross-checks it
+against the box's own twelve triangles through Möller-Trumbore — the same
+routine the mine's walls use, entirely different arithmetic — over 1260 rays
+from fourteen directions. They agree on every verdict and to **0.000019 units**
+on distance.
+
+That check needs `edgeSlack`, for the reason the parameter was added in the
+first place. A ray down a box's corner enters exactly where two faces meet, and
+with no slack Möller-Trumbore misses *both* triangles and reports the far side:
+on `mine01`'s reactor that is an 18.7 unit error. The slab test has no such
+seam, which is why it is the one in the shipping path.
+
+#### Cost
+
+The stated risk for this phase was per-step cost: `playerVisibility` runs 120
+times a second and every shadow ray that clears the mine now also walks the set.
+Measured with 42 occluders, it is **+4.59 µs per query against an 8333 µs
+step** — under 0.06%. The cheap reject is a dot product and a compare against
+the occluder's bounding radius, which throws out everything not roughly on the
+line before any real intersection work.
+
+#### What this deliberately makes worse
+
+Adding dynamic occluders here while the renderer still drops casters past the
+shadow budget means the two answers can disagree in a new way: a light that has
+lost its budget slot shines through a robot on screen while this query says it
+does not. That is a real regression in the rare case, taken knowingly, because
+the common case goes the other way — today the query says "lit" whenever a robot
+visually blocks a lamp, and after M8 it agrees with the screen there. A frequent
+disagreement traded for a rare one.
 
 ---
 

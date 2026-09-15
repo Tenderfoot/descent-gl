@@ -2019,3 +2019,90 @@ units** past the column's own widest radius, measured by `--collision-test`. The
 proxy is the model's bounding box and the column is a tapered octagon, so the box
 holds 79% more volume than the column. A tapered-cylinder proxy kind is the fix
 and belongs with the proxy work, not here.
+
+## Dynamic occluders: a pillar is cover
+
+The renderer has cast shadows from robots, props, the ship and door slabs since
+M3. The simulation never has. `addIllumination` traced wall triangles and door
+faces and nothing else, and the robot sight ray did the same, so a robot
+standing in a beam darkened the picture but not the number, and a column between
+a robot and the player blocked neither. Both `src/sim/lighting.h` and
+`docs/ARCHITECTURE.md` described that gap as permanent, on the grounds that the
+occluder meshes live behind `render/gl.h`. Proxy volumes made it untrue: `sim`
+is handed finished shapes and never reads an asset.
+
+`src/sim/occluders.h` is the set — the ship, every live robot, every floating
+light, every solid object — rebuilt each step and allocation-free. Bodies go in
+as spheres of their own radius rather than their model's bounds, so what blocks
+a line of sight is the same size as what stops a bullet.
+
+**The roadmap aimed this at the wrong function, and the correction is the whole
+point of the milestone.** The plan was to improve `addIllumination` and call the
+payoff "pillars become cover". Robot perception short-circuits:
+`alreadyOnToThem` bypasses the illumination term entirely, so for any robot
+already on to the player only `canSee` matters — and `canSee` was a raycast
+against walls and shut doors with no level objects in it. Improving the light
+query alone would have changed exactly one case: a robot that had never seen the
+player deciding whether to notice them. The occluders go into that sight ray
+first.
+
+`OccluderId` is not bookkeeping. `playerVisibility` samples the ship's own
+centre, so including the ship's proxy would start every shadow ray inside it:
+the player reads unlit against every light in the mine and nothing ever notices
+them again. Not a flicker — the mechanic stops. The same applies to a floating
+light inside its own housing.
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| `--validate-assets` | ✅ 0 failures |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS |
+| `--weapons-test` | ✅ PASS |
+| `--robots-test` | ✅ PASS |
+| `--loop-test` | ✅ PASS |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| A column is cover | ✅ `--robots-test`: awareness **0.00** behind a column, **1.00** on a clear line, **1.00** with the column not in the set — the last proving the line is otherwise clear |
+| An alert robot loses you | ✅ held two seconds behind a column, awareness decays **1.00 → 0.33** |
+| The control line is really clear | ✅ asserted, not assumed: the first version of the control ran through a wall at 17u of a 23u gap and looked exactly like the column working |
+| Columns cast into the light query | ✅ `--light-test`: 10 light/column pairs, behind a column the reading falls to **0%** of the unoccluded value |
+| Nothing shadows itself | ✅ with the ship's own proxy in the set the brightest room still reads **2.87**; a robot standing in the same spot drops it to **0.00** |
+| A light is not put out by its own housing | ✅ beside a floating light, reading 2.50 |
+| The slab test against brute force | ✅ 1260 rays against the box's own twelve triangles through Möller-Trumbore: 0 disagreements, worst distance gap **0.000019u** |
+| Allocation-free with occluders | ✅ 34 000 visibility queries with 42 occluders: **0 allocations** |
+| Per-step cost | ✅ **+4.59 µs per query** with 42 occluders, against an 8333 µs step — under 0.06% |
+| Per-frame allocations | ✅ `--controls-menu` run: `sim step none on 0 of 110 frames`, `draw path none on 0 of 110` |
+| Sim-step allocations in gameplay | ✅ `sim step SOME on 1 of 90 (worst 1)` — the same line `main` reports. Pre-existing; this adds nothing |
+| `--resize-test` | ✅ completed, 67.7 steps/s (median of three; software rendering, 1920×1080, bounded by the loop's frame clamp) |
+
+The gameplay run reads `draw path SOME on 47 of 90` against the 45 of 90 the
+previous milestone measured on what is now `main`, over a run that lasts 2262
+sim steps against 2189 and 18.8 seconds against 18.2. Draw-path allocation is
+renderer-side and this change touches only `sim`; the sim-step line, the one
+this could move, is unchanged.
+
+A `--resize-test` baseline was not re-measured on this `main` before opening the
+pull request. The branch figure above stands on its own and is in the same band
+as the 67.9 recorded two milestones ago; the comparison run is outstanding.
+
+The brute-force oracle needed `edgeSlack`, for the reason the parameter exists.
+A ray down a box's corner enters exactly where two faces meet, and with no slack
+Möller-Trumbore misses **both** triangles and reports the far side — on
+`mine01`'s reactor an 18.7 unit error. The slab test has no such seam, which is
+why it is the one in the shipping path.
+
+Two decisions taken deliberately rather than discovered:
+
+- **Robots occlude light**, so a robot between the player and a lamp makes the
+  player harder to see. In keeping with the lighting model, and reversible by
+  leaving robots out of the set.
+- **This widens the disagreement with the screen in one case and narrows it in
+  another.** A light past the renderer's shadow budget still shines through a
+  robot on screen while this query says it does not. Taken knowingly: before
+  M8 the query said "lit" whenever a robot visually blocked a lamp, which is the
+  common case, and now it agrees with the screen there. A frequent disagreement
+  traded for a rare one.

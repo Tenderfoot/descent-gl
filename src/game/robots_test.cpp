@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "sim/collision.h"
+#include "sim/occluders.h"
 #include "sim/lighting.h"
 #include "sim/combat.h"
 #include "sim/props.h"
@@ -30,6 +31,10 @@ struct Rig {
     sim::PropState props;
     sim::Body player;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    sim::OccluderSet occluders;
+    // Off for every case written before M8, so they keep testing what they were
+    // written to test rather than quietly becoming sight-line tests.
+    bool useOccluders = false;
 
     void reset() {
         combat = sim::CombatState{};
@@ -50,13 +55,35 @@ struct Rig {
     void run(int steps, const sim::FireControls& fire) {
         for (int i = 0; i < steps; ++i) {
             sim::stepCombat(level, combat, player, orientation, weapons, fire, kStep, &robots);
+            if (useOccluders) buildOccluders();
             sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, nullptr,
-                            nullptr, &props);
+                            nullptr, &props, useOccluders ? &occluders : nullptr);
             // The same shared body pass the game runs, so these cases see
             // robots that can stand on each other rather than through each
             // other. Without it the AI is exercised in a world where nothing
             // is ever in the way, which is not the world it ships into.
             resolveBodies();
+        }
+    }
+
+    // Everything that blocks a sight line and is not the mine, exactly as
+    // main.cpp builds it: bodies as spheres of their own radius, objects as
+    // their proxies, and dead things left out.
+    void buildOccluders() {
+        occluders.clear();
+        occluders.addBody(player.position, player.radius, {sim::OccluderKind::Ship, -1},
+                          player.segment);
+        for (int i = 0; i < robots.count; ++i) {
+            const sim::Robot& robot = robots.robots[static_cast<size_t>(i)];
+            if (!robot.alive) continue;
+            occluders.addBody(robot.body.position, robot.body.radius,
+                              {sim::OccluderKind::Robot, i}, robot.body.segment);
+        }
+        for (int i = 0; i < combat.objects.count &&
+                        static_cast<size_t>(i) < level.objectProxies.size(); ++i) {
+            if (!combat.objects.alive[static_cast<size_t>(i)]) continue;
+            occluders.add(level.objectProxies[static_cast<size_t>(i)],
+                          {sim::OccluderKind::Object, i}, level.objects[static_cast<size_t>(i)].segment);
         }
     }
 
@@ -118,6 +145,64 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
     bool ok = true;
 
     ok &= expect(rig.robotCfg.types.size() >= 3, "three robot types are defined");
+
+    // Clear robot-to-player sight, but an object blocks the only light. This
+    // exercises the exposure query inside stepRobots, not just its LOS ray.
+    {
+        Level room = rig.level;
+        room.lights.clear();
+        const int segment = room.start.segment;
+        const glm::vec3 at = room.segments[static_cast<size_t>(segment)].center;
+        Light light;
+        light.position = at + glm::vec3(4.0f, 0.0f, 0.0f);
+        light.radius = 20.0f;
+        light.intensity = 10.0f;
+        light.segment = segment;
+        light.segments = {segment};
+        room.lights.push_back(light);
+
+        sim::Body player;
+        player.position = at;
+        player.segment = segment;
+        sim::CombatState combat;
+        combat.player.headlightOn = false;
+        sim::RobotState robots;
+        robots.count = 1;
+        sim::Robot& robot = robots.robots[0];
+        robot.alive = true;
+        robot.type = 0;
+        robot.health = rig.robotCfg.types[0].health;
+        robot.body.position = at + glm::vec3(0.0f, 0.0f, 4.0f);
+        robot.body.segment = segment;
+
+        sim::OccluderSet blockers;
+        sim::PlacedProxy pillar;
+        pillar.kind = sim::ProxyVolume::Kind::Box;
+        pillar.centre = at + glm::vec3(2.0f, 0.0f, 0.0f);
+        pillar.halfExtents = glm::vec3(0.5f, 2.0f, 0.5f);
+        blockers.add(pillar, {sim::OccluderKind::Object, 0}, segment);
+        ok &= expect(!sim::occluded(blockers, robot.body.position, player.position),
+                     "shadow cover leaves robot-to-player sight clear");
+        ok &= expect(!sim::raycast(room, robot.body.position, glm::vec3(0, 0, -1),
+                                  4.0f, segment).hit,
+                     "shadow cover sight is also clear of walls");
+        ok &= expect(!sim::playerVisibility(room, combat, rig.weapons, at, segment,
+                                           nullptr, nullptr, &blockers).visible,
+                     "the blocker puts the player in darkness");
+        sim::stepRobots(room, rig.robotCfg, rig.weapons, robots, combat, player, kStep,
+                        nullptr, nullptr, nullptr, &blockers);
+        ok &= expect(robot.awareness == 0.0f,
+                     "an unalerted robot cannot detect a player in an object's shadow");
+
+        blockers.clear();
+        ok &= expect(sim::playerVisibility(room, combat, rig.weapons, at, segment,
+                                          nullptr, nullptr, &blockers).visible,
+                     "removing the blocker exposes the player to light");
+        sim::stepRobots(room, rig.robotCfg, rig.weapons, robots, combat, player, kStep,
+                        nullptr, nullptr, nullptr, &blockers);
+        ok &= expect(robot.awareness > 0.0f,
+                     "the same robot detects the player when the shadow is removed");
+    }
 
     // --- robot energy is present and stays full ----------------------------
     {
@@ -743,6 +828,159 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
         ok &= expect(escapes == 0, "no robot left the mine over fifteen seconds of chasing");
         log::info("containment: {} robots chasing for 15 s, {} escapes", rig.robots.aliveCount(),
                   escapes);
+    }
+
+    // --- a pillar is cover (M8) ---------------------------------------------
+    //
+    // The case this milestone exists for, and the one the roadmap originally
+    // missed. Robot sight was a raycast against walls and shut doors only, so a
+    // column broke nothing. Worse, the awareness rule short-circuits: an ALERT
+    // robot ignores illumination entirely and keeps tracking on line of sight
+    // alone, so improving the light query - which is what the plan proposed -
+    // would not have moved this case at all.
+    {
+        // The tallest, widest column in the level, and a horizontal axis with
+        // clear room on both sides of it.
+        int column = -1;
+        for (size_t oi = 0; oi < rig.level.objectProxies.size(); ++oi) {
+            if (!rig.combat.objects.alive[oi]) continue;
+            const sim::PlacedProxy& proxy = rig.level.objectProxies[oi];
+            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+            if (proxy.halfExtents.y > 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
+                column = static_cast<int>(oi);
+                break;
+            }
+        }
+
+        if (column < 0) {
+            log::info("pillar cover: SKIPPED, no column in this level");
+        } else {
+            const glm::vec3 centre = rig.level.objectProxies[static_cast<size_t>(column)].centre;
+            const int segment = rig.level.objects[static_cast<size_t>(column)].segment;
+
+            const glm::vec3 axes[4] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
+            glm::vec3 axis(1.0f, 0.0f, 0.0f);
+            float room = 0.0f;
+            for (const glm::vec3& a : axes) {
+                const sim::RayHit hit = sim::raycast(rig.level, centre, a, 200.0f, segment);
+                const float ahead = hit.hit ? hit.distance : 200.0f;
+                const sim::RayHit back = sim::raycast(rig.level, centre, -a, 200.0f, segment);
+                const float behind = back.hit ? back.distance : 200.0f;
+                if (std::min(ahead, behind) > room) {
+                    room = std::min(ahead, behind);
+                    axis = a;
+                }
+            }
+            const float stand = std::min(11.0f, room - 2.0f);
+
+            // Robot one side, player the other, column exactly between.
+            const auto place = [&](bool behindColumn) {
+                rig.reset();
+                rig.revealPlayer();   // the headlight, so darkness is not the variable
+                for (int i = 1; i < rig.robots.count; ++i) rig.robots.robots[static_cast<size_t>(i)].alive = false;
+                sim::Robot& r = rig.robots.robots[0];
+                r.alive = true;
+                r.awareness = 0.0f;
+                r.body.position = centre - axis * stand;
+                r.body.segment = findSegment(rig.level, r.body.position, segment);
+                // Behind the column, or on the ROBOT'S OWN SIDE of it, where
+                // the line between them never reaches the column. The obvious
+                // control - step sideways at the same distance - puts the
+                // player round a corner on mine01: the line then crosses a wall
+                // at 17 units of a 23 unit gap, and the case measures the room
+                // rather than the column. Staying on the cleared axis avoids
+                // that, and the wall check below refuses to let it come back.
+                rig.player.position = behindColumn ? centre + axis * stand
+                                                   : centre - axis * (stand * 0.5f);
+                rig.player.segment = findSegment(rig.level, rig.player.position, segment);
+                return r.body.segment >= 0 && rig.player.segment >= 0;
+            };
+
+            if (!place(true)) {
+                log::info("pillar cover: SKIPPED, no room either side of the column");
+            } else {
+                // ONE step each. Awareness is set the instant a robot can see
+                // the player, and a robot that is given longer starts flying:
+                // at 14 u/s half a second of chasing moves it clear of the
+                // column and the case stops being about the column at all.
+                // 1. Blocked by the column.
+                rig.useOccluders = true;
+                rig.run(1);
+                const float hidden = rig.robots.robots[0].awareness;
+
+                // 2. The same geometry with the column not in the set at all -
+                //    the pre-M8 behaviour, and the proof that the line of sight
+                //    is otherwise clear.
+                place(true);
+                rig.useOccluders = false;
+                rig.run(1);
+                const float seenWithoutOccluders = rig.robots.robots[0].awareness;
+
+                // 3. The same distance, stepped aside from the column.
+                // 3. The same room, the same lighting, the column simply not
+                //    between them.
+                place(false);
+                rig.useOccluders = true;
+                rig.run(1);
+                const float clearLine = rig.robots.robots[0].awareness;
+
+                // The control is only a control while its line is genuinely
+                // clear of the mine. Checked rather than assumed, because the
+                // first version of it ran through a wall and looked exactly
+                // like the column working.
+                {
+                    const glm::vec3 from = rig.robots.robots[0].body.position;
+                    const glm::vec3 to = rig.player.position;
+                    const float span = glm::length(to - from);
+                    const sim::RayHit wall =
+                        sim::raycast(rig.level, from, (to - from) / span, span,
+                                     rig.robots.robots[0].body.segment);
+                    ok &= expect(!wall.hit, "the control line is clear of the mine's own walls");
+                }
+
+                ok &= expect(seenWithoutOccluders > 0.0f,
+                             "without occluders the robot sees straight through the column");
+                ok &= expect(hidden <= 0.0f, "with occluders the column hides the player");
+                ok &= expect(clearLine > 0.0f, "with the column out of the line, seen again");
+
+                log::info("pillar cover: awareness behind the column {:.2f}, on a clear line "
+                          "{:.2f}, and {:.2f} with the column not in the set at all",
+                          hidden, clearLine, seenWithoutOccluders);
+            }
+
+            // --- and an ALREADY ALERT robot loses the player ------------------
+            //
+            // The short-circuit. `alreadyOnToThem` skips the illumination term,
+            // so for a robot that has seen you, line of sight is the whole test.
+            // Breaking it with a column is the only thing that calls it off.
+            if (place(false)) {
+                rig.useOccluders = true;
+                rig.run(1);
+                const float alerted = rig.robots.robots[0].awareness;
+
+                // Step back behind the column without resetting: the robot is
+                // already on to the player, which is the case that matters.
+                const glm::vec3 robotSpot = rig.robots.robots[0].body.position;
+                const int robotSeg = rig.robots.robots[0].body.segment;
+                rig.player.position = centre + axis * stand;
+                rig.player.segment = findSegment(rig.level, rig.player.position, segment);
+                // Held in place, or it simply flies around the column and the
+                // test measures pathfinding instead of perception.
+                for (int i = 0; i < 240; ++i) {   // two seconds; decay takes about three
+                    rig.robots.robots[0].body.position = robotSpot;
+                    rig.robots.robots[0].body.segment = robotSeg;
+                    rig.robots.robots[0].body.velocity = glm::vec3(0.0f);
+                    rig.run(1);
+                }
+                const float afterCover = rig.robots.robots[0].awareness;
+
+                ok &= expect(alerted > 0.0f, "the robot was on to the player to begin with");
+                ok &= expect(afterCover < alerted,
+                             "an alert robot loses the player behind a column");
+                log::info("breaking contact: alert at {:.2f}, two seconds behind a column {:.2f}",
+                          alerted, afterCover);
+            }
+        }
     }
 
     log::info("robots test: {}", ok ? "PASS" : "FAIL");
