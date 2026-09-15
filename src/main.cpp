@@ -804,6 +804,8 @@ int main(int argc, char** argv) {
         const auto alpha = static_cast<float>(accumulator / kSimStep);
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
         rs.camera = camera;
+        rs.verticalFov = camera == dvk::CameraMode::FirstPerson ? settings.firstPersonFov
+                                                                : settings.thirdPersonFov;
 
         // The mine coming apart. Driven from wall-clock rather than the sim, so
         // the shake is smooth at any frame rate and never accumulates into the

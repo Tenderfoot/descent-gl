@@ -23,7 +23,7 @@ namespace dvk::gl {
 
 namespace {
 
-constexpr float kFovY = glm::radians(70.0f);
+constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr int kWallTileSize = 256;
 
@@ -908,7 +908,7 @@ glm::mat4 Renderer::viewProj(const RenderState& rs) const {
         target_.height() > 0
             ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
             : 1.0f;
-    return infiniteReversedZ(kFovY, aspect, kZNear) * buildView(rs);
+    return infiniteReversedZ(glm::radians(rs.verticalFov), aspect, kZNear) * buildView(rs);
 }
 
 // Silhouettes are extracted on the CPU once per light per frame, before any
@@ -1359,7 +1359,7 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
 
     CameraBlock cam;
     cam.view = buildView(rs);
-    cam.proj = infiniteReversedZ(kFovY, aspect, kZNear);
+    cam.proj = infiniteReversedZ(glm::radians(rs.verticalFov), aspect, kZNear);
     glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
 
     gatherLights(level, dynamicLights, eyePos(rs), walk, shadowBudget);
@@ -1493,7 +1493,7 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
     cam.view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
     // The project's own reversed-Z projection, not a second convention: the
     // depth test is still GL_GEQUAL and the clear is still 0.
-    cam.proj = infiniteReversedZ(kFovY, aspect, kZNear);
+    cam.proj = infiniteReversedZ(kAutomapFovY, aspect, kZNear);
     glNamedBufferSubData(cameraUbo_, 0, sizeof(CameraBlock), &cam);
 
     glDisable(GL_STENCIL_TEST);

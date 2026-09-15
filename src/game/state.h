@@ -42,6 +42,7 @@ struct RenderState {
     glm::vec3 shipPos{0.0f};
     glm::quat shipOrientation{1.0f, 0.0f, 0.0f, 0.0f};
     CameraMode camera = CameraMode::FirstPerson;
+    float verticalFov = 70.0f;   // degrees
     int shipSegment = 0;
 
     // Readouts, not used to draw the scene.

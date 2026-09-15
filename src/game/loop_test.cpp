@@ -332,10 +332,13 @@ bool verifyPlayerMenu() {
     menu.showPause();
     menu.showSettings(settings);
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 9,
+    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 11,
                  "settings open from the pause menu");
     ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%",
                  "settings show their current values");
+    ok &= expect(std::string_view(view.buttons[2].value.data()) == "70 deg" &&
+                     std::string_view(view.buttons[3].value.data()) == "70 deg",
+                 "settings show first and third person field of view");
     view = menu.view(640, 360);
     bool settingsFit = true;
     for (int i = 0; i < view.buttonCount; ++i) {
@@ -348,6 +351,15 @@ bool verifyPlayerMenu() {
     menu.update(decrease, 1600, 900);
     ok &= expect(menu.editedSettings().masterVolume == 0.75f,
                  "left adjusts the selected setting");
+    MenuInput nextSetting;
+    nextSetting.next = true;
+    menu.update(nextSetting, 1600, 900);
+    menu.update(nextSetting, 1600, 900);
+    MenuInput increase;
+    increase.increase = true;
+    menu.update(increase, 1600, 900);
+    ok &= expect(menu.editedSettings().firstPersonFov == 75.0f,
+                 "field of view adjusts in five degree steps");
 
     menu.showControls();
     view = menu.view(1600, 900);
