@@ -291,6 +291,7 @@ int main(int argc, char** argv) {
     // debug panel. Held out here so it survives between frames rather than
     // being rebuilt inside the UI block.
     dvk::sim::Illumination playerLight;
+    dvk::sim::PlayerVisibility playerSeen;
 
     // The level's own lights had their segment sets computed at load with no
     // doors. They are recomputed against the door state now, and again every
@@ -804,6 +805,15 @@ int main(int argc, char** argv) {
         dvk::sim::addIllumination(playerLight, lightQuery, level, level.lights, &solidDoors);
         dvk::sim::addIllumination(playerLight, lightQuery, level, dynamicLights, &solidDoors);
 
+        // And the conclusion the robots draw from it, which is a different
+        // question with a different answer: a point rather than the hull, and
+        // true whatever the light if the player is carrying a headlight. Asked
+        // here rather than inside the debug panel so the HUD and the panel read
+        // one answer instead of two, and so it is still asked with the panel
+        // shut.
+        playerSeen = dvk::sim::playerVisibility(level, cur.combat, weapons, rs.shipPos,
+                                                rs.shipSegment, &solidDoors);
+
         // A ray straight out of the nose, for the debug overlay and as a live
         // check that the query everything from M5 on depends on agrees with
         // what is on screen.
@@ -843,6 +853,19 @@ int main(int argc, char** argv) {
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
+        // Both the bar and the word come from `playerSeen` rather than from
+        // `playerLight`, even though the latter is the better-behaved number.
+        // They have to agree: a bar sitting under its own threshold tick beside
+        // the word "exposed" reads as a bug, and the two queries genuinely can
+        // disagree - one samples the hull and the other a point. The one worth
+        // showing is the one the robots act on.
+        hud.illumination = playerSeen.illumination;
+        hud.darkThreshold = dvk::sim::kDarkThreshold;
+        hud.seen = playerSeen.visible;
+        // The headlight is what gave them away only when nothing else had:
+        // exactly the case where `visible` would have been false without it.
+        hud.seenByHeadlight = playerSeen.headlight &&
+                              playerSeen.illumination < dvk::sim::kDarkThreshold;
         hud.robotsTotal = cur.game.robotsAtStart;
 
         dvk::MenuView menuView = menu.view(fb.x, fb.y);
@@ -1123,8 +1146,9 @@ int main(int argc, char** argv) {
             // it is a point query rather than the hull, and a player carrying a
             // headlight is visible whatever is falling on them. Shown next to
             // the illumination above precisely because the two can disagree.
-            const dvk::sim::PlayerVisibility seen = dvk::sim::playerVisibility(
-                level, cur.combat, weapons, rs.shipPos, rs.shipSegment, &solidDoors);
+            // The frame already asked this for the HUD; this is that answer, so
+            // the panel cannot report something the gauge disagrees with.
+            const dvk::sim::PlayerVisibility& seen = playerSeen;
             int hunting = 0;
             for (int i = 0; i < cur.robots.count; ++i) {
                 const dvk::sim::Robot& r = cur.robots.robots[static_cast<size_t>(i)];

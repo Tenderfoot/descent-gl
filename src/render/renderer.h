@@ -74,6 +74,22 @@ struct HudData {
     int robotsDestroyed = 0;
     int robotsTotal = 0;
 
+    // Darkness, as the simulation understands it rather than as the screen
+    // shows it. `illumination` is the light reaching the player and
+    // `darkThreshold` is the value it has to stay under for the mine to hide
+    // them; both arrive as plain floats because `sim::kDarkThreshold` lives
+    // behind a simulation header this one must not include.
+    //
+    // `seen` is the separate question the robots actually act on, and it is not
+    // a function of `illumination` alone: a player flying an unlit corridor with
+    // the headlight on is carrying a lamp and is seen anyway. `seenByHeadlight`
+    // says that is what happened, so the readout can point at the key that
+    // fixes it.
+    float illumination = 0.0f;
+    float darkThreshold = 0.25f;
+    bool seen = false;
+    bool seenByHeadlight = false;
+
     // 1 the instant the hull is hit, 0 once the flinch has faded. Drawn even
     // when `show` is false: it is damage feedback rather than a readout, and a
     // screenshot taken with the HUD hidden should still show the player being

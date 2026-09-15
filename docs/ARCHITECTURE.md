@@ -1200,6 +1200,57 @@ name, ammo, keys, countdown, phase, message. The renderer never reaches into
 `GameState` or `CombatState` to draw the HUD, which is what keeps `src/render`
 free of simulation types.
 
+### The darkness gauge
+
+The mine has no ambient term, and `playerVisibility` (see *Darkness hides you*)
+turns that into a rule robots act on: an unlit player they have never seen
+cannot be picked out. That rule was invisible. A player flying a black corridor
+had no way to know whether it was dark enough to count, and the difference
+between hidden and seen is a step or two of flying.
+
+So darkness is a third gauge on the energy/shields stack rather than an icon of
+its own. It is a live quantity the player spends and recovers by flying,
+which is exactly what the other two are:
+
+| Part | Shows |
+| --- | --- |
+| The bar | The light reaching the player |
+| The tick inside it | `sim::kDarkThreshold`, the value it must stay under |
+| The word | What the robots conclude — `hidden`, `exposed`, or `headlight` |
+
+The tick is drawn **in** the bar, not as a colour change at the boundary,
+because "how close am I to being seen" is the question worth answering while
+flying; which side of the line you are on you can already tell from the word.
+
+Two decisions worth keeping:
+
+- **The word and the bar read one query.** Both come from
+  `PlayerVisibility::illumination`, not from the hull-sampled `Illumination`
+  main already computes for the debug panel. The hull query is the
+  better-behaved number — it averages seven samples, so it does not flicker as
+  a shadow edge crosses a point — but it answers a *different* question, and the
+  two genuinely disagree near a shadow edge. A bar sitting below its own
+  threshold tick next to the word `exposed` reads as a bug. The number the
+  robots act on is the one that gets drawn.
+- **The headlight names itself.** `playerVisibility` makes a player carrying a
+  lamp visible whatever is falling on them, so with the headlight on in a black
+  corridor the bar sits near zero and the answer is still "seen". Reading
+  `exposed` over an empty bar looks broken; reading `headlight` says what
+  happened and points at the key that undoes it. That state is exactly
+  `headlight && illumination < kDarkThreshold` — the case where `visible` would
+  have been false without it.
+
+The headlight cannot brighten its own bar, which is what makes that state
+readable at all. It sits `kHeadlightForward` (2.2) ahead of the ship's centre
+pointing forward, and the query's sample points are at most `shipRadius` (1.6)
+from that centre, so every sample is behind the cone's origin for any
+orientation.
+
+The word doubles as the gauge's caption, where `energy` and `shields` put a
+fixed noun. A noun and the state together do not fit across the bar at this
+scale, and between the two the answer is worth more than the name of the thing
+being measured.
+
 ### The font is generated, not shipped
 
 Text needs digits, a colon and capitals: 37 glyphs. Those are a 5x7 bitmap per
@@ -1453,7 +1504,9 @@ Three things give the position away, and **none of them is a special case**:
 So there is no sniping out of the dark, and no rule had to be written saying so.
 
 The query is asked **once per step**, not once per robot: it is a property of
-where the player is standing, identical for every robot looking at them.
+where the player is standing, identical for every robot looking at them. The
+same answer is what the HUD's darkness gauge draws, so the readout and the
+robots can never disagree; see *The darkness gauge*.
 
 ### Retreat is what sells it
 

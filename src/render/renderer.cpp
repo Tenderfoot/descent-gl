@@ -460,6 +460,46 @@ void Renderer::buildHud(const HudData& hud) {
     hud_.text("shields", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
     hud_.bar(left, y, barW, barH, hud.shields / 100.0f, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
 
+    // Darkness, as a third gauge on the same stack. It belongs with energy and
+    // shields rather than off on its own: the mine has no ambient term, so the
+    // light on the player is a resource they spend and recover by flying,
+    // exactly as those two are.
+    //
+    // Three parts, because one number cannot say it. The bar is the light
+    // reaching the player. The tick inside it is the threshold that light has to
+    // stay under to be hidden, drawn in the bar so the player can see how close
+    // to the edge they are flying rather than only which side of it they are
+    // on. The word is the robots' own conclusion, which is the thing that
+    // actually matters and which the bar alone would get wrong: with the
+    // headlight on the bar can sit deep in the dark and the answer still be
+    // "seen".
+    y -= barH + 12.0f * s;
+    {
+        // Scaled so the threshold sits a quarter of the way along. The range
+        // worth reading is the one either side of it; the rest of the bar only
+        // has to say "not close".
+        const float full = std::max(hud.darkThreshold, 1e-4f) * 4.0f;
+        const glm::vec4 hidden(0.35f, 0.5f, 0.95f, 0.9f);
+        const glm::vec4 exposed(1.0f, 0.8f, 0.3f, 0.9f);
+        const glm::vec4 c = hud.seen ? exposed : hidden;
+
+        // The state word stands where "energy" and "shields" put their captions,
+        // and is the caption: a fixed noun plus the word would not fit across
+        // the bar at this scale, and of the two the answer is worth more than
+        // the name of the thing being measured. The headlight case names itself
+        // rather than reading "exposed", because the player can do something
+        // about that one and the key that does it is one press away.
+        const char* word = !hud.seen ? "hidden" : (hud.seenByHeadlight ? "headlight" : "exposed");
+        hud_.text(word, left, y - 7.0f * s - 2.0f * s, s * 0.7f, c);
+        hud_.bar(left, y, barW, barH, hud.illumination / full, c);
+
+        // Drawn after the bar so it sits on top of the fill, and taller than the
+        // bar so it stays findable once the fill has passed it.
+        const float tickW = std::max(1.0f, s * 0.5f);
+        hud_.rect(left + barW * (hud.darkThreshold / full) - tickW * 0.5f, y - 1.5f * s, tickW,
+                  barH + 3.0f * s, glm::vec4(0.85f, 0.9f, 1.0f, 0.65f));
+    }
+
     // Weapon and ammo, bottom right.
     {
         std::string line = hud.weaponName;
