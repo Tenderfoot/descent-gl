@@ -676,19 +676,19 @@ int main(int argc, char** argv) {
         }
 
         dvk::alloc::Scope simAllocs;
-        glm::vec2 mouseDelta = input.consumeMouseDelta();
+        glm::vec2 mouseDelta{0.0f};
         // With the map open the mouse orbits it instead of steering. The
         // simulation is untouched either way: the ship keeps flying, robots keep
         // hunting, and the countdown keeps running - opening the map is not a
         // pause, and reading it while something is shooting at you is the cost
         // of looking.
         if (automap.open) {
+            // The automap camera is render-driven, so it consumes motion every
+            // frame. Ship steering consumes below only when a simulation step
+            // actually runs, leaving motion queued across faster render frames.
+            mouseDelta = input.consumeMouseDelta();
             automap.yaw += mouseDelta.x * 0.005f;
             automap.pitch = std::clamp(automap.pitch - mouseDelta.y * 0.005f, -1.45f, 1.45f);
-            mouseDelta = glm::vec2(0.0f);
-        } else {
-            mouseDelta *= settings.mouseSensitivity;
-            if (settings.invertMouseY) mouseDelta.y = -mouseDelta.y;
         }
         bool consumedMouse = false;
         bool runFinished = false;
@@ -697,6 +697,10 @@ int main(int argc, char** argv) {
             prev = cur;
             // The whole frame's motion belongs to the first step; later steps
             // in the same frame have no new input to apply.
+            if (!consumedMouse && !automap.open) {
+                mouseDelta = input.consumeMouseDelta() * settings.mouseSensitivity;
+                if (settings.invertMouseY) mouseDelta.y = -mouseDelta.y;
+            }
             dvk::sim::ShipControls controls =
                 dvk::readControls(input, consumedMouse ? glm::vec2(0.0f) : mouseDelta,
                                   settings.bindings);
