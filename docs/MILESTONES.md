@@ -1846,3 +1846,46 @@ the guns, not the window".
 | First person unchanged | ✅ same run without `--chase`: reticle at (640, 360), the centre, to the pixel |
 | Automap unchanged | ✅ `--automap --reveal`: reticle at (640, 360); `hasAimPoint` is false there |
 | Per-frame allocations | ✅ unchanged from `main` — Release chase run reports the same pre-existing `sim step SOME on 1 of 30`, `draw path SOME on 26 of 30` before and after |
+
+## Weapon keys: four primaries on 1-4, missiles on one cycle key
+
+The number keys walked the `WeaponId` enum, which is the order the weapons were
+written rather than the order they are used: the two missiles took `3` and `4`,
+and the railgun and the lightning gun — both primaries, both fired from the left
+trigger — sat out on `5` and `6`. Selecting a primary meant reaching past the
+secondaries to get to it.
+
+Each primary now has a key of its own in the order a pilot reaches for them —
+`1` laser, `2` vulcan, `3` lightning, `4` railgun — and the two missiles share
+`G`, which steps to the next one. The pairing of key to gun is written out in
+`kWeaponSelectActions` rather than being the action's position cast to a weapon
+id, and `--weapons-test` checks the number keys and the cycle together name
+every weapon exactly once, so a gun added later cannot end up unreachable.
+
+Actions are named for the gun (`selectLightning`) instead of the key
+(`weapon3`), so no saved settings file can carry an old rebinding over to a
+different weapon; the superseded entries are simply unknown and every weapon key
+comes back as its default. The cycle itself belongs to `stepCombat`, through
+`FireControls::cycleSecondary` and `sim::nextSecondaryWeapon`. See
+`docs/ARCHITECTURE.md`, "Player input actions and rebinding".
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| `--validate-assets` | ✅ 0 failures |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS (82 portal crossings, 0 failed) |
+| `--weapons-test` | ✅ PASS — `selection: keys 1-4 primaries, 2 missiles on one cycle key` |
+| `--robots-test` | ✅ PASS |
+| `--loop-test` | ✅ PASS |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| `--resize-test` | ✅ completed, 56.6 steps/s against 56.2 on the same run on `main` (median of three each; software rendering, 1920x1080, bounded by the loop's frame clamp) |
+| Every gun reachable from exactly one control | ✅ `--weapons-test`: 4 number keys + 2 cycle positions cover all 6 weapons once each, and each lands on the trigger its slot says |
+| The cycle wraps and leaves the primary alone | ✅ `--weapons-test`: from the default concussion, three presses give homing, concussion, homing, with the primary unchanged; a cycle from a non-missile selection lands on a missile |
+| Old weapon bindings do not carry over | ✅ `--settings-test`: a file with `weapon1`/`weapon3`/`weapon5` loads with all five weapon keys at their defaults |
+| The controls screen shows them | ✅ `--loop-test` reads `1`, `2`, `3`, `4`, `G` off the rebinding rows; `--controls-menu` at 1600x900 reports `1-7 of 25` actions |
+| Per-frame allocations | ✅ `--controls-menu` run: `sim step none on 0 of 110 frames`, `draw path none on 0 of 110` |

@@ -216,8 +216,13 @@ struct FireControls {
     bool primary = false;      // left mouse
     bool secondary = false;    // right mouse
     bool flare = false;
-    // 0..1 select the primary weapon, 2..3 select the secondary weapon.
+    // A WeaponId, or -1 for no change. Which trigger it lands on is
+    // weaponSlot()'s answer, not the caller's: selecting a primary leaves the
+    // secondary selection alone and the other way round.
     int selectWeapon = -1;
+    // Step the secondary selection on to the next missile. A one-shot edge,
+    // not a held button: the cycle key advances once per press.
+    bool cycleSecondary = false;
 };
 
 struct CombatState {

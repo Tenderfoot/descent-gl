@@ -93,15 +93,18 @@ to enter the selected level directly.
 | F1 | Toggle chase camera |
 | F3 | Toggle the ImGui debug panels |
 | Tab | Toggle the automap (mouse orbits it; the simulation keeps running) |
-| 1 / 2 | Select laser or vulcan for primary fire |
-| 3 / 4 | Select concussion or homing for secondary fire |
+| 1 / 2 / 3 / 4 | Select laser, vulcan, lightning or railgun for primary fire |
+| G | Cycle the secondary weapon: concussion, homing |
 | Left mouse | Fire the selected primary weapon |
 | Right mouse | Fire the selected secondary weapon |
 | F | Throw a flare |
 | H | Toggle the headlight |
 | Escape | Pause / resume |
 
-Every one of these comes from a single table in `src/game/bindings.h`.
+Every one of these is a default in a single table in
+`src/game/input_actions.cpp`, and every one can be rebound from the controls
+screen. `src/game/bindings.h` samples whatever is bound into the controls the
+simulation reads.
 
 ## Verifying it
 

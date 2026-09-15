@@ -411,6 +411,7 @@ int main(int argc, char** argv) {
     double lastTime = loopStart;
     double accumulator = 0.0;
     int pendingWeaponSelection = -1;
+    bool pendingSecondaryCycle = false;
     bool pendingFlare = false;
     long long totalSteps = 0;
     int frame = 0;
@@ -671,6 +672,7 @@ int main(int argc, char** argv) {
         if (!session.advancesSimulation()) {
             accumulator = 0.0;
             pendingWeaponSelection = -1;
+            pendingSecondaryCycle = false;
             pendingFlare = false;
         } else if (!bindingCaptureActive) {
             // A fast render frame can have no fixed simulation step. Preserve
@@ -678,13 +680,18 @@ int main(int argc, char** argv) {
             pendingFlare = pendingFlare ||
                            dvk::bindingPressed(input, settings.bindings,
                                                dvk::PlayerAction::Flare);
-            for (int w = 0; w < dvk::sim::WeaponCount; ++w) {
-                const dvk::PlayerAction action = static_cast<dvk::PlayerAction>(
-                    static_cast<int>(dvk::PlayerAction::Weapon1) + w);
-                if (dvk::bindingPressed(input, settings.bindings, action)) {
-                    pendingWeaponSelection = w;
+            // A key each for the four primaries; the missiles share one that
+            // cycles them, which the simulation resolves against whichever one
+            // is selected at the time.
+            for (const dvk::WeaponSelectAction& select : dvk::kWeaponSelectActions) {
+                if (dvk::bindingPressed(input, settings.bindings, select.action)) {
+                    pendingWeaponSelection = select.weapon;
                 }
             }
+            pendingSecondaryCycle =
+                pendingSecondaryCycle ||
+                dvk::bindingPressed(input, settings.bindings,
+                                    dvk::PlayerAction::CycleSecondary);
         }
 
         dvk::alloc::Scope simAllocs;
@@ -746,6 +753,7 @@ int main(int argc, char** argv) {
             if (!consumedMouse) {
                 fire.flare = pendingFlare;
                 fire.selectWeapon = pendingWeaponSelection;
+                fire.cycleSecondary = pendingSecondaryCycle;
             }
             if (opts.autofire >= 0) {
                 if (opts.autofire >= dvk::sim::WeaponCount) {
@@ -766,6 +774,7 @@ int main(int argc, char** argv) {
             if (!consumedMouse) {
                 pendingFlare = false;
                 pendingWeaponSelection = -1;
+                pendingSecondaryCycle = false;
             }
             dvk::sim::stepRobots(level, robotConfig, weapons, cur.robots, cur.combat,
                                  cur.ship.body, static_cast<float>(kSimStep), &solidDoors,

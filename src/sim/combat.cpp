@@ -303,6 +303,14 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         if (controls.selectWeapon != selected) emitLocal(events, Cue::WeaponSelect);
         selected = controls.selectWeapon;
     }
+    if (controls.cycleSecondary) {
+        // Always a change while there is more than one missile to cycle
+        // between, so the cue fires on every press - that click is the only
+        // feedback a blind cycle gives before the HUD redraws.
+        const int next = nextSecondaryWeapon(player.secondaryWeapon);
+        if (next != player.secondaryWeapon) emitLocal(events, Cue::WeaponSelect);
+        player.secondaryWeapon = next;
+    }
 
     for (float& c : player.cooldown) c = std::max(0.0f, c - dt);
     player.emptyClickTimer = std::max(0.0f, player.emptyClickTimer - dt);

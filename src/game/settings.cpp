@@ -240,6 +240,27 @@ int runSettingsTest() {
                  "invalid bindings default without discarding valid bindings");
 
     {
+        // A file written before the weapon keys were reorganised: the old
+        // weapon1..weapon6 slots named a gun by its position, which no longer
+        // exists. None of them may be mistaken for one of the actions that
+        // replaced them, so every weapon key comes back as its default.
+        std::ofstream previous(path, std::ios::trunc);
+        previous << R"({"version":3,"bindings":{"weapon1":{"device":"keyboard","code":49},)"
+                    R"("weapon3":{"device":"keyboard","code":90},)"
+                    R"("weapon5":{"device":"keyboard","code":88}}})";
+    }
+    const PlayerSettings migrated = loadPlayerSettings(path);
+    const InputBindings fresh = defaultInputBindings();
+    bool weaponsDefaulted = true;
+    for (const WeaponSelectAction& select : kWeaponSelectActions) {
+        weaponsDefaulted =
+            weaponsDefaulted && migrated.bindings[select.action] == fresh[select.action];
+    }
+    ok &= expect(weaponsDefaulted && migrated.bindings[PlayerAction::CycleSecondary] ==
+                                         fresh[PlayerAction::CycleSecondary],
+                 "weapon bindings from before the reorganisation fall back to the defaults");
+
+    {
         std::ofstream malformed(path, std::ios::trunc);
         malformed << "{";
     }

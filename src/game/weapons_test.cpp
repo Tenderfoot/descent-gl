@@ -1,6 +1,7 @@
 #include "game/weapons_test.h"
 
 #include "core/log.h"
+#include "game/input_actions.h"
 #include "game/level.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
@@ -8,10 +9,13 @@
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
+#include <GLFW/glfw3.h>
+
 #include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -183,6 +187,65 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         }
         ok &= expect(firedVulcan, "primary fire uses the selected primary weapon");
         ok &= expect(firedHoming, "secondary fire uses the selected secondary weapon");
+    }
+
+    // --- every gun is reachable, and the missiles cycle -------------------
+    //
+    // The four primaries have a key each and the missiles share one, so the
+    // check that nothing is stranded is that the two lists together name every
+    // weapon exactly once - not that either list has a particular length.
+    {
+        std::array<int, sim::WeaponCount> reachable{};
+        for (const WeaponSelectAction& select : kWeaponSelectActions) {
+            ++reachable[static_cast<size_t>(select.weapon)];
+            ok &= expect(sim::weaponSlot(select.weapon) == sim::WeaponSlot::Primary,
+                         "a number key selects a primary weapon");
+        }
+        for (const sim::WeaponId weapon : sim::kSecondaryWeapons) {
+            ++reachable[static_cast<size_t>(weapon)];
+            ok &= expect(sim::weaponSlot(weapon) == sim::WeaponSlot::Secondary,
+                         "the cycle key selects a secondary weapon");
+        }
+        bool once = true;
+        for (const int count : reachable) once = once && count == 1;
+        ok &= expect(once, "every weapon is reachable from exactly one control");
+
+        const InputBindings defaults = defaultInputBindings();
+        ok &= expect(defaults[PlayerAction::SelectLaser].code == GLFW_KEY_1 &&
+                         defaults[PlayerAction::SelectVulcan].code == GLFW_KEY_2 &&
+                         defaults[PlayerAction::SelectLightning].code == GLFW_KEY_3 &&
+                         defaults[PlayerAction::SelectRailgun].code == GLFW_KEY_4 &&
+                         defaults[PlayerAction::CycleSecondary].code == GLFW_KEY_G,
+                     "laser, vulcan, lightning and railgun sit on 1 to 4, missiles on G");
+
+        rig.reset();
+        sim::FireControls cycle;
+        cycle.cycleSecondary = true;
+        // Walk the whole cycle and one step past it, which is where a wrap
+        // that runs off the end of the list would show up.
+        const int started = rig.state.player.primaryWeapon;
+        for (size_t i = 0; i < sim::kSecondaryWeapons.size() + 1; ++i) {
+            rig.run(1, cycle);
+            const sim::WeaponId expected =
+                sim::kSecondaryWeapons[(i + 1) % sim::kSecondaryWeapons.size()];
+            ok &= expect(rig.state.player.secondaryWeapon == expected,
+                         "the cycle key steps to the next missile and wraps");
+        }
+        ok &= expect(rig.state.player.primaryWeapon == started,
+                     "cycling the missiles leaves the primary weapon alone");
+
+        // A primary selection is not a point in the cycle. Pressing the cycle
+        // key while the saved secondary is nonsense has to land on a missile
+        // rather than leave a gun on the right trigger.
+        rig.reset();
+        rig.state.player.secondaryWeapon = sim::WeaponLaser;
+        rig.run(1, cycle);
+        ok &= expect(sim::weaponSlot(rig.state.player.secondaryWeapon) ==
+                         sim::WeaponSlot::Secondary,
+                     "cycling from a weapon outside the cycle lands on a missile");
+
+        log::info("selection: keys 1-4 primaries, {} missiles on one cycle key",
+                  sim::kSecondaryWeapons.size());
     }
 
     // --- bolts hit walls rather than passing through them -------------------

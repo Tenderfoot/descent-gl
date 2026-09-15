@@ -134,7 +134,8 @@ level directly unless `--start-menu` is present.
 | F1 | Toggle chase camera |
 | F3 | Toggle the ImGui debug panels |
 | Tab | Toggle the automap (mouse orbits it; the simulation keeps running) |
-| 1 / 2 / 3 / 4 / 5 / 6 | Select laser, vulcan, concussion, homing, railgun, lightning |
+| 1 / 2 / 3 / 4 | Select laser, vulcan, lightning, railgun |
+| G | Cycle the secondary weapon (concussion, homing) |
 | Left mouse | Fire the selected gun. The railgun fires one traced shot per pull; the lightning gun runs for as long as it is held. |
 | Right mouse | Launch a missile |
 | F | Throw a flare |
