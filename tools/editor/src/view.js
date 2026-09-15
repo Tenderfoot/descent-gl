@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 
 import { SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import { lampPosition } from './entities.js';
 import { lightSegments, sideCorners } from './geometry.js';
 
 // Flat, distinguishable, and nothing like the game's palette on purpose: this
@@ -26,7 +27,7 @@ const DOOR_COLOR = 0xe0913a;
 
 // Groups rebuilt from the level on every build(), and cleared before it.
 const LEVEL_GROUPS = ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
-                      'pickups', 'start', 'exit', 'vertices', 'highlight'];
+                      'pickups', 'props', 'start', 'exit', 'vertices', 'highlight'];
 
 // Groups that do not come from the level and must survive a rebuild. Keeping
 // this list explicit is what stops the next thing added to the scene from
@@ -115,6 +116,7 @@ export class LevelView {
         this.buildWalls(level);
         this.buildPortals(level);
         this.buildLights(level);
+        this.buildProps(level);
         this.buildEntities(level);
         this.buildVertices(level);
         this.setXray(this.xray);
@@ -259,14 +261,7 @@ export class LevelView {
             // The radius is the flood fill's cutoff, not a falloff curve. It is
             // the number that decides which segments the light is considered
             // against at all, so it is worth seeing.
-            const shell = new THREE.Mesh(
-                this.track(new THREE.SphereGeometry(light.radius, 20, 14)),
-                this.track(new THREE.MeshBasicMaterial({
-                    color, wireframe: true, transparent: true, opacity: 0.1, depthWrite: false,
-                })));
-            shell.position.copy(v3(light.position));
-            shell.userData.pick = { kind: 'light', index: i };
-            this.groups.reach.add(shell);
+            this.addReachShell(light.position, light.radius, color, { kind: 'light', index: i });
 
             if (light.type === 'spot') {
                 const direction = v3(light.direction).normalize();
@@ -275,6 +270,109 @@ export class LevelView {
                 this.groups.lights.add(helper);
             }
         }
+    }
+
+    // The two things that move once the level is running.
+    //
+    // Both are drawn at rest, and both draw the part that cannot be read off
+    // the numbers: a floating light's reach, and a swinging lamp's whole arc.
+    // The arc is the one that matters - a cord length and an amplitude in
+    // radians say nothing about whether the lamp will sweep into a pillar, and
+    // the swept curve says it at a glance.
+    buildProps(level) {
+        for (let i = 0; i < level.floatingLights.length; ++i) {
+            const ball = level.floatingLights[i];
+            const color = new THREE.Color(ball.color[0], ball.color[1], ball.color[2]);
+
+            const mesh = new THREE.Mesh(
+                this.track(new THREE.SphereGeometry(ball.radius, 16, 12)),
+                this.track(new THREE.MeshBasicMaterial({ color })));
+            mesh.position.copy(v3(ball.position));
+            mesh.userData.pick = { kind: 'ball', index: i };
+            this.groups.props.add(mesh);
+
+            // A wire cage, so a ball reads as a lamp in a housing rather than
+            // as a pickup, and so its collision radius is visible.
+            const cage = new THREE.Mesh(
+                this.track(new THREE.IcosahedronGeometry(ball.radius * 1.35, 1)),
+                this.track(new THREE.MeshBasicMaterial({
+                    color, wireframe: true, transparent: true, opacity: 0.55,
+                })));
+            cage.position.copy(v3(ball.position));
+            cage.userData.pick = { kind: 'ball', index: i };
+            this.groups.props.add(cage);
+
+            this.addReachShell(ball.position, ball.lightRadius, color, { kind: 'ball', index: i });
+        }
+
+        for (let i = 0; i < level.swingingLights.length; ++i) {
+            const lamp = level.swingingLights[i];
+            const color = new THREE.Color(lamp.color[0], lamp.color[1], lamp.color[2]);
+            const pick = { kind: 'lamp', index: i };
+            const rest = lampPosition(lamp, 0);
+
+            // The anchor is what the author drags, so it is what is easiest to
+            // hit: a small solid marker at the ceiling.
+            const anchor = new THREE.Mesh(
+                this.track(new THREE.BoxGeometry(0.9, 0.5, 0.9)),
+                this.track(new THREE.MeshBasicMaterial({ color: 0x8899aa })));
+            anchor.position.copy(v3(lamp.position));
+            anchor.userData.pick = pick;
+            this.groups.props.add(anchor);
+
+            const housing = new THREE.Mesh(
+                this.track(new THREE.ConeGeometry(1.3, 1.8, 12)),
+                this.track(new THREE.MeshBasicMaterial({ color })));
+            housing.position.copy(v3(rest));
+            housing.userData.pick = pick;
+            this.groups.props.add(housing);
+
+            // The cord at rest, and then the arc the lamp actually sweeps.
+            this.addLine([lamp.position, rest], 0x8899aa, 0.9, pick);
+
+            const arc = [];
+            const steps = 24;
+            for (let k = 0; k <= steps; ++k) {
+                arc.push(lampPosition(lamp, -lamp.amplitude + (2 * lamp.amplitude * k) / steps));
+            }
+            this.addLine(arc, color.getHex(), 0.75, pick);
+            // The two extremes of the cord, so the swept volume is readable
+            // rather than just its lower edge.
+            this.addLine([lamp.position, arc[0]], color.getHex(), 0.3, pick);
+            this.addLine([lamp.position, arc[arc.length - 1]], color.getHex(), 0.3, pick);
+
+            const direction = new THREE.Vector3().subVectors(v3(rest), v3(lamp.position)).normalize();
+            this.groups.props.add(new THREE.ArrowHelper(
+                direction, v3(rest), Math.min(lamp.lightRadius, 12), color.getHex(), 2.5, 1.6));
+
+            this.addReachShell(rest, lamp.lightRadius, color, pick);
+        }
+    }
+
+    // A light's radius is the flood fill's cutoff, not a falloff curve: it is
+    // the number that decides which segments the light is considered against at
+    // all. Shared by the static lights and both prop kinds.
+    addReachShell(position, radius, color, pick) {
+        const shell = new THREE.Mesh(
+            this.track(new THREE.SphereGeometry(radius, 20, 14)),
+            this.track(new THREE.MeshBasicMaterial({
+                color, wireframe: true, transparent: true, opacity: 0.1, depthWrite: false,
+            })));
+        shell.position.copy(v3(position));
+        if (pick) shell.userData.pick = pick;
+        this.groups.reach.add(shell);
+    }
+
+    addLine(points, color, opacity, pick) {
+        const geometry = this.track(new THREE.BufferGeometry());
+        geometry.setFromPoints(points.map(v3));
+        const material = this.track(new THREE.LineBasicMaterial({
+            color, transparent: true, opacity,
+        }));
+        const line = new THREE.Line(geometry, material);
+        if (pick) line.userData.pick = pick;
+        this.groups.props.add(line);
+        return line;
     }
 
     // The real mesh where the cache has it, a box where it does not. A level

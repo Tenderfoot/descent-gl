@@ -12,7 +12,8 @@
 // is exactly the kind of bug an editor exists to prevent.
 
 import { PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
-import { insideSegment, sideCorners } from './geometry.js';
+import { lampPosition } from './entities.js';
+import { findSegment, insideSegment, sideCorners } from './geometry.js';
 
 const finding = (severity, rule, message, where = {}) => ({ severity, rule, message, ...where });
 
@@ -121,6 +122,46 @@ function checkEntities(level, out) {
     for (const p of level.pickups) place('pickup', 'pickup-outside', 'error', `'${PICKUP_NAMES[p.kind]}'`, p);
     for (const o of level.objects) place('object', 'object-outside', 'error', `'${o.type}'`, o);
     for (const l of level.lights) place('light', 'light-outside', 'warning', '', l);
+
+    // Both prop kinds are fatal in loadLevel when they are not inside a
+    // segment, unlike a static light, so both are errors here.
+    for (const b of level.floatingLights) place('floating light', 'ball-outside', 'error', '', b);
+    for (const l of level.swingingLights) place('swinging light', 'lamp-outside', 'error', '', l);
+
+    checkCords(level, out);
+}
+
+// A lamp hangs a cord's length below its anchor, so a cord longer than the room
+// puts the lamp through the floor, where it lights the segment below through
+// solid rock.
+//
+// loadLevel checks the straight-down case and is fatal on it, which is matched
+// here. It does not check the swing, so a lamp that only leaves the room at the
+// ends of its arc loads and then leaks light - that one is the editor's to
+// catch, as a warning, and is in EDITOR_ONLY_RULES.
+function checkCords(level, out) {
+    for (const lamp of level.swingingLights) {
+        if (lamp.segment < 0 || lamp.segment >= level.segments.length) continue;
+        const [x, y, z] = lamp.position;
+        const where = `at ${x.toFixed(1)} ${y.toFixed(1)} ${z.toFixed(1)}`;
+
+        const straightDown = [lamp.position[0], lamp.position[1] - lamp.cordLength, lamp.position[2]];
+        if (findSegment(level, straightDown, lamp.segment) < 0) {
+            out.push(finding('error', 'lamp-cord-outside',
+                `swinging light ${where} has a ${lamp.cordLength.toFixed(1)}u cord that reaches ` +
+                'outside the mine', {}));
+            continue;
+        }
+
+        for (const angle of [-lamp.amplitude, lamp.amplitude]) {
+            if (findSegment(level, lampPosition(lamp, angle), lamp.segment) >= 0) continue;
+            out.push(finding('warning', 'lamp-swing-outside',
+                `swinging light ${where} hangs clear but swings outside the mine at ` +
+                `${Math.abs(angle).toFixed(2)} rad. The game only checks the cord straight down, ` +
+                'so this loads and then lights through rock', {}));
+            break;
+        }
+    }
 }
 
 // --- the closed-surface check ----------------------------------------------
@@ -277,4 +318,5 @@ export function validateLevel(level) {
     return { findings, closure, ok: findings.every((f) => f.severity !== 'error') };
 }
 
-export const EDITOR_ONLY_RULES = new Set(['segment-overlap', 'segment-unreachable']);
+export const EDITOR_ONLY_RULES = new Set(['segment-overlap', 'segment-unreachable',
+                                          'lamp-swing-outside']);

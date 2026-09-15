@@ -78,8 +78,31 @@ Three selection modes — **1** segment, **2** side, **3** vertex.
 
 Mode **4** places the things inside a mine: lights (radius, intensity, colour,
 point or spot), robots and scenery from `assets/models/` drawn as their real
-meshes, pickups including keys, the exit trigger, and doors on portals. Drag
-the gizmo to move any of them.
+meshes, pickups including keys, the exit trigger, doors on portals, and the two
+kinds that move once the level is running. Drag the gizmo to move any of them.
+
+**Floating lights** are a light in a ball: shoot one in the game and it bounces
+around the room. Mass divides every impulse it takes, bounce is how much of a
+wall it keeps, and drift is how fast it wanders when nothing has hit it.
+
+**Swinging lights** hang from the ceiling on a cord. What the author places and
+drags is the **anchor**; the lamp is a cord's length below it. The file calls
+that point `anchor`, and inside the editor it is an entity's ordinary
+`position`, so selection, dragging, segment resolution and validation are
+written once rather than once per kind — `parseLevel` and `serializeLevel` are
+the only two places the name changes.
+
+A lamp is hard to author blind: a cord length and an amplitude in radians say
+nothing about whether it will sweep into a pillar. So the viewport draws the
+whole arc, the cord at both extremes, and the spot direction, and the panel
+takes the swing in degrees and prints the period in seconds. "Add swinging
+light" hangs it from the middle of the selected segment's ceiling on a cord
+short enough to clear the floor, because the game is fatal on one that does
+not.
+
+Both kinds are capped in the simulation at eight per level. Past that the game
+warns and ignores the rest, so the editor refuses the ninth rather than letting
+you place something that will silently not be there.
 
 The rule all of it protects is that an entity's cached `segment` says which
 segment actually contains it. The loader recomputes a `segment` that is missing
@@ -126,7 +149,7 @@ one keystroke away.
 | `src/json_emit.js` | the number and layout rules the level files use |
 | `src/validate.js` | every structural rule, plus two the game does not check |
 | `src/ops.js` | extrude, join, delete and the rest of the structural edits |
-| `src/entities.js` | lights, robots, pickups, doors, the exit, the start |
+| `src/entities.js` | lights, robots, pickups, doors, the exit, the start, the moving lights |
 | `src/create.js` | the starter level, and what a level may be called |
 | `src/obj.js` | just enough OBJ to draw the shipped models |
 | `src/history.js` | undo and redo, by snapshot |
@@ -210,9 +233,9 @@ one an author needs:
 Only "cannot load" counts against the headline. The full output is one click
 away underneath.
 
-### Two checks the game does not make
+### Three checks the game does not make
 
-Both are warnings, both marked *editor only* in the panel:
+All three are warnings, all marked *editor only* in the panel:
 
 * **Overlapping segments.** Nothing in the C++ checks that two segments occupy
   disjoint space. When they overlap, `findSegment` returns whichever it tests
@@ -220,6 +243,11 @@ Both are warnings, both marked *editor only* in the panel:
 * **Unreachable segments.** A segment no portal walk from the player start can
   reach is either dead data or a room nobody will ever see. The game loads it
   and says nothing.
+* **A lamp that swings out of the room.** `loadLevel` checks a swinging light's
+  cord straight down and is fatal on one that reaches outside the mine, which
+  the editor matches as an error. It does not check the ends of the swing, so a
+  lamp that hangs clear but leaves the room at the extremes of its arc loads
+  and then lights through rock.
 
 ## Two differences from `saveLevel()`
 

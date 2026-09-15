@@ -62,7 +62,32 @@ export const DEFAULTS = {
     exitRadius: 6.0,
     objectScale: 1.0,
     objectHealth: 0.0,
+    // src/game/level.h: FloatingLightDef.
+    ballRadius: 1.1,
+    ballLightRadius: 26.0,
+    ballLightIntensity: 2.6,
+    ballRestitution: 0.72,
+    ballMass: 0.45,
+    ballDrift: 1.4,
+    // src/game/level.h: SwingingLightDef.
+    lampCordLength: 7.0,
+    lampAmplitude: 0.55,
+    lampRate: 1.5,
+    lampPhase: 0.0,
+    lampLightRadius: 34.0,
+    lampLightIntensity: 3.2,
+    lampCone: 60.0,
 };
+
+// The default colours the two prop kinds take when the file omits them.
+// src/game/level.h.
+export const BALL_COLOR = [1.0, 0.86, 0.62];
+export const LAMP_COLOR = [1.0, 0.95, 0.82];
+
+// sim::kMaxFloatingLights and sim::kMaxSwingingLights. Past these the game
+// warns and ignores the rest, so the editor says so before that happens.
+export const MAX_FLOATING_LIGHTS = 8;
+export const MAX_SWINGING_LIGHTS = 8;
 
 // Corner order for each of the two candidate triangulations of a quad.
 export const SPLIT_A = [[0, 1, 2], [0, 2, 3]];   // diagonal 0-2

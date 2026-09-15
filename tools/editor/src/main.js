@@ -10,7 +10,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import {
-    addDoor, addLight, addObject, addPickup, availableKeys, moveEntity, removeEntity,
+    addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
+    ceilingAnchor, moveEntity, removeEntity,
     segmentCentre, setExit,
 } from './entities.js';
 import { KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
@@ -36,6 +37,7 @@ const LAYERS = [
     ['reach', 'Light radius', false],
     ['objects', 'Objects', true],
     ['pickups', 'Pickups', true],
+    ['props', 'Moving lights', true],
     ['start', 'Start', true],
     ['exit', 'Exit', true],
 ];
@@ -606,6 +608,23 @@ function renderEntityTools(container, button, hint) {
         return input;
     };
 
+    // The three fields every emissive thing has. Both prop kinds carry a light
+    // with the same meaning as a static one's - radius is the flood fill's
+    // cutoff, not a falloff curve - so they get the same controls.
+    const lightFields = (entity, set) => {
+        const hex = '#' + entity.color.map((c) =>
+            Math.round(Math.min(Math.max(c, 0), 1) * 255).toString(16).padStart(2, '0')).join('');
+        field('colour', hex, { type: 'color' }, (el) => set('colour', () => {
+            const v = el.value;
+            entity.color = [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+        }));
+        field('light radius', entity.lightRadius, { type: 'number', min: 1, max: 400, step: 1 },
+              (el) => set('light radius', () => { entity.lightRadius = Number(el.value); }));
+        field('light intensity', entity.lightIntensity,
+              { type: 'number', min: 0, max: 40, step: 0.1 },
+              (el) => set('light intensity', () => { entity.lightIntensity = Number(el.value); }));
+    };
+
     if (selection && MOVABLE.has(selection.kind)) {
         const kind = selection.kind;
         const index = selection.index;
@@ -641,6 +660,53 @@ function renderEntityTools(container, button, hint) {
                   { type: 'number', min: 0, max: 5000, step: 1 },
                   (el) => edit(`object ${index} health`, () => { object.health = Number(el.value); }));
             row('health 0 is indestructible scenery; anything above makes it a target');
+        }
+
+        if (kind === 'ball') {
+            const ball = app.level.floatingLights[index];
+            const set = (what, value) => edit(`floating light ${index} ${what}`, value);
+            field('radius', ball.radius, { type: 'number', min: 0.2, max: 6, step: 0.1 },
+                  (el) => set('radius', () => { ball.radius = Number(el.value); }));
+            field('mass', ball.mass, { type: 'number', min: 0.05, max: 20, step: 0.05 },
+                  (el) => set('mass', () => { ball.mass = Number(el.value); }));
+            row('every impulse is divided by mass: 0.45 means a missile throws it across the room');
+            field('bounce', ball.restitution, { type: 'number', min: 0, max: 1, step: 0.02 },
+                  (el) => set('bounce', () => { ball.restitution = Number(el.value); }));
+            row('0 makes it slide along a wall like a ship; 0.72 makes it rattle around the room');
+            field('drift', ball.drift, { type: 'number', min: 0, max: 12, step: 0.1 },
+                  (el) => set('drift', () => { ball.drift = Number(el.value); }));
+            row('how fast it wanders when nothing has hit it');
+            lightFields(ball, set);
+        }
+
+        if (kind === 'lamp') {
+            const lamp = app.level.swingingLights[index];
+            const set = (what, value) => edit(`swinging light ${index} ${what}`, value);
+            field('cord', lamp.cordLength, { type: 'number', min: 0.5, max: 60, step: 0.5 },
+                  (el) => set('cord', () => { lamp.cordLength = Number(el.value); }));
+            // Radians in the file, degrees in the panel: nobody authors a swing
+            // in radians, and the arc in the viewport is the real readout.
+            field('swing°', +(lamp.amplitude * 180 / Math.PI).toFixed(1),
+                  { type: 'number', min: 0, max: 85, step: 1 },
+                  (el) => set('swing', () => { lamp.amplitude = Number(el.value) * Math.PI / 180; }));
+            field('rate', lamp.rate, { type: 'number', min: 0.05, max: 8, step: 0.05 },
+                  (el) => set('rate', () => { lamp.rate = Number(el.value); }));
+            row(`one full swing takes ${(2 * Math.PI / Math.max(0.05, lamp.rate)).toFixed(2)} s`);
+            field('phase', lamp.phase, { type: 'number', min: 0, max: 6.3, step: 0.1 },
+                  (el) => set('phase', () => { lamp.phase = Number(el.value); }));
+            row('offsets two lamps in one room so they do not swing in lockstep');
+            const axisRow = document.createElement('div');
+            axisRow.className = 'textures';
+            for (const [label, axis] of [['swing along X', [1, 0, 0]], ['swing along Z', [0, 0, 1]]]) {
+                const el = document.createElement('button');
+                el.textContent = label;
+                el.onclick = () => set('axis', () => { lamp.swingAxis = axis.slice(); });
+                axisRow.appendChild(el);
+            }
+            container.appendChild(axisRow);
+            field('cone°', lamp.coneDegrees, { type: 'number', min: 1, max: 179, step: 1 },
+                  (el) => set('cone', () => { lamp.coneDegrees = Number(el.value); }));
+            lightFields(lamp, set);
         }
 
         if (kind === 'exit') {
@@ -697,6 +763,18 @@ function renderEntityTools(container, button, hint) {
         const index = addLight(level, segmentCentre(level, target));
         app.selection = { kind: 'light', index };
     }));
+
+    button('Add floating light', 'a light in a ball: shoot it and it bounces around the room',
+           () => edit('add floating light', (level) => {
+               const index = addFloatingLight(level, segmentCentre(level, target));
+               app.selection = { kind: 'ball', index };
+           }));
+    button('Add swinging light', 'a spotlight hung from this segment\u2019s ceiling on a cord',
+           () => edit('add swinging light', (level) => {
+               const { position, cordLength } = ceilingAnchor(level, target);
+               const index = addSwingingLight(level, position, cordLength);
+               app.selection = { kind: 'lamp', index };
+           }));
 
     row('objects');
     const objectRow = document.createElement('div');
@@ -1048,7 +1126,7 @@ gizmo.addEventListener('objectChange', () => {
 
 // The kinds the gizmo can drag. A door is not one: it belongs to a portal, not
 // to a place.
-const MOVABLE = new Set(['light', 'pickup', 'object', 'start', 'exit']);
+const MOVABLE = new Set(['light', 'pickup', 'object', 'ball', 'lamp', 'start', 'exit']);
 
 function attachGizmo(position) {
     handle.position.set(...position);

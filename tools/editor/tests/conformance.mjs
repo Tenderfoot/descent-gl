@@ -108,6 +108,27 @@ const CASES = [
         mutate: (j) => { j.objects = [{ type: 'pillar', position: [999.0, 999.0, 999.0] }]; },
     },
     {
+        name: 'a floating light is outside the mine',
+        rule: 'ball-outside',
+        mutate: (j) => { j.floatingLights = [{ position: [999.0, 999.0, 999.0] }]; },
+    },
+    {
+        name: 'a swinging light is anchored outside the mine',
+        rule: 'lamp-outside',
+        mutate: (j) => { j.swingingLights = [{ anchor: [999.0, 999.0, 999.0] }]; },
+    },
+    {
+        name: 'a swinging light has a cord longer than the mine',
+        rule: 'lamp-cord-outside',
+        // Anchored inside, but on a cord that puts the lamp well below the
+        // floor - which is exactly the level that loads and then lights the
+        // room underneath through solid rock, if nobody checks.
+        mutate: (j) => {
+            j.swingingLights = [{ anchor: j.segments[0].verts ? [5.0, 5.0, 5.0] : [0, 0, 0],
+                                  cordLength: 400.0 }];
+        },
+    },
+    {
         name: 'a segment has the wrong number of sides',
         rule: 'parse', segment: 0,
         mutate: (j) => { j.segments[0].sides.pop(); },
