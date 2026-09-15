@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sim/proxy.h"
+
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
@@ -212,6 +214,12 @@ struct Level {
     std::vector<Segment> segments;
     std::vector<Light> lights;
     std::vector<LevelObject> objects;
+    // The collision shape of each object, parallel to `objects` and resolved at
+    // load from the model each one names. A sphere per object was the old
+    // answer and it was wrong by a factor of four on a column: see
+    // `sim::ProxyVolume`. Built by `resolveObjectProxies` in game/proxies.cpp,
+    // because deriving it needs the OBJ and `sim` may not read one.
+    std::vector<sim::PlacedProxy> objectProxies;
     std::vector<Door> doors;
     std::vector<Pickup> pickups;
     std::vector<FloatingLightDef> floatingLights;

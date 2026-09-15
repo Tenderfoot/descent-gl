@@ -1,11 +1,14 @@
 #include "render/model.h"
+#include "render/model_data.h"
 
 #include "core/log.h"
 
 #include <tiny_obj_loader.h>
 
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
+#include <algorithm>
 #include <cstdint>
 
 namespace dvk::gl {
@@ -53,6 +56,19 @@ ModelData loadObj(const std::string& path) {
     log::info("model '{}' loaded: {} vertices, {} triangles", path, model.positions.size(),
               model.triangles.size());
     return model;
+}
+
+bool modelBounds(const ModelData& model, glm::vec3& lo, glm::vec3& hi) {
+    if (model.positions.empty()) return false;
+    glm::vec3 low = model.positions.front();
+    glm::vec3 high = low;
+    for (const glm::vec3& p : model.positions) {
+        low = glm::min(low, p);
+        high = glm::max(high, p);
+    }
+    lo = low;
+    hi = high;
+    return true;
 }
 
 Mesh toMesh(const ModelData& model) {
