@@ -274,6 +274,15 @@ int main(int argc, char** argv) {
         prev.combat.player.headlightOn = true;
         cur.combat.player.headlightOn = true;
     }
+    if (opts.targetHud && session.initial().robots.count > 0) {
+        dvk::sim::Robot& target = session.initial().robots.robots[0];
+        const dvk::sim::RobotDef& def =
+            robotConfig.types[static_cast<size_t>(target.type)];
+        target.health = def.health * 0.09f;
+        target.mode = dvk::sim::RobotMode::Disabled;
+        session.initial().combat.player.lastTargetRobot = 0;
+        session.initial().combat.player.targetHudTime = dvk::sim::kTargetHudTime;
+    }
     dvk::PlayerMenu menu;
     std::vector<dvk::LevelEntry> levelEntries = dvk::discoverLevels(kLevelDir, levelFile);
     for (dvk::LevelEntry& entry : levelEntries) {
@@ -1205,6 +1214,26 @@ int main(int argc, char** argv) {
         hud.message = cur.game.endReason;
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
+        const int targetSlot = cur.combat.player.lastTargetRobot;
+        if (cur.combat.player.targetHudTime > 0.0f && targetSlot >= 0 &&
+            targetSlot < cur.robots.count) {
+            const dvk::sim::Robot& target =
+                cur.robots.robots[static_cast<size_t>(targetSlot)];
+            if (target.alive && target.type >= 0 &&
+                static_cast<size_t>(target.type) < robotConfig.types.size()) {
+                const dvk::sim::RobotDef& def =
+                    robotConfig.types[static_cast<size_t>(target.type)];
+                hud.hasTarget = true;
+                hud.targetDisabled = target.mode == dvk::sim::RobotMode::Disabled;
+                hud.targetName = def.name.c_str();
+                hud.targetStatus = hud.targetDisabled
+                                       ? "engines disabled"
+                                       : dvk::sim::kRobotModeNames[static_cast<size_t>(target.mode)];
+                hud.targetHealth01 = def.health > 0.0f ? target.health / def.health : 0.0f;
+                hud.targetEnergy01 = def.energy > 0.0f ? target.energy / def.energy : 1.0f;
+                hud.targetFade = std::min(1.0f, cur.combat.player.targetHudTime / 0.5f);
+            }
+        }
         hud.commActive = opts.comm || cur.game.comm.active;
         // Forced mode holds on a useful, repeatable frame even when a
         // frame-limited render runs faster than the fixed simulation clock.

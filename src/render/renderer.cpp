@@ -632,6 +632,45 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     const float cx = w * 0.5f;
     const float cy = h * 0.5f;
 
+    // Last directly damaged robot, upper left. It mirrors the player's two
+    // resource bars but stays visually separate: this is a transient scanner
+    // result, not another resource owned by the ship.
+    if (hud.hasTarget && hud.targetFade > 0.0f) {
+        const float alpha = std::clamp(hud.targetFade, 0.0f, 1.0f);
+        const float x = 8.0f * s;
+        const float y = 8.0f * s;
+        const float panelW = 72.0f * s;
+        const float panelH = 45.0f * s;
+        const float targetBarW = panelW - 8.0f * s;
+        const float targetBarH = 3.5f * s;
+        const glm::vec4 frame(0.95f, 0.35f, 0.25f, alpha * 0.95f);
+        const glm::vec4 targetDim(0.8f, 0.86f, 0.92f, alpha * 0.82f);
+        const auto targetBar = [&](float barY, float fill, const glm::vec4& color) {
+            const float border = 1.0f;
+            hud_.rect(x + 4.0f * s - border, barY - border,
+                      targetBarW + border * 2.0f, targetBarH + border * 2.0f,
+                      glm::vec4(color.r * 0.35f, color.g * 0.35f, color.b * 0.35f,
+                                alpha * 0.85f));
+            hud_.rect(x + 4.0f * s, barY, targetBarW, targetBarH,
+                      glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.6f));
+            const float clamped = std::clamp(fill, 0.0f, 1.0f);
+            if (clamped > 0.0f) {
+                hud_.rect(x + 4.0f * s, barY, targetBarW * clamped, targetBarH, color);
+            }
+        };
+        hud_.rect(x, y, panelW, panelH, glm::vec4(0.015f, 0.025f, 0.04f, alpha * 0.78f));
+        hud_.rect(x, y, panelW, std::max(1.0f, 0.8f * s), frame);
+        hud_.text(hud.targetName, x + 4.0f * s, y + 4.0f * s, s * 0.85f, frame);
+        hud_.text(hud.targetStatus, x + 4.0f * s, y + 12.0f * s, s * 0.62f,
+                  hud.targetDisabled ? frame : targetDim);
+        hud_.text("health", x + 4.0f * s, y + 21.0f * s, s * 0.58f, targetDim);
+        targetBar(y + 28.0f * s, hud.targetHealth01,
+                  glm::vec4(1.0f, 0.32f, 0.22f, alpha * 0.92f));
+        hud_.text("energy", x + 4.0f * s, y + 33.0f * s, s * 0.58f, targetDim);
+        targetBar(y + 40.0f * s, hud.targetEnergy01,
+                  glm::vec4(0.3f, 0.75f, 1.0f, alpha * 0.92f));
+    }
+
     // Incoming transmission, below the key row in the otherwise open upper
     // right. The authored frames loop for the duration of the message; the
     // short fades keep it from arriving and vanishing as a hard rectangle.

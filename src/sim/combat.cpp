@@ -339,6 +339,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     player.hurtTimer = std::max(0.0f, player.hurtTimer - dt);
     player.recoilTimer = std::max(0.0f, player.recoilTimer - dt);
     player.beamCueTimer = std::max(0.0f, player.beamCueTimer - dt);
+    player.targetHudTime = std::max(0.0f, player.targetHudTime - dt);
+    if (player.targetHudTime <= 0.0f) player.lastTargetRobot = -1;
 
     // A disabled ship has no power for anything the player might ask of it:
     // the guns are dead and the headlight goes out. Drifting through a mine
@@ -508,6 +510,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 case CombatHit::Kind::Robot: {
                     Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                     robot.health -= shot;
+                    player.lastTargetRobot = hit.index;
+                    player.targetHudTime = kTargetHudTime;
                     robot.awareness = 1.0f;
                     robot.lastKnown = ship.position;
                     robot.hasLastKnown = true;
@@ -706,6 +710,12 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             case CombatHit::Kind::Robot: {
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
+                // Only the player's direct impact acquires a HUD target.
+                // applySplash remains intentionally unaware of target state.
+                if (p.owner < 0) {
+                    state.player.lastTargetRobot = hit.index;
+                    state.player.targetHudTime = kTargetHudTime;
+                }
                 // Along the line of travel, not away from the impact point: a
                 // bullet pushes what it hits the way it was already going.
                 applyImpulse(robot.body, dir, p.impactImpulse, robot.mass);
@@ -815,6 +825,8 @@ bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
 
     state.player.shields = 100.0f;
     state.player.energy = 100.0f;
+    state.player.lastTargetRobot = -1;
+    state.player.targetHudTime = 0.0f;
     return true;
 }
 

@@ -66,6 +66,8 @@ namespace dvk {
 //   --comm-test         decode and validate every frame of the HUD comm clip,
 //                       check deterministic playback timing, then exit.
 //   --comm              keep the comm panel visible for screenshot checks.
+//   --target-hud        show a disabled robot in the target panel for a
+//                       deterministic screenshot check.
 //   --level PATH        load a level other than the default mine01
 //   --no-ui             hide both the HUD and the debug panels, so a
 //                       screenshot shows only the game
@@ -99,6 +101,7 @@ struct Options {
     bool loopTest = false;
     bool commTest = false;
     bool comm = false;
+    bool targetHud = false;
     bool lightTest = false;
     bool headlight = false;
     bool soundTest = false;

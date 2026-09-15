@@ -170,6 +170,12 @@ struct PlayerState {
     bool headlightOn = false;
     int deaths = 0;
 
+    // The last robot directly damaged by the player's weapon. Splash damage
+    // deliberately never writes this: a blast can hurt several robots and
+    // has no single honest target for the HUD to name.
+    int lastTargetRobot = -1;
+    float targetHudTime = 0.0f;
+
     // Feel, not state anything reads back. Both decay in stepCombat and both
     // only ever leave the simulation through RenderState and HudData: the
     // screen flinches, the ship does not.
@@ -202,6 +208,7 @@ inline constexpr float kEmptyClickInterval = 0.4f;
 // How long the hit tint and the missile kick take to fade out.
 inline constexpr float kHurtFlashTime = 0.45f;
 inline constexpr float kRecoilTime = 0.18f;
+inline constexpr float kTargetHudTime = 4.0f;
 
 // Health of each level object, indexed the same as Level::objects. Zero or
 // below is destroyed.
