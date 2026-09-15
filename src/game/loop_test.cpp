@@ -346,6 +346,15 @@ bool verifyPlayerMenu() {
         settingsFit &= bounds.y >= 360.0f * 0.12f && bounds.y + bounds.height <= 360.0f * 0.90f;
     }
     ok &= expect(settingsFit, "settings stay inside the panel at the smallest supported size");
+    view = menu.view(2560, 1440);
+    bool settingsClearHeader = true;
+    for (int i = 0; i < view.buttonCount; ++i) {
+        const MenuRect& bounds = view.buttons[static_cast<size_t>(i)].bounds;
+        settingsClearHeader &= bounds.y >= 1440.0f * 0.30f &&
+                               bounds.y + bounds.height <= 1440.0f * 0.88f;
+    }
+    ok &= expect(settingsClearHeader,
+                 "settings stay below the header and inside the panel at 1440p");
     MenuInput decrease;
     decrease.decrease = true;
     menu.update(decrease, 1600, 900);

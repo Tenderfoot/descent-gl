@@ -603,7 +603,10 @@ void Renderer::buildMenu(const MenuView& menu) {
 
     const float width = static_cast<float>(target_.width());
     const float height = static_cast<float>(target_.height());
-    const float scale = std::max(1.5f, height / 260.0f);
+    // Menu panels stop growing once they are comfortably readable. Keep the
+    // bitmap font under the same kind of ceiling: scaling it from height alone
+    // made 1440p labels wider than their fixed-width rows.
+    const float scale = std::clamp(height / 260.0f, 1.5f, 4.0f);
     const glm::vec4 white(0.92f, 0.96f, 1.0f, 1.0f);
     const glm::vec4 dim(0.58f, 0.66f, 0.75f, 0.95f);
     const glm::vec4 accent(0.35f, 1.0f, 0.62f, 0.95f);
@@ -647,10 +650,11 @@ void Renderer::buildMenu(const MenuView& menu) {
         hud_.textWidth(subtitle, subtitleScale) +
         (elided ? hud_.textWidth(kEllipsis, subtitleScale) : 0.0f);
     const float subtitleLeft = (width - subtitleWidth) * 0.5f;
-    hud_.text(subtitle, subtitleLeft, height * 0.30f, subtitleScale, dim);
+    const float subtitleY = height * (menu.screen == MenuScreen::Settings ? 0.27f : 0.30f);
+    hud_.text(subtitle, subtitleLeft, subtitleY, subtitleScale, dim);
     if (elided) {
         hud_.text(kEllipsis, subtitleLeft + hud_.textWidth(subtitle, subtitleScale),
-                  height * 0.30f, subtitleScale, dim);
+                  subtitleY, subtitleScale, dim);
     }
 
     if (menu.screen == MenuScreen::Summary) {

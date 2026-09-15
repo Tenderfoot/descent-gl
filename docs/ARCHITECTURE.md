@@ -1347,7 +1347,9 @@ Settings rows carry their rendered values in fixed-size character storage in
 `MenuView`. The renderer therefore draws the screen through the existing HUD
 batch without formatting into heap-backed strings. At small resolutions the
 eleven rows reduce their height and gap together so the final row remains
-inside the panel.
+inside the panel. At large resolutions the panel, rows and bitmap-font scale
+all have matching ceilings, and the settings rows begin below the subtitle, so
+1440p and larger framebuffers cannot make text outgrow or overlap the layout.
 
 ### Player input actions and rebinding
 

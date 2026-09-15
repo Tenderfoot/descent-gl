@@ -341,7 +341,7 @@ MenuView PlayerMenu::view(int width, int height) const {
 
     const float screenWidth = static_cast<float>(std::max(width, 1));
     const float screenHeight = static_cast<float>(std::max(height, 1));
-    const float buttonWidth = std::clamp(screenWidth * 0.32f, 260.0f, 460.0f);
+    const float buttonWidth = std::clamp(screenWidth * 0.32f, 260.0f, 600.0f);
     const float left = (screenWidth - buttonWidth) * 0.5f;
     const float gap = std::clamp(screenHeight * 0.018f, 10.0f, 18.0f);
 
@@ -498,17 +498,22 @@ MenuView PlayerMenu::view(int width, int height) const {
     const auto [definitions, count] = buttonsFor(screen_);
     result.buttonCount = count;
     const bool settingsScreen = screen_ == MenuScreen::Settings;
-    const float rowGap = settingsScreen ? std::clamp(screenHeight * 0.008f, 3.0f, 10.0f) : gap;
-    const float buttonHeight =
-        settingsScreen
-            ? std::clamp((screenHeight * 0.54f - static_cast<float>(count - 1) * rowGap) /
-                             static_cast<float>(count),
-                         18.0f, 56.0f)
-            : std::clamp(screenHeight * 0.065f, 42.0f, 64.0f);
+    const float settingsTop = screenHeight * 0.30f;
+    const float settingsBottom = screenHeight * 0.88f;
+    const float settingsHeight = settingsBottom - settingsTop;
+    const float rowGap =
+        settingsScreen ? std::clamp(screenHeight * 0.006f, 2.0f, 10.0f) : gap;
+    const float buttonHeight = settingsScreen
+                                   ? std::clamp((settingsHeight -
+                                                 static_cast<float>(count - 1) * rowGap) /
+                                                    static_cast<float>(count),
+                                                14.0f, 56.0f)
+                                   : std::clamp(screenHeight * 0.065f, 42.0f, 64.0f);
     const float blockHeight = count * buttonHeight + (count - 1) * rowGap;
-    const float blockCenter =
-        settingsScreen ? screenHeight * 0.51f
-                       : screenHeight * (screen_ == MenuScreen::Summary ? 0.70f : 0.64f);
+    const float blockCenter = settingsScreen
+                                  ? settingsTop + settingsHeight * 0.5f
+                                  : screenHeight *
+                                        (screen_ == MenuScreen::Summary ? 0.70f : 0.64f);
     const float top = blockCenter - blockHeight * 0.5f;
 
     for (int i = 0; i < count; ++i) {
