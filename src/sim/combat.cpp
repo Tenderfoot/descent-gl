@@ -223,14 +223,21 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
     float bestBody = wall.hit ? wall.distance : maxDistance;
     bool haveBody = false;
 
-    // Closest approach of the shot's centre line to a sphere, compared against
-    // the summed radii rather than solved exactly. At these speeds and sizes
-    // the difference is well below the radius itself.
-    const auto consider = [&](const glm::vec3& centre, float bodyRadius, CombatHit::Kind kind,
-                              int index) {
-        const float along = std::clamp(glm::dot(centre - origin, direction), 0.0f, maxDistance);
-        const glm::vec3 closest = origin + direction * along;
-        if (glm::length(closest - centre) > bodyRadius + params.radius) return;
+    // Exact ray/sphere entry. Besides placing the flash on the target's surface,
+    // this gives body-vs-wall ordering the actual first contact rather than the
+    // sphere's centre plane.
+    const auto consider = [&](const glm::vec3& centre, float bodyRadius, int bodySegment,
+                              CombatHit::Kind kind, int index) {
+        const float radius = bodyRadius + params.radius;
+        const glm::vec3 fromCentre = origin - centre;
+        const float projected = glm::dot(fromCentre, direction);
+        const float outside = glm::dot(fromCentre, fromCentre) - radius * radius;
+        if (outside > 0.0f && projected > 0.0f) return;
+        const float discriminant = projected * projected - outside;
+        if (discriminant < 0.0f) return;
+        const float along = std::max(0.0f, -projected - std::sqrt(discriminant));
+        if (along > maxDistance) return;
+        const glm::vec3 contact = origin + direction * along;
         // A body level with the wall still stops the shot; a body level with a
         // body already found does not displace it.
         if (haveBody ? along >= bestBody : along > bestBody) return;
@@ -238,29 +245,32 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         haveBody = true;
         body.kind = kind;
         body.distance = along;
-        body.point = closest;
-        body.segment = segment;
+        body.point = contact;
+        body.segment = bodySegment;
         body.index = index;
     };
 
     // The player, for robot fire. Checked first so that where a robot's bolt
     // reaches the player and a crate at the same instant, the player is hit.
-    if (params.owner >= 0) consider(ship.position, ship.radius, CombatHit::Kind::Player, -1);
+    if (params.owner >= 0) {
+        consider(ship.position, ship.radius, ship.segment, CombatHit::Kind::Player, -1);
+    }
 
     // Robots, for the player's fire.
     if (robots && params.owner < 0) {
         for (int i = 0; i < robots->count; ++i) {
             const Robot& robot = robots->robots[static_cast<size_t>(i)];
             if (!robot.alive) continue;
-            consider(robot.body.position, robot.body.radius, CombatHit::Kind::Robot, i);
+            consider(robot.body.position, robot.body.radius, robot.body.segment,
+                     CombatHit::Kind::Robot, i);
         }
     }
 
     // Destructible scenery, which either side can hit.
     for (int i = 0; i < state.objects.count; ++i) {
         if (!state.objects.alive[static_cast<size_t>(i)]) continue;
-        consider(level.objects[static_cast<size_t>(i)].position, kObjectRadius,
-                 CombatHit::Kind::Object, i);
+        const LevelObject& object = level.objects[static_cast<size_t>(i)];
+        consider(object.position, kObjectRadius, object.segment, CombatHit::Kind::Object, i);
     }
 
     // Floating lights. They take no damage - shooting one moves it, which is
@@ -270,7 +280,8 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         for (int i = 0; i < props->floatingCount; ++i) {
             const FloatingLight& ball = props->floating[static_cast<size_t>(i)];
             if (!ball.alive) continue;
-            consider(ball.body.position, ball.body.radius, CombatHit::Kind::Prop, i);
+            consider(ball.body.position, ball.body.radius, ball.body.segment,
+                     CombatHit::Kind::Prop, i);
         }
     }
 
