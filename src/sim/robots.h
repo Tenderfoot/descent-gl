@@ -40,6 +40,9 @@ struct RobotDef {
     std::string name;
     std::string model;
     float health = 30.0f;
+    // Reserved for future firing/recharge behaviour. Until that exists every
+    // robot spawns full and nothing drains this resource.
+    float energy = 100.0f;
     float radius = 2.0f;
     // How hard it is to shove. An impulse is divided by this, so a drone gets
     // thrown across a room by the same blast that rocks a brute.
@@ -122,6 +125,7 @@ struct Robot {
     Body body;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
     float health = 0.0f;
+    float energy = 0.0f;
     // Copied from the type at spawn. Carried on the instance because the code
     // that shoves a robot - splash damage, a bolt landing - has the RobotState
     // but not the RobotConfig.

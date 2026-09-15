@@ -119,6 +119,27 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
 
     ok &= expect(rig.robotCfg.types.size() >= 3, "three robot types are defined");
 
+    // --- robot energy is present and stays full ----------------------------
+    {
+        rig.reset();
+        bool full = true;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& robot = rig.robots.robots[static_cast<size_t>(i)];
+            const sim::RobotDef& def =
+                rig.robotCfg.types[static_cast<size_t>(robot.type)];
+            full &= robot.energy == def.energy;
+        }
+        rig.run(240);
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& robot = rig.robots.robots[static_cast<size_t>(i)];
+            const sim::RobotDef& def =
+                rig.robotCfg.types[static_cast<size_t>(robot.type)];
+            full &= robot.energy == def.energy;
+        }
+        ok &= expect(full, "robot energy spawns full and is not consumed");
+        log::info("energy: all {} robots stayed full for two seconds", rig.robots.count);
+    }
+
     // --- a robot that cannot see the player idles --------------------------
     {
         rig.reset();

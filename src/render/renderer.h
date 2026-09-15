@@ -77,6 +77,14 @@ struct HudData {
     int robotsDestroyed = 0;
     int robotsTotal = 0;
 
+    bool hasTarget = false;
+    bool targetDisabled = false;
+    const char* targetName = "";
+    const char* targetStatus = "";
+    float targetHealth01 = 0.0f;
+    float targetEnergy01 = 0.0f;
+    float targetFade = 0.0f;
+
     // The level-opening transmission is simulation-timed. The renderer turns
     // the time into a texture-array layer; no video decode happens per frame.
     bool commActive = false;

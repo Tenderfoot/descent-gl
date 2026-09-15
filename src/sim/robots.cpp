@@ -214,6 +214,7 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "model", def.model);
             if (def.model.empty()) def.model = name;
             get(tj, "health", def.health);
+            get(tj, "energy", def.energy);
             get(tj, "radius", def.radius);
             get(tj, "speed", def.speed);
             get(tj, "acceleration", def.acceleration);
@@ -262,6 +263,7 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["name"] = def.name;
         tj["model"] = def.model;
         tj["health"] = def.health;
+        tj["energy"] = def.energy;
         tj["radius"] = def.radius;
         tj["speed"] = def.speed;
         tj["acceleration"] = def.acceleration;
@@ -326,6 +328,7 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.body.mass = def.mass;
         robot.orientation = obj.orientation;
         robot.health = obj.health > 0.0f ? obj.health : def.health;
+        robot.energy = def.energy;
         robot.mass = def.mass;
         robot.homeSegment = obj.segment;
     }
