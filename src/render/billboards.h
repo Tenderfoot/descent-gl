@@ -36,8 +36,8 @@ public:
     // A beam between two points: a quad turned about its own axis to face the
     // viewer. Same vertex format and same buffer as the sprites above, so a
     // corridor full of tracers still costs the unlit pass one draw.
-    void addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye, float width,
-                 const glm::vec3& color);
+    void addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye,
+                 const glm::vec3& cameraRight, float width, const glm::vec3& color);
 
     void upload();
     void draw() const;
