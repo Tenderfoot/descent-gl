@@ -31,7 +31,28 @@ struct ModelData {
 // A missing or unparsable file is fatal.
 ModelData loadObj(const std::string& path);
 
-// Expands to a drawable mesh with flat per-face normals.
+// Expands to a drawable mesh with flat per-face normals. Corners come out in
+// the triangle's own `x, y, z` order, so the drawn triangle is the source
+// triangle - which is what lets an occluder built from the same ModelData cap
+// its own surface exactly. See cubeModel() below.
 Mesh toMesh(const ModelData& model);
+
+// A unit cube centred on the origin: 8 welded positions, 12 triangles, closed.
+//
+// In ModelData form rather than as a finished Mesh, because anything that both
+// DRAWS a cube and CASTS a shadow from one has to derive the drawable mesh and
+// the OccluderMesh from the same triangle list. The shadow volume's front cap
+// is the occluder's own light-facing triangles sitting exactly on the surface
+// the depth prepass drew, and "exactly" is a bit-for-bit claim about the
+// rasterized interior, not only about the vertices: two triangulations of the
+// same flat quad across opposite diagonals describe the same plane, but the
+// hardware sets that plane up from different corners and the interior lands an
+// ulp apart in a scattered pattern. See render/shadow.h.
+//
+// The door slabs had precisely that bug. They were drawn from one hand-written
+// cube and cast from another, the two agreed on four faces and split the other
+// two across the opposite diagonal, and the door fizzed with false self-shadow
+// on one face and was clean on the other.
+ModelData cubeModel();
 
 } // namespace dvk::gl
