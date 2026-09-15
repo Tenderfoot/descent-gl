@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sim/weapons.h"
+
 #include <array>
 #include <cstddef>
 
@@ -35,12 +37,15 @@ enum class PlayerAction {
     Flare,
     Headlight,
     Automap,
-    Weapon1,
-    Weapon2,
-    Weapon3,
-    Weapon4,
-    Weapon5,
-    Weapon6,
+    // One key per primary gun. Named for the gun and not for the number key,
+    // so that moving a gun to a different key is a change to one default
+    // binding rather than a slot whose meaning silently shifts under every
+    // saved settings file. The missiles share one key, which cycles them.
+    SelectLaser,
+    SelectVulcan,
+    SelectLightning,
+    SelectRailgun,
+    CycleSecondary,
     ChaseCamera,
     Mute,
     Pause,
@@ -59,6 +64,22 @@ struct InputBindings {
         return values[static_cast<size_t>(action)];
     }
 };
+
+// Which gun each number key asks for. A written-out pairing rather than an
+// index into a weapon list: the actions and the WeaponId enum are two separate
+// orders, and a cast between them would quietly select the wrong gun the first
+// time either one changed.
+struct WeaponSelectAction {
+    PlayerAction action;
+    sim::WeaponId weapon;
+};
+
+inline constexpr std::array<WeaponSelectAction, 4> kWeaponSelectActions{{
+    {PlayerAction::SelectLaser, sim::WeaponLaser},
+    {PlayerAction::SelectVulcan, sim::WeaponVulcan},
+    {PlayerAction::SelectLightning, sim::WeaponLightning},
+    {PlayerAction::SelectRailgun, sim::WeaponRailgun},
+}};
 
 InputBindings defaultInputBindings();
 InputBindings normalizedInputBindings(InputBindings bindings);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <glm/vec3.hpp>
 #include <string>
@@ -40,6 +41,25 @@ constexpr WeaponSlot weaponSlot(int weaponId) {
             break;
     }
     return WeaponSlot::Primary;
+}
+
+// The order the missiles cycle in. The primaries each have a key of their own
+// and so have no order here; which key that is belongs to game/input_actions.h,
+// because the simulation knows nothing about keyboards. The cycle does live
+// here: it reads the current selection and picks the next, which is state the
+// simulation owns.
+inline constexpr std::array<WeaponId, 2> kSecondaryWeapons{WeaponConcussion, WeaponHoming};
+
+// The next secondary in the cycle. An id that is not a secondary at all - a
+// primary, or a corrupt save - starts the cycle from the beginning rather than
+// returning something that is not a missile.
+constexpr WeaponId nextSecondaryWeapon(int weaponId) {
+    for (size_t i = 0; i < kSecondaryWeapons.size(); ++i) {
+        if (kSecondaryWeapons[i] == weaponId) {
+            return kSecondaryWeapons[(i + 1) % kSecondaryWeapons.size()];
+        }
+    }
+    return kSecondaryWeapons[0];
 }
 
 // How a weapon delivers its damage. Structural rather than tunable, so it is a
