@@ -99,6 +99,19 @@ struct HudData {
     // shot at.
     float damageFlash = 0.0f;
 
+    // Where the guns are pointed, in world space, and whether that question has
+    // an answer this frame. The reticle is drawn over this point rather than at
+    // the centre of the window.
+    //
+    // In first person the two are the same pixel, because the camera sits on
+    // the firing line and every point on it projects to the centre. The chase
+    // camera does not: it looks at the ship from above and behind, so a reticle
+    // nailed to the centre of the window marks a spot on the floor well short
+    // of whatever the shot would hit. Left false on the automap, which has no
+    // firing line on screen to mark.
+    glm::vec3 aimPoint{0.0f};
+    bool hasAimPoint = false;
+
     // The ship is under the disabled threshold and the player has no control of
     // it. Held rather than fading, because unlike the flinch it is a state and
     // not an event: the edges stay red and pulsing until something changes.
@@ -265,7 +278,7 @@ private:
     void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildDoors(const RenderState& rs, const Level& level);
     void buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk);
-    void buildHud(const HudData& hud);
+    void buildHud(const HudData& hud, const glm::mat4& viewProj);
     void buildMenu(const MenuView& menu);
     void hudPass();
     void buildAutomapLines(const AutomapData& map, const Level& level);

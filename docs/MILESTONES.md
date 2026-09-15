@@ -1811,3 +1811,38 @@ See `docs/ARCHITECTURE.md`, "Door signs".
 The verification suite and a rendered run were skipped at the requester's
 explicit instruction, so nothing here claims the signs have been seen on screen.
 They need running before this is treated as finished.
+
+## Chase-camera reticle
+
+The reticle was drawn at the centre of the window in both cameras. That is
+correct in first person, where the camera sits on the firing line, and wrong in
+chase, where the camera watches the ship from above and behind: only the point
+`kChaseLookAhead` ahead of the nose is at the centre of the window, and
+everything further along the firing line climbs away from it. The crosshair
+marked a spot on the floor short of anything a shot would hit.
+
+It is now placed by projecting the aim point with the same matrix the scene is
+drawn with. The aim point is the nose raycast `main.cpp` already fires each
+frame, clamped to 12..200 units and chased at 12/s so it does not jump when the
+ray crosses a corridor mouth. See `docs/ARCHITECTURE.md`, "The reticle follows
+the guns, not the window".
+
+| Check | Result |
+| --- | --- |
+| Debug and Release builds | ✅ clean, no warnings (GCC, Linux container) |
+| `--validate-assets` | ✅ 0 failures |
+| `--flight-test` | ✅ PASS |
+| `--world-test` | ✅ PASS |
+| `--collision-test` | ✅ PASS (82 portal crossings, 0 failed) |
+| `--weapons-test` | ✅ PASS |
+| `--robots-test` | ✅ PASS |
+| `--loop-test` | ✅ PASS |
+| `--sound-test` | ✅ PASS |
+| `--light-test` | ✅ PASS |
+| `--settings-test` | ✅ PASS |
+| `--progress-test` | ✅ PASS |
+| `--resize-test` | ✅ completed, 52.8 steps/s against 45.0 on the same run on `main` (software rendering, 1920x1080, bounded by the loop's frame clamp) |
+| Chase reticle on the firing line | ✅ `--chase --debug-lines` at 1280x720: reticle centred on the green nose ray at (640, 282), 78 px above the centre of the window |
+| First person unchanged | ✅ same run without `--chase`: reticle at (640, 360), the centre, to the pixel |
+| Automap unchanged | ✅ `--automap --reveal`: reticle at (640, 360); `hasAimPoint` is false there |
+| Per-frame allocations | ✅ unchanged from `main` — Release chase run reports the same pre-existing `sim step SOME on 1 of 30`, `draw path SOME on 26 of 30` before and after |

@@ -101,6 +101,14 @@ constexpr float kHeadlightIntensity = 2.0f;
 // own geometry.
 constexpr float kHeadlightForward = 2.2f;
 
+// The range the reticle is allowed to sit at along the firing line. The near
+// bound keeps it steady when the nose is up against a wall, where a couple of
+// units of travel would otherwise swing it across the screen; the far bound is
+// where the reticle stops moving for any practical purpose, so a shot into open
+// space has somewhere to point.
+constexpr float kAimNearDistance = 12.0f;
+constexpr float kAimFarDistance = 200.0f;
+
 // Scripted window events for --resize-test. Covers the two cases that break
 // silently: a framebuffer size change while drawing, and iconify/restore,
 // where the framebuffer is 0x0 for a while.
@@ -407,6 +415,9 @@ int main(int argc, char** argv) {
     long long totalSteps = 0;
     int frame = 0;
     double frameMs = 0.0;
+    // How far down the firing line the reticle is drawn. Held across frames
+    // because it is chased rather than set: see where it is updated below.
+    float aimDistance = kAimFarDistance;
     // Allocation instrumentation. The first frames are exempt: pools and
     // vectors reserve on their way to steady state, and counting that warm-up
     // would report a leak that is really a start-up cost.
@@ -1063,6 +1074,22 @@ int main(int argc, char** argv) {
         const dvk::sim::RayHit noseRay =
             dvk::sim::raycast(level, rs.shipPos, shipForward, 300.0f, rs.shipSegment);
 
+        // The same ray says where the reticle belongs. The guns fire from the
+        // ship along this line, so the point the reticle should cover is the
+        // first thing the line meets - or a point far along it when it meets
+        // nothing, which is the honest answer to "where would this shot go".
+        //
+        // Chased rather than set: crossing a corridor mouth steps the hit from
+        // a near wall to a far one in a single frame, and in the chase camera
+        // that is a reticle jumping across the screen. In first person none of
+        // this shows, because the camera sits on the firing line and the whole
+        // line projects to one pixel whatever the distance.
+        const float aimTarget =
+            std::clamp(noseRay.hit ? noseRay.distance : kAimFarDistance,
+                       kAimNearDistance, kAimFarDistance);
+        aimDistance += (aimTarget - aimDistance) *
+                       std::min(1.0f, static_cast<float>(elapsed) * 12.0f);
+
         const glm::ivec2 fb = window.framebufferSize();
         dvk::alloc::Scope drawAllocs;
         renderer.beginFrame(fb.x, fb.y);
@@ -1099,6 +1126,9 @@ int main(int argc, char** argv) {
         hud.elapsed = cur.game.elapsed;
         hud.robotsDestroyed = cur.game.robotsDestroyed;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
+        // Only the scene draws a firing line; the automap has its own camera.
+        hud.aimPoint = rs.shipPos + shipForward * aimDistance;
+        hud.hasAimPoint = !automap.open;
         hud.shipDisabled = cur.ship.disabled;
         hud.shipDisabledTime = cur.game.elapsed;
         // Both the bar and the word come from `playerSeen` rather than from

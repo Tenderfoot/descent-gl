@@ -1200,6 +1200,42 @@ name, ammo, keys, countdown, phase, message. The renderer never reaches into
 `GameState` or `CombatState` to draw the HUD, which is what keeps `src/render`
 free of simulation types.
 
+### The reticle follows the guns, not the window
+
+The reticle is the one part of the HUD that is not screen furniture: it marks a
+place in the world. So it is **drawn over the aim point, projected with the same
+matrix the scene was drawn with**, rather than nailed to the centre of the
+window.
+
+In first person the distinction does not show. The camera sits on the firing
+line, every point on that line projects to the same pixel, and that pixel is the
+centre. The chase camera is a different thing entirely: it looks at the ship
+from `kChaseOffset` - above and behind - at a point `kChaseLookAhead` ahead of
+the nose. Only that one point is at the centre of the window. The rest of the
+firing line climbs away from it: at the default 70 degree vertical FOV and 720p
+it is 61 px above the centre 40 units out and 89 px at the vanishing point, and
+a screenshot of the opening corridor puts the reticle 78 px up. A centred
+reticle in chase view marks a spot on the floor some way short of anything a
+shot would hit.
+
+The aim point comes from the raycast `main.cpp` already fires straight out of
+the nose each frame for the debug overlay: the first wall the shot would meet,
+or a point far along the line when it meets none. Two details that are not
+decoration:
+
+- **Clamped to 12..200 units.** Under the near bound the reticle swings across
+  the screen for a couple of units of travel when the nose is against a wall;
+  over the far bound it has stopped moving for any practical purpose.
+- **Chased, not set.** Crossing a corridor mouth steps the hit from a near wall
+  to a far one in a single frame, which in chase view is a reticle jumping tens
+  of pixels. The tracked distance lags it at 12/s. The lag lives in `main.cpp`,
+  where the frame delta already is, so the renderer stays a function of what it
+  is handed.
+
+`HudData::hasAimPoint` is false on the automap, which has its own camera and no
+firing line on screen; the reticle falls back to the centre of the window there,
+as does anything the projection cannot place (a point at or behind the eye).
+
 ### The darkness gauge
 
 The mine has no ambient term, and `playerVisibility` (see *Darkness hides you*)
