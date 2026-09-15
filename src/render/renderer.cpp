@@ -89,7 +89,6 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     }
 
     walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
-    levelMesh_ = std::make_unique<LevelMesh>(level);
 
     shipModel_ = loadObj("assets/models/ship.obj");
     ship_ = std::make_unique<Mesh>(toMesh(shipModel_));
@@ -98,6 +97,25 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     shipOccluder_.reset(&shipOccluderMesh_, glm::mat4(1.0f));
 
     gizmo_ = std::make_unique<Mesh>(makeCube());
+
+    loadRobotMeshes(robots);
+    setLevel(level);
+
+    glCreateVertexArrays(1, &emptyVao_);
+
+    glCreateBuffers(1, &cameraUbo_);
+    glNamedBufferStorage(cameraUbo_, sizeof(CameraBlock), nullptr, GL_DYNAMIC_STORAGE_BIT);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, cameraUbo_);
+}
+
+// Everything in the renderer that is a function of which mine is loaded, in
+// one place, so switching levels from the menu rebuilds exactly this and the
+// shaders, textures, ship and robot meshes are left alone. The prop caches are
+// keyed by model name and kept: two mines that both place a pillar load the
+// pillar once, and the Prop pointers into those maps stay valid because the
+// maps are node-based.
+void Renderer::setLevel(const Level& level) {
+    levelMesh_ = std::make_unique<LevelMesh>(level);
 
     // The mine itself is an occluder, and the most important one: without it a
     // light spills through walls into rooms it should never reach.
@@ -122,18 +140,14 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         mineOccluder_.reset(&mineMesh_, glm::mat4(1.0f));
     }
 
-    loadRobotMeshes(robots);
-    loadProps(level, robots);
+    props_.clear();
+    loadProps(level, *robotConfig_);
 
+    // Reserves, not resizes: these are rebuilt every frame. A second, larger
+    // mine grows them once here rather than during a draw.
     lit_.reserve(level.segments.size());
     ranges_.reserve(level.lights.size() + 1);
     lightStats_.reserve(level.lights.size() + 1);
-
-    glCreateVertexArrays(1, &emptyVao_);
-
-    glCreateBuffers(1, &cameraUbo_);
-    glNamedBufferStorage(cameraUbo_, sizeof(CameraBlock), nullptr, GL_DYNAMIC_STORAGE_BIT);
-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, cameraUbo_);
 }
 
 void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {

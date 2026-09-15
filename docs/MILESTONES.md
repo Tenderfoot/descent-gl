@@ -1548,3 +1548,68 @@ they relocate the player into a robot's own (unlit) segment to test what a robot
 *does* once engaged, not whether it notices. `Rig::revealPlayer()` turns the
 headlight on rather than reaching past the rule into `awareness`, so the real
 visibility path is still exercised.
+
+---
+
+## Choosing a level from the menu ✅
+
+`play` used to start the level the command line named. It now opens a list of
+the levels in `assets/levels`, and picking one loads it.
+
+Three pieces. `src/game/level_list.h` reads only the `name` and `comment`
+fields of each file, because the list is one line of text per level and loading
+every mine to draw it would pay for a level's worth of geometry per entry; the
+directory walk that `--validate-assets` was doing privately moved here and is
+now shared. The menu grew a `LevelSelect` screen whose cursor walks the whole
+list while the view shows a window of at most eight rows centred on it - the
+window is a function of the selection alone, so `view()` stays pure and there
+is no scroll position to fall out of step with what is selected. And
+`loadLevelFile` in `main.cpp` is the one place a second mine is loaded:
+`Renderer::setLevel` for the level mesh, the mine occluder and the props,
+`LevelSession::load` for the initial and live states, and the frame loop's own
+per-level caches - contacts, automap, the door signature behind the light
+rebuild, the light editor's selection - reset alongside them.
+
+`--level-switch-test` is the check, because a switch cannot be verified without
+performing one. It drives the list down a row, starts that level and flies it,
+then reports what it started on, what it ended on, and whether the ship is
+inside the new mine.
+
+| Check | Result |
+| --- | --- |
+| Levels found in `assets/levels` | ✅ 3, loaded level listed first, all named, `.json` only |
+| A missing level directory | ✅ lists nothing rather than crashing |
+| The list opens on the loaded level | ✅ cursor on mine01, its blurb as the subtitle |
+| Confirming a row reports that level | ✅ `selectedLevel()` matches the row |
+| Cursor wraps last level → back → first | ✅ |
+| Clicking a row starts the row under the pointer | ✅ not the row the keyboard was on |
+| A 20-level list at 1600×900 | ✅ 8 rows holding the selection, every row inside the panel |
+| The same list at 640×360 | ✅ fewer rows, nothing past the panel |
+| An empty list | ✅ offers only back, selects nothing |
+| Big → small switch (mine01 → MineEntrance) | ✅ 34 → 1 segments, playing, ship in segment 0 of 1, 531 steps in the new mine |
+| Small → big switch (MineEntrance → mine01) | ✅ 1 → 34 segments, 2 static props placed, 1154 steps in the new mine |
+| GL errors across a switch | ✅ none; `KHR_debug` fatal-on-high was armed throughout |
+| Allocations after warm-up, across a switch | ✅ sim step none, draw path none (Debug and Release) |
+| Debug and Release builds | ✅ both clean |
+| Debug and Release headless suites | ✅ all nine pass in both |
+| `--level-select` screenshot | ✅ three rows, blurb, back |
+| `--resize-test` (Release, software GL) | ✅ 49.7 and 50.4 steps/s, against 49.9 and 45.3 for the same run on `main` - clamp-bound, unchanged |
+| A plain 120-frame run, both configs | ✅ no `[ERROR]` or `[FATAL]`; 31.2 and 31.1 steps/s against 30.6 for the same run on `main` - clamp-bound under software GL |
+
+The switch test's own step rate is below 120 by construction: the first twenty
+frames sit in the menu, where there are no simulation steps to take, and that
+time is in the denominator. The switch report is the check, not that line.
+
+### The intermediate state nobody should ship
+
+The screen landed before the loading did, so for one commit picking a row
+started the level that was already loaded. That is fine in a stack reviewed and
+merged in order and would have been a lie on `main`; it is called out here
+because the commits are in the history either way.
+
+### What it is not
+
+No campaign, no progression, no unlock state: the list is flat and every level
+in the directory is playable from it. A level that fails to parse is still
+listed, under its filename, and `loadLevel` is still fatal when it is picked -
+the menu does not get to decide that a broken level is invisible.

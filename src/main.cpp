@@ -118,6 +118,15 @@ constexpr ScriptedEvent kResizeScript[] = {
 };
 constexpr double kResizeTestSeconds = 9.0;
 
+// --level-switch-test. Loading a second mine touches GL resources, the session
+// and every per-level cache in the frame loop, so the only honest check is to
+// do it and then keep playing: move the cursor down one row, start that level,
+// and fly it for long enough that the new mine is simulated and drawn rather
+// than merely loaded.
+constexpr int kSwitchPickFrame = 10;
+constexpr int kSwitchConfirmFrame = 20;
+constexpr int kSwitchEndFrame = 90;
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -188,7 +197,10 @@ int main(int argc, char** argv) {
     dvk::gl::installDebugCallback(/*fatalOnHigh=*/false);
 #endif
 
-    dvk::Level level = dvk::loadLevel(levelPath);
+    // Not const and not the command line's string: the menu can load another
+    // mine, and the light editor writes back to whichever one is loaded.
+    std::string levelFile = levelPath;
+    dvk::Level level = dvk::loadLevel(levelFile);
     const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
     dvk::gl::Renderer renderer(level, robotConfig);
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
@@ -223,18 +235,19 @@ int main(int argc, char** argv) {
         cur.combat.player.headlightOn = true;
     }
     dvk::PlayerMenu menu;
-    menu.setLevels(dvk::discoverLevels(kLevelDir, levelPath));
+    menu.setLevels(dvk::discoverLevels(kLevelDir, levelFile));
     // The list opens on the level that is loaded, so confirming twice from the
     // main menu starts what a plain run has always started.
     for (int i = 0; i < static_cast<int>(menu.levels().size()); ++i) {
-        if (menu.levels()[static_cast<size_t>(i)].path == levelPath) menu.setSelectedLevel(i);
+        if (menu.levels()[static_cast<size_t>(i)].path == levelFile) menu.setSelectedLevel(i);
     }
 
-    const bool commandLineRun = argc > 1 && !opts.startMenu && !opts.levelSelect;
+    const bool commandLineRun =
+        argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest;
     if (commandLineRun) {
         session.start();
         menu.hide();
-    } else if (opts.levelSelect) {
+    } else if (opts.levelSelect || opts.levelSwitchTest) {
         menu.showLevelSelect();
     } else {
         menu.showMain();
@@ -300,6 +313,40 @@ int main(int argc, char** argv) {
     // Without this, the one thing you cannot see is what the cull decided.
     bool freezeVisible = false;
     int lightEditorSelection = -1;
+    // Loading another mine, from the level list and from nowhere else. Every
+    // piece of state that is a function of which level is loaded is rebuilt
+    // here: the renderer's level resources, the session's initial and live
+    // states, and the caches in this loop that index segments, lights and
+    // contacts of the mine that was loaded a moment ago. Anything left stale
+    // here shows up as a light in a wall or a ship in the rock, so the resets
+    // stay together rather than spread through the menu handlers.
+    const auto loadLevelFile = [&](const std::string& path) {
+        if (path == levelFile) return;
+        dvk::log::info("switching to level '{}'", path);
+        level = dvk::loadLevel(path);   // fatal if the file is broken, as everywhere else
+        levelFile = path;
+
+        renderer.setLevel(level);
+        session.load(level, robotConfig, opts.startSegment);
+        if (opts.headlight) {
+            session.initial().combat.player.headlightOn = true;
+            prev.combat.player.headlightOn = true;
+            cur.combat.player.headlightOn = true;
+        }
+
+        contacts.clear();
+        const bool wasOpen = automap.open;
+        automap = dvk::gl::AutomapData{};
+        automap.open = wasOpen;
+        // The level's lights were flooded at load with no doors; -1 makes the
+        // loop below rebuild them against this level's door state.
+        lightDoorSignature = -1;
+        lightEditorSelection = -1;
+    };
+
+    const std::string switchTestFrom = levelFile;
+    const int switchTestFromSegments = level.segmentCount();
+
     dvk::Clock clock;
     // Measured from here, not from construction: startup (window, GL, texture,
     // shader compile) runs no sim steps and would drag the average down.
@@ -402,13 +449,25 @@ int main(int argc, char** argv) {
         const glm::vec2 pointerScale(
             static_cast<float>(menuFramebuffer.x) / static_cast<float>(std::max(menuWindow.x, 1)),
             static_cast<float>(menuFramebuffer.y) / static_cast<float>(std::max(menuWindow.y, 1)));
-        const dvk::MenuAction menuAction = menu.update(
-            dvk::readMenuInput(input, input.cursorPosition() * pointerScale), menuFramebuffer.x,
-            menuFramebuffer.y);
+        dvk::MenuInput menuInput = dvk::readMenuInput(input, input.cursorPosition() * pointerScale);
+        if (opts.levelSwitchTest) {
+            // The script drives the cursor, so the pointer is parked off every
+            // button: under a window manager the mouse sits wherever it was
+            // left, and hovering a row would decide which level this test picks.
+            menuInput = dvk::MenuInput{};
+            menuInput.pointer = glm::vec2(-1.0f);
+            menuInput.next = frame == kSwitchPickFrame;
+            menuInput.confirm = frame == kSwitchConfirmFrame;
+        }
+        const dvk::MenuAction menuAction =
+            menu.update(menuInput, menuFramebuffer.x, menuFramebuffer.y);
         switch (menuAction) {
             case dvk::MenuAction::ChooseLevel: menu.showLevelSelect(); break;
             case dvk::MenuAction::Back: menu.showMain(); break;
             case dvk::MenuAction::Start:
+                if (menu.selectedLevel() >= 0) {
+                    loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
+                }
                 session.start();
                 menu.hide();
                 lightDoorSignature = -1;
@@ -1246,7 +1305,7 @@ int main(int argc, char** argv) {
                 lightEditorSelection = static_cast<int>(level.lights.size()) - 1;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Save level")) dvk::saveLevel(levelPath, level);
+            if (ImGui::Button("Save level")) dvk::saveLevel(levelFile, level);
             ImGui::SameLine();
             ImGui::TextDisabled("%d lights", static_cast<int>(level.lights.size()));
 
@@ -1301,7 +1360,8 @@ int main(int argc, char** argv) {
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         ++frame;
-        const bool lastFrame = opts.frames >= 0 && frame >= opts.frames;
+        const bool lastFrame = (opts.frames >= 0 && frame >= opts.frames) ||
+                               (opts.levelSwitchTest && frame >= kSwitchEndFrame);
         if (lastFrame) {
             // Stop the clock before the screenshot: a PNG encode of the whole
             // framebuffer takes ~200ms, and counting it would understate the
@@ -1381,6 +1441,29 @@ int main(int argc, char** argv) {
         }
     }
 
+    int exitCode = 0;
+    if (opts.levelSwitchTest) {
+        const bool changed = levelFile != switchTestFrom;
+        const bool playing = session.mode() == dvk::AppMode::Playing;
+        const bool inside =
+            cur.ship.body.segment >= 0 && cur.ship.body.segment < level.segmentCount();
+        const bool stepped = totalSteps > 0;
+        dvk::log::info(
+            "level-switch-test: started on '{}' ({} segments), ended on '{}' ({} segments); "
+            "playing {}, ship in segment {} of {}, {} sim steps in the new mine",
+            switchTestFrom, switchTestFromSegments, levelFile, level.segmentCount(),
+            playing ? "yes" : "no", cur.ship.body.segment, level.segmentCount(), totalSteps);
+        if (!changed) dvk::log::error("level-switch-test: the level list started no new level");
+        if (!playing) dvk::log::error("level-switch-test: the new level is not being played");
+        if (!inside) {
+            dvk::log::error("level-switch-test: the ship is not inside the new level");
+        }
+        if (!stepped) dvk::log::error("level-switch-test: the new level ran no simulation steps");
+        const bool ok = changed && playing && inside && stepped;
+        dvk::log::info("level switch: {}", ok ? "PASS" : "FAIL");
+        if (!ok) exitCode = 1;
+    }
+
     // Measured, not asserted. A non-zero number here is a real finding: it means
     // something in the sim step or the draw path reached the heap on a frame
     // after warm-up, which CLAUDE.md says does not happen.
@@ -1393,5 +1476,5 @@ int main(int argc, char** argv) {
             worstSimAllocs, firstSimAllocFrame, drawAllocFrames == 0 ? "none" : "SOME",
             drawAllocFrames, measured, worstDrawAllocs, firstDrawAllocFrame);
     }
-    return 0;
+    return exitCode;
 }

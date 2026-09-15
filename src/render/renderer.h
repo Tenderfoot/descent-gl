@@ -121,6 +121,13 @@ public:
 
     Renderer(const Level& level, const sim::RobotConfig& robots);
 
+    // Point the renderer at a different mine. Rebuilds the level mesh, the
+    // mine occluder and the static props; everything else - shaders, wall
+    // textures, the ship, the robot meshes - is level-independent and stays.
+    // The GL resources of the previous level are released by the same RAII
+    // that built them.
+    void setLevel(const Level& level);
+
     void beginFrame(int fbWidth, int fbHeight);
     // `dynamicLights` holds everything that is not baked into the level: the
     // headlight, every bolt in flight, every burning flare, every explosion.

@@ -1221,6 +1221,62 @@ existing harness retain their behavior; `--start-menu` selects the menu for a
 visual check. Pause and run summary use the same menu model, while ImGui remains
 debug-only.
 
+### Choosing a level
+
+`play` opens a list of the levels in `assets/levels` rather than starting one.
+`src/game/level_list.h` reads only the `name` and `comment` fields out of each
+file: the list is a line of text per level, and loading every mine to draw it
+would pay for a level's worth of geometry per entry. The same directory walk
+serves `--validate-assets`, which was doing it privately for the same reason.
+
+The list is the one menu whose length is not known at compile time, so the
+cursor and the rows are deliberately different things. The cursor walks all of
+the levels plus `back`; the view shows a window of at most eight rows centred
+on the cursor. The window is computed from the selection alone, which keeps
+`view()` const and pure and means there is no scroll position to fall out of
+step with what is selected. Rows shrink before the window does and the window
+shrinks before anything leaves the panel, so a 640x360 window shows fewer
+levels rather than drawing them off the bottom.
+
+A level's `comment` is written for whoever opens the file - mine01's is a
+paragraph about where the keys are - so the menu keeps its first sentence and
+the renderer elides what still does not fit at a word boundary. That path runs
+every frame a menu is up, so it works in `string_view` and never builds a
+`std::string`.
+
+### Loading a second mine
+
+Until this point the level was loaded once, before the renderer existed, and
+nothing could replace it. Switching levels is one function in `main.cpp`,
+`loadLevelFile`, and every piece of per-level state is rebuilt there:
+
+- `Renderer::setLevel` rebuilds the level mesh, the mine occluder and the
+  static props. Shaders, wall textures, the ship and the robot meshes are
+  level-independent and are left alone, and the model caches are keyed by name
+  so two mines that both place a pillar load it once. GL resources of the
+  previous level are released by the same RAII that built them.
+- `LevelSession::load` rebuilds the initial state, the objects, the robots and
+  the game flow, and the live and interpolation states with them.
+- The frame loop's own caches - the contact log, the automap, the door
+  signature that drives the light rebuild, the light editor's selection - are
+  reset alongside them. They index segments, lights and doors of the mine that
+  was loaded a moment ago; anything left stale here shows up as a light inside
+  a wall or a ship inside the rock.
+
+The scratch buffers that are sized from the level (`PortalWalk`, `LightFlood`)
+grow on demand and are stamped per build, so a larger mine resizes them and a
+smaller one simply uses less of them. Nothing else in the loop holds a pointer
+into the level: lights are gathered per frame, and the level is passed to the
+renderer by reference on every call rather than stored.
+
+`--level-switch-test` is the check, because a level switch cannot be verified
+without doing one: it drives the list down one row, starts that level, and
+flies it long enough that the new mine is simulated and drawn rather than
+merely loaded, then reports what it started on, what it ended on and whether
+the ship is inside it. Its step rate is below 120 by construction - the first
+twenty frames are spent in the menu, where there are no simulation steps to
+take - so that line is not the check; the switch report is.
+
 ---
 
 ## The automap (M8)

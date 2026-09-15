@@ -66,6 +66,8 @@ Options Options::parse(int argc, char** argv) {
             o.startMenu = true;
         } else if (a == "--level-select") {
             o.levelSelect = true;
+        } else if (a == "--level-switch-test") {
+            o.levelSwitchTest = true;
         } else if (a == "--autofire" && hasNext) {
             o.autofire = std::atoi(argv[++i]);
         } else if (a == "--debug-lines") {
