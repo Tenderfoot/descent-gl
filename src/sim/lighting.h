@@ -13,6 +13,7 @@ namespace dvk::sim {
 struct SolidDoors;
 struct CombatState;
 struct WeaponConfig;
+struct PropState;
 
 // How much light arrives at a point in the mine.
 //
@@ -123,6 +124,14 @@ void addLooseLight(Illumination& out, const IlluminationQuery& query, const Leve
                    const glm::vec3& position, float radius, float intensity,
                    const SolidDoors* doors = nullptr);
 
+// The same, for a loose light with a cone. A swinging lamp is a spot, and the
+// cone is the whole point of it: standing outside the circle it throws is
+// standing in the dark, and treating it as a point light reports the opposite
+// in exactly the place the player is relying on.
+void addLooseSpot(Illumination& out, const IlluminationQuery& query, const Level& level,
+                  const glm::vec3& position, const glm::vec3& direction, float coneDegrees,
+                  float radius, float intensity, const SolidDoors* doors = nullptr);
+
 // Whether the player can be seen at all.
 //
 // Separate from Illumination because being seen is not only a question of how
@@ -139,7 +148,14 @@ struct PlayerVisibility {
 };
 
 // Gathers the level's lights, every bolt, flare and flash the simulation owns,
-// and the headlight, and decides whether the player is visible.
+// the floating and swinging lights, and the headlight, and decides whether the
+// player is visible.
+//
+// EVERY LIGHT THE SIMULATION OWNS HAS TO BE IN HERE. This is the number the
+// robots act on and the number the HUD's detection meter shows, and a light
+// that reaches the screen without reaching this function is a room the player
+// can see is lit while the game insists they are hidden in it. See
+// kSimLightSources below, and the case per source in --light-test.
 //
 // Deliberately a POINT query rather than a body one. It runs every simulation
 // step, seven-sample body coverage would cost seven times as much for an answer
@@ -148,7 +164,19 @@ struct PlayerVisibility {
 // wanting coverage can ask illuminationAt directly.
 PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
                                   const WeaponConfig& weapons, const glm::vec3& position,
-                                  int segment, const SolidDoors* doors = nullptr);
+                                  int segment, const SolidDoors* doors = nullptr,
+                                  const PropState* props = nullptr);
+
+// The kinds of light the simulation owns, as distinct from the level's authored
+// ones: a bolt in flight, a burning flare, an explosion flash, a floating light
+// and a swinging lamp.
+//
+// A number rather than an enum because nothing dispatches on it. It exists so
+// that adding a sixth kind breaks --light-test, which walks one case per kind
+// and checks the count against this. Three times now a new emitter has been
+// added without the thing that consumes light being told, so the obligation is
+// written down where the next one will trip over it.
+inline constexpr int kSimLightSources = 5;
 
 // The sample points a query uses, exposed so the debug overlay can draw the
 // same ones the answer came from. Returns how many of `out` were filled.

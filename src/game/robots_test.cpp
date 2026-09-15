@@ -5,6 +5,7 @@
 #include "sim/collision.h"
 #include "sim/lighting.h"
 #include "sim/combat.h"
+#include "sim/props.h"
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
@@ -26,6 +27,7 @@ struct Rig {
     sim::RobotConfig robotCfg;
     sim::RobotState robots;
     sim::CombatState combat;
+    sim::PropState props;
     sim::Body player;
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
 
@@ -48,7 +50,8 @@ struct Rig {
     void run(int steps, const sim::FireControls& fire) {
         for (int i = 0; i < steps; ++i) {
             sim::stepCombat(level, combat, player, orientation, weapons, fire, kStep, &robots);
-            sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep);
+            sim::stepRobots(level, robotCfg, weapons, robots, combat, player, kStep, nullptr,
+                            nullptr, &props);
         }
     }
 
@@ -61,7 +64,8 @@ struct Rig {
     void revealPlayer() { combat.player.headlightOn = true; }
 
     sim::PlayerVisibility visibility() const {
-        return sim::playerVisibility(level, combat, weapons, player.position, player.segment);
+        return sim::playerVisibility(level, combat, weapons, player.position, player.segment,
+                                     nullptr, &props);
     }
 
     sim::Robot* firstOfType(const char* name) {
@@ -429,6 +433,89 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             const sim::Robot& hit = rig.robots.robots[static_cast<size_t>(slot)];
             ok &= expect(hit.awareness > 0.0f,
                          "a robot hit from the dark is alerted by the hit itself");
+        }
+    }
+
+    // --- a floating light gives the player away, and shooting it hides them ---
+    //
+    // The behavioural half of what --light-test asserts about the meter: a
+    // robot standing in the dark has to actually notice a player lit by one of
+    // the moving lights, and stop noticing when the light is gone. This is the
+    // mechanic the floating light exists for.
+    {
+        rig.reset();
+        rig.combat.player.headlightOn = false;
+
+        int slot = -1;
+        for (int i = 0; i < rig.robots.count; ++i) {
+            const sim::Robot& r = rig.robots.robots[static_cast<size_t>(i)];
+            if (!r.alive) continue;
+            const glm::vec3 centre =
+                rig.level.segments[static_cast<size_t>(r.body.segment)].center;
+            if (!sim::playerVisibility(rig.level, rig.combat, rig.weapons, centre,
+                                       r.body.segment).visible) {
+                slot = i;
+                break;
+            }
+        }
+        ok &= expect(slot >= 0, "the level has a robot standing in the dark");
+
+        if (slot >= 0) {
+            // Only this one robot. The other fifteen are awake elsewhere in the
+            // mine and their fire is light too, which would decide the case
+            // from another room.
+            for (int i = 0; i < rig.robots.count; ++i) {
+                if (i != slot) rig.robots.robots[static_cast<size_t>(i)].alive = false;
+            }
+            sim::Robot& robot = rig.robots.robots[static_cast<size_t>(slot)];
+            const int segment = robot.body.segment;
+            const glm::vec3 centre = rig.level.segments[static_cast<size_t>(segment)].center;
+
+            robot.body.position = centre + glm::vec3(0.0f, 0.0f, -5.0f);
+            robot.mode = sim::RobotMode::Idle;
+            robot.awareness = 0.0f;
+            robot.hasLastKnown = false;
+            rig.player.segment = segment;
+            rig.player.position = centre + glm::vec3(0.0f, 0.0f, 5.0f);
+
+            ok &= expect(!rig.visibility().visible, "the spot really is dark to begin with");
+
+            // Float a light over the player's head.
+            rig.props = sim::PropState{};
+            rig.props.floatingCount = 1;
+            sim::FloatingLight& ball = rig.props.floating[0];
+            ball.alive = true;
+            ball.body.position = rig.player.position + glm::vec3(0.0f, 3.0f, 0.0f);
+            ball.body.segment = segment;
+
+            const sim::PlayerVisibility underLight = rig.visibility();
+            ok &= expect(underLight.visible, "a floating light overhead lights the player up");
+
+            rig.run(120);
+            ok &= expect(robot.awareness > 0.0f && robot.mode != sim::RobotMode::Idle,
+                         "and the robot in the dark notices them");
+
+            // Take the light away - the game does it by shooting the ball out
+            // of the room - and the hiding place comes back.
+            //
+            // The robot has spent the last second shooting, and its bolts and
+            // muzzle flashes are lights playerVisibility counts too, so they
+            // have to be gone before the dark can be asserted. That they keep
+            // the player lit is the same wiring working, one source over.
+            rig.props.floating[0].alive = false;
+            rig.combat.projectiles = sim::ProjectilePool{};
+            rig.combat.effects = sim::EffectPool{};
+            robot.awareness = 0.0f;
+            robot.mode = sim::RobotMode::Idle;
+            robot.hasLastKnown = false;
+            ok &= expect(!rig.visibility().visible, "with the light gone they are hidden again");
+
+            rig.run(120);
+            ok &= expect(robot.awareness == 0.0f && robot.mode == sim::RobotMode::Idle,
+                         "and the robot goes back to not knowing they are there");
+
+            log::info("floating light: illumination {:.3f} lit, {:.3f} once it is gone",
+                      underLight.illumination, rig.visibility().illumination);
         }
     }
 

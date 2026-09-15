@@ -18,6 +18,7 @@ namespace dvk::sim {
 struct CombatState;
 struct WeaponConfig;
 struct SolidDoors;
+struct PropState;
 
 // What a robot is doing. Every transition is reported in the ImGui readout,
 // because a state machine you cannot watch is a state machine you cannot tune.
@@ -212,8 +213,12 @@ bool objectIsRobot(const RobotConfig& cfg, const std::string& type);
 // open for robots, so the path search only treats a LOCKED shut door as a
 // wall; a shut door with no key is walked up to and opened.
 // `events` is the sound queue and may be null. See sim/events.h.
+// `props` is the level's moving lights, and is what lets a robot see the player
+// standing under one. Null means the caller has none, not that they do not
+// count - see playerVisibility.
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
                 RobotState& state, CombatState& combat, Body& player, float dt,
-                const SolidDoors* doors = nullptr, EventQueue* events = nullptr);
+                const SolidDoors* doors = nullptr, EventQueue* events = nullptr,
+                const PropState* props = nullptr);
 
 } // namespace dvk::sim

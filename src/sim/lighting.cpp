@@ -2,6 +2,7 @@
 
 #include "sim/collision.h"
 #include "sim/combat.h"
+#include "sim/props.h"
 
 #include <glm/geometric.hpp>
 
@@ -151,9 +152,11 @@ void addIllumination(Illumination& out, const IlluminationQuery& query, const Le
     out.value += total / static_cast<float>(sampleCount);
 }
 
-void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
-                   const glm::vec3& position, float radius, float intensity,
-                   const SolidDoors* doors) {
+namespace {
+
+void addLooseSource(Illumination& out, const IlluminationQuery& query, const Level& level,
+                    LightType type, const glm::vec3& position, float radius, float intensity,
+                    const glm::vec3& direction, float coneDegrees, const SolidDoors* doors) {
     if (query.segment < 0 || query.segment >= level.segmentCount()) return;
     if (radius <= 0.0f || intensity <= 0.0f) return;
 
@@ -162,17 +165,33 @@ void addLooseLight(Illumination& out, const IlluminationQuery& query, const Leve
     out.samples = sampleCount;
     std::array<float, kIlluminationSamples> perSample{};
 
-    accumulateSource(out, perSample, samples, sampleCount, query, level, LightType::Point,
-                     position, radius, intensity, glm::vec3(0.0f, 0.0f, -1.0f), 45.0f, doors);
+    accumulateSource(out, perSample, samples, sampleCount, query, level, type, position, radius,
+                     intensity, direction, coneDegrees, doors);
 
     float total = 0.0f;
     for (int s = 0; s < sampleCount; ++s) total += perSample[static_cast<size_t>(s)];
     out.value += total / static_cast<float>(sampleCount);
 }
 
+}   // namespace
+
+void addLooseLight(Illumination& out, const IlluminationQuery& query, const Level& level,
+                   const glm::vec3& position, float radius, float intensity,
+                   const SolidDoors* doors) {
+    addLooseSource(out, query, level, LightType::Point, position, radius, intensity,
+                   glm::vec3(0.0f, 0.0f, -1.0f), 45.0f, doors);
+}
+
+void addLooseSpot(Illumination& out, const IlluminationQuery& query, const Level& level,
+                  const glm::vec3& position, const glm::vec3& direction, float coneDegrees,
+                  float radius, float intensity, const SolidDoors* doors) {
+    addLooseSource(out, query, level, LightType::Spot, position, radius, intensity, direction,
+                   coneDegrees, doors);
+}
+
 PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
                                  const WeaponConfig& weapons, const glm::vec3& position,
-                                 int segment, const SolidDoors* doors) {
+                                 int segment, const SolidDoors* doors, const PropState* props) {
     PlayerVisibility out;
     out.headlight = combat.player.headlightOn;
 
@@ -203,6 +222,30 @@ PlayerVisibility playerVisibility(const Level& level, const CombatState& combat,
         const float k = e.lifetime > 0.0f ? e.age / e.lifetime : 1.0f;
         addLooseLight(lit, query, level, e.position, e.lightRadius,
                       e.lightIntensity * std::max(0.0f, 1.0f - k), doors);
+    }
+
+    // The lights that are furniture rather than fire. A ball floating in a room
+    // and a lamp swinging over it light the player exactly as a flare does, and
+    // shooting the ball away to put a corridor back into darkness is the
+    // mechanic they exist for - which only works if this is the number it
+    // moves.
+    if (props) {
+        for (int i = 0; i < props->floatingCount; ++i) {
+            const FloatingLight& ball = props->floating[static_cast<size_t>(i)];
+            if (!ball.alive) continue;
+            addLooseLight(lit, query, level, ball.body.position, ball.lightRadius,
+                          ball.lightIntensity, doors);
+        }
+        // A lamp is a SPOT, and the cone is the whole point of it: standing
+        // outside the circle it throws is standing in the dark, and reporting
+        // it as a point light would say the opposite in exactly the place the
+        // player is relying on.
+        for (int i = 0; i < props->swingingCount; ++i) {
+            const SwingingLight& lamp = props->swinging[static_cast<size_t>(i)];
+            if (!lamp.alive) continue;
+            addLooseSpot(lit, query, level, lamp.position, lamp.direction, lamp.coneDegrees,
+                         lamp.lightRadius, lamp.lightIntensity, doors);
+        }
     }
 
     out.illumination = lit.value;

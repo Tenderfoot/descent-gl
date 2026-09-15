@@ -7,6 +7,7 @@
 #include "sim/combat.h"
 #include "sim/weapons.h"
 #include "sim/lighting.h"
+#include "sim/props.h"
 
 #include <glm/geometric.hpp>
 
@@ -267,6 +268,114 @@ int runLightTest(const char* levelPath) {
     log::info("  {} dark, {} lit, threshold {:.2f}", dark, lit, sim::kDarkThreshold);
     ok &= expect(dark > 0, "the level has somewhere dark to stand");
     ok &= expect(lit > 0, "the level has somewhere lit to stand");
+
+    // --- every light the simulation owns reaches the detection meter -------
+    //
+    // playerVisibility is the number the robots act on AND the number the HUD's
+    // detection meter shows. A light that reaches the screen without reaching
+    // this function is a room the player can see is lit while the game insists
+    // they are hidden in it - which is what happened when the floating and
+    // swinging lights were added and nothing told this query about them.
+    //
+    // One case per kind, and the count is checked against kSimLightSources, so
+    // a sixth kind breaks this test rather than shipping half-wired.
+    {
+        const sim::WeaponConfig weapons = sim::WeaponConfig::defaults();
+
+        // Somewhere the level's own lights do not reach, so any reading is the
+        // one this case put there.
+        int darkSegment = -1;
+        for (int si = 0; si < n && darkSegment < 0; ++si) {
+            sim::IlluminationQuery probe;
+            probe.point = level.segments[static_cast<size_t>(si)].center;
+            probe.segment = si;
+            if (sim::illuminationAt(probe, level, level.lights).dark()) darkSegment = si;
+        }
+        ok &= expect(darkSegment >= 0, "the level has a dark segment to test in");
+
+        if (darkSegment >= 0) {
+            const glm::vec3 at = level.segments[static_cast<size_t>(darkSegment)].center;
+            const auto seen = [&](const sim::CombatState& combat, const sim::PropState& props) {
+                return sim::playerVisibility(level, combat, weapons, at, darkSegment, nullptr,
+                                             &props);
+            };
+
+            sim::CombatState empty;
+            sim::PropState noProps;
+            const sim::PlayerVisibility baseline = seen(empty, noProps);
+            ok &= expect(!baseline.visible, "the player is hidden there with nothing lit");
+
+            int wired = 0;
+
+            {   // 1. a bolt in flight
+                sim::CombatState combat;
+                sim::Projectile& p = combat.projectiles.items[0];
+                p.alive = true;
+                p.position = at + glm::vec3(0.0f, 2.0f, 0.0f);
+                p.lightRadius = 18.0f;
+                p.lightIntensity = 3.0f;
+                if (expect(seen(combat, noProps).visible, "a bolt in flight gives the player away")) {
+                    ++wired;
+                }
+            }
+
+            {   // 2. a burning flare
+                sim::CombatState combat;
+                sim::Flare& f = combat.flares.items[0];
+                f.alive = true;
+                f.position = at + glm::vec3(0.0f, 2.0f, 0.0f);
+                f.lifetime = 30.0f;
+                if (expect(seen(combat, noProps).visible, "so does a burning flare")) ++wired;
+            }
+
+            {   // 3. an explosion or muzzle flash
+                sim::CombatState combat;
+                sim::Effect& e = combat.effects.items[0];
+                e.alive = true;
+                e.position = at + glm::vec3(0.0f, 2.0f, 0.0f);
+                e.lifetime = 0.4f;
+                e.lightRadius = 20.0f;
+                e.lightIntensity = 4.0f;
+                if (expect(seen(combat, noProps).visible, "so does an explosion flash")) ++wired;
+            }
+
+            {   // 4. a floating light
+                sim::PropState props;
+                props.floatingCount = 1;
+                sim::FloatingLight& ball = props.floating[0];
+                ball.alive = true;
+                ball.body.position = at + glm::vec3(0.0f, 3.0f, 0.0f);
+                ball.body.segment = darkSegment;
+                if (expect(seen(empty, props).visible, "so does a floating light")) ++wired;
+            }
+
+            {   // 5. a swinging lamp, which is a SPOT - the cone is the point
+                sim::PropState props;
+                props.swingingCount = 1;
+                sim::SwingingLight& lamp = props.swinging[0];
+                lamp.alive = true;
+                lamp.position = at + glm::vec3(0.0f, 6.0f, 0.0f);
+                lamp.segment = darkSegment;
+                lamp.direction = glm::vec3(0.0f, -1.0f, 0.0f);
+                if (expect(seen(empty, props).visible, "so does a swinging lamp pointed at you")) {
+                    ++wired;
+                }
+
+                // And the case that makes the cone worth carrying: the same
+                // lamp, the same distance, aimed the other way. Treated as a
+                // point light this would read as lit, which is the opposite of
+                // what the player can see.
+                lamp.direction = glm::vec3(0.0f, 1.0f, 0.0f);
+                ok &= expect(!seen(empty, props).visible,
+                             "but a lamp aimed away from you leaves you in the dark");
+            }
+
+            log::info("  {} of {} simulation-owned light kinds reach playerVisibility", wired,
+                      sim::kSimLightSources);
+            ok &= expect(wired == sim::kSimLightSources,
+                         "every light the simulation owns reaches the detection meter");
+        }
+    }
 
     // --- the body sphere --------------------------------------------------
     //

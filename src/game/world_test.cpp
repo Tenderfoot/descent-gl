@@ -162,12 +162,24 @@ int runWorldTest(const char* levelPath) {
     // essentially black - the falloff, not the segment set, is what makes the
     // dark stretches. So measure the thing that is actually claimed: how much
     // light arrives at each segment's centre.
+    // The level's authored lights plus the moving ones, at rest.
+    //
+    // A ball wanders and a lamp swings, so no static grading can be exact for
+    // them - but leaving them out grades a room lit only by a floating light as
+    // dark, which is a worse answer than one taken at their starting positions.
+    // Their contribution here is uncut by any segment set, because the
+    // simulation does not build one for them; the falloff is the whole bound,
+    // which is the same thing playerVisibility does with them.
+    sim::PropState props;
+    sim::spawnProps(level, props);
+
     log::info("brightness at segment centres (best single light, falloff as the shader computes it):");
     int dark = 0;
     for (int si = 0; si < n; ++si) {
         const glm::vec3 p = level.segments[static_cast<size_t>(si)].center;
         float best = 0.0f;
         int from = -1;
+        std::string fromWhat;
         for (size_t li = 0; li < level.lights.size(); ++li) {
             const Light& l = level.lights[li];
             if (std::find(l.segments.begin(), l.segments.end(), si) == l.segments.end()) continue;
@@ -175,12 +187,45 @@ int runWorldTest(const char* levelPath) {
             if (value > best) {
                 best = value;
                 from = static_cast<int>(li);
+                fromWhat = std::format("  from light {}", from);
+            }
+        }
+        for (int bi = 0; bi < props.floatingCount; ++bi) {
+            const sim::FloatingLight& ball = props.floating[static_cast<size_t>(bi)];
+            if (!ball.alive) continue;
+            Light as{};
+            as.type = LightType::Point;
+            as.position = ball.body.position;
+            as.radius = ball.lightRadius;
+            as.intensity = ball.lightIntensity;
+            const float value = sim::lightContribution(as, p);
+            if (value > best) {
+                best = value;
+                from = bi;
+                fromWhat = std::format("  from floating light {}", bi);
+            }
+        }
+        for (int li = 0; li < props.swingingCount; ++li) {
+            const sim::SwingingLight& lamp = props.swinging[static_cast<size_t>(li)];
+            if (!lamp.alive) continue;
+            Light as{};
+            as.type = LightType::Spot;
+            as.position = lamp.position;
+            as.direction = lamp.direction;
+            as.coneDegrees = lamp.coneDegrees;
+            as.radius = lamp.lightRadius;
+            as.intensity = lamp.lightIntensity;
+            const float value = sim::lightContribution(as, p);
+            if (value > best) {
+                best = value;
+                from = li;
+                fromWhat = std::format("  from swinging light {}", li);
             }
         }
         const bool isDark = best < sim::kDarkThreshold;
         if (isDark) ++dark;
         log::info("  segment {:2}: {:.3f}{}{}", si, best,
-                  from >= 0 ? std::format("  from light {}", from) : std::string("  unreached"),
+                  from >= 0 ? fromWhat : std::string("  unreached"),
                   isDark ? "   <- dark" : "");
     }
     log::info("  {} of {} segments are below {:.2f} and read as dark", dark, n, sim::kDarkThreshold);
