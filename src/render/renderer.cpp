@@ -699,8 +699,19 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         // otherwise sample another transmission's frames.
         const CommClipInfo& clip = commClips_.clips[static_cast<size_t>(
             std::clamp(hud.commClip, 0, static_cast<int>(commClips_.clips.size()) - 1))];
-        const int layer =
+        int layer =
             clip.baseLayer + std::clamp(hud.commFrame, 0, std::max(0, clip.frameCount - 1));
+        if (clip.video >= 0 && clip.video < static_cast<int>(commClips_.videos.size())) {
+            // A decoded clip owns one layer rather than a run of them, so the
+            // picture is fetched and written rather than indexed. The decoder
+            // returns null when the frame has not changed since it was last
+            // asked, which on a 120 Hz loop showing 24 fps is most draws.
+            CommVideo& video = commClips_.videos[static_cast<size_t>(clip.video)];
+            if (const uint8_t* rgba = video.frame(hud.commFrame)) {
+                commFrames_->updateLayer(clip.baseLayer, rgba);
+            }
+            layer = clip.baseLayer;
+        }
         hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
         hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);

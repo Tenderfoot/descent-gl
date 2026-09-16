@@ -274,6 +274,13 @@ int main(int argc, char** argv) {
     }
 
     dvk::Clock clock;
+    // Sound. A container with no sound card is the ordinary case for this and
+    // is a warning, not an error: the mixer still runs, nothing pulls from it,
+    // and every other number the run reports is unaffected. Declared here
+    // rather than at its init below because starting a transmission starts its
+    // voice, and that is decided a few lines down.
+    dvk::audio::Audio audio;
+
     dvk::CommPlayer commPlayer;
     int activeCommMessage = -1;
     // Which clip the panel is drawing. Every frame index the player produces is
@@ -291,12 +298,30 @@ int main(int argc, char** argv) {
     const auto selectCommClip = [&](std::string_view name) {
         return std::max(0, renderer.commClipIndex(name));
     };
+    // Starts the picture and, if the clip has one, the voice beside it. They
+    // are started together and never corrected against each other afterwards;
+    // see audio.h and docs/ARCHITECTURE.md for why that is enough.
+    const auto startCommClip = [&](std::string_view name, float seconds) {
+        activeCommClip = selectCommClip(name);
+        dvk::CommClipTiming timing = commTiming(activeCommClip);
+        if (seconds > 0.0f) timing.displaySeconds = seconds;
+        commPlayer.configure(timing);
+        commPlayer.start(clock.seconds());
+        audio.playComm(audio.bank().commClip(name));
+    };
     const auto startComm = [&]() {
         activeCommMessage = -1;
-        activeCommClip = selectCommClip(opts.comm.empty() ? kDefaultCommClip : opts.comm);
-        commPlayer.configure(commTiming(activeCommClip));
-        if (!opts.comm.empty()) commPlayer.hold(1.0);
-        else commPlayer.start(clock.seconds());
+        const std::string_view name = opts.comm.empty() ? kDefaultCommClip : opts.comm;
+        if (!opts.comm.empty()) {
+            // --comm is a screenshot pin, not a performance: a fixed frame and
+            // no voice, so the picture is the same every run.
+            activeCommClip = selectCommClip(name);
+            commPlayer.configure(commTiming(activeCommClip));
+            commPlayer.hold(1.0);
+            audio.stopComm();
+            return;
+        }
+        startCommClip(name, 0.0f);
     };
 
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
@@ -386,12 +411,11 @@ int main(int argc, char** argv) {
     // is not the mine. Rebuilt every step, never resized.
     dvk::sim::OccluderSet occluders;
 
-    // Sound. A container with no sound card is the ordinary case for this and
-    // is a warning, not an error: the mixer still runs, nothing pulls from it,
-    // and every other number the run reports is unaffected.
-    dvk::audio::Audio audio;
     if (!opts.noSound) {
-        audio.init(kSoundDir);
+        // assets/comm too: a transmission's voice track lives beside its
+        // pictures rather than in assets/sounds, because which transmissions
+        // exist is level content.
+        audio.init(kSoundDir, /*openDevice=*/true, kCommRoot);
     }
     audio.setMasterGain(settings.masterVolume);
     audio.setMuted(settings.muted);
@@ -465,6 +489,7 @@ int main(int argc, char** argv) {
         activeCommMessage = -1;
         activeCommClip = 0;
         commPlayer.stop();
+        audio.stopComm();
         if (opts.headlight) {
             session.initial().combat.player.headlightOn = true;
             prev.combat.player.headlightOn = true;
@@ -951,14 +976,10 @@ int main(int argc, char** argv) {
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 activeCommMessage = requested;
-                activeCommClip = selectCommClip(message->clip);
-                dvk::CommClipTiming timing = commTiming(activeCommClip);
                 // The clip's own displaySeconds is how long the pictures run;
                 // the message says how long it is on screen, and the frames
                 // loop to fill it.
-                timing.displaySeconds = message->seconds;
-                commPlayer.configure(timing);
-                commPlayer.start(clock.seconds());
+                startCommClip(message->clip, message->seconds);
             }
         }
 

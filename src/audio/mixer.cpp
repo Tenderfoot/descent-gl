@@ -113,15 +113,34 @@ void Mixer::drain() {
                     }
                     break;
                 }
-                // Already running: update it in place. Restarting the clip
+                // Already running the same clip: update it in place. Restarting
                 // every time the throttle moved would make the engine stutter.
+                //
+                // The clip has to match. A channel that carries a different
+                // recording each time it is used - a transmission rather than
+                // an engine - would otherwise keep playing whatever it started
+                // with and silently ignore the new one, because nothing below
+                // ever reassigns `clip`.
+                if (!clips_ || static_cast<size_t>(command.clip) >= clips_->size()) break;
+                const Clip* wanted = &(*clips_)[static_cast<size_t>(command.clip)];
                 if (slot >= 0 && voices_[static_cast<size_t>(slot)].active) {
                     Voice& v = voices_[static_cast<size_t>(slot)];
-                    v.gain = command.gain;
-                    v.pitch = command.pitch;
-                    v.position = command.position;
-                    v.positional = command.positional;
-                    break;
+                    if (v.clip == wanted) {
+                        v.gain = command.gain;
+                        v.pitch = command.pitch;
+                        v.position = command.position;
+                        v.positional = command.positional;
+                        break;
+                    }
+                    // A different recording, so the channel is being reused
+                    // rather than adjusted. Retire the voice holding it before
+                    // taking it again: start() would claim a free slot and
+                    // leave this one playing in a slot the channel no longer
+                    // points at - still flagged as a channel, so still never
+                    // stolen, and with nothing able to stop it.
+                    v.active = false;
+                    v.ambient = -1;
+                    ambientSlots_[channel] = -1;
                 }
                 start(command);
                 break;
