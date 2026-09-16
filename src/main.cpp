@@ -16,6 +16,7 @@
 #include "game/loop_test.h"
 #include "game/progress.h"
 #include "game/robots_test.h"
+#include "game/comm_player.h"
 #include "game/session.h"
 #include "game/settings.h"
 #include "game/weapons_test.h"
@@ -151,7 +152,13 @@ int main(int argc, char** argv) {
 
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
-    if (opts.commTest) return dvk::gl::runCommTest(kCommManifestPath);
+    if (opts.commTest) {
+        // The clip and the clock that plays it are checked separately, and both
+        // run before either can report. A failure in one must not hide the other.
+        const int clip = dvk::gl::runCommTest(kCommManifestPath);
+        const int player = dvk::runCommPlayerTest();
+        return clip != 0 || player != 0 ? 1 : 0;
+    }
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -243,6 +250,23 @@ int main(int argc, char** argv) {
     dvk::Level level = dvk::loadLevel(levelFile);
     const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
     dvk::gl::Renderer renderer(level, robotConfig);
+
+    // The transmission runs on the application clock rather than on simulation
+    // time, so the clock has to exist before anything can start playing. It is
+    // monotonic from construction and the step-rate measurement takes its own
+    // stamp below, so moving it up here costs that measurement nothing. See
+    // game/comm_player.h for why it is not the fixed-step clock.
+    dvk::Clock clock;
+    dvk::CommPlayer commPlayer;
+    commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
+                          renderer.commDisplaySeconds()});
+    // --comm pins a repeatable frame so a screenshot shows the panel without
+    // depending on how fast the run got here. Determinism comes from the flag,
+    // which is where it came from before the clock moved.
+    const auto startComm = [&]() {
+        if (opts.comm) commPlayer.hold(1.0);
+        else commPlayer.start(clock.seconds());
+    };
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
     renderer.showStencil = opts.stencilView;
     renderer.drawWallNormals = opts.debugLines;
@@ -306,6 +330,7 @@ int main(int argc, char** argv) {
                                  opts.screenshot.empty() && !opts.resizeTest;
     if (commandLineRun) {
         session.start();
+        startComm();
         menu.hide();
     } else if (opts.settingsMenu) {
         menu.showMain();
@@ -404,6 +429,9 @@ int main(int argc, char** argv) {
 
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
+        // Nothing plays until the new level starts; the outgoing level's
+        // transmission must not carry over into it.
+        commPlayer.stop();
         if (opts.headlight) {
             session.initial().combat.player.headlightOn = true;
             prev.combat.player.headlightOn = true;
@@ -423,7 +451,6 @@ int main(int argc, char** argv) {
     const std::string switchTestFrom = levelFile;
     const int switchTestFromSegments = level.segmentCount();
 
-    dvk::Clock clock;
     // Measured from here, not from construction: startup (window, GL, texture,
     // shader compile) runs no sim steps and would drag the average down.
     const double loopStart = clock.seconds();
@@ -626,6 +653,7 @@ int main(int argc, char** argv) {
                     loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
                 }
                 session.start();
+                startComm();
                 menu.hide();
                 lightDoorSignature = -1;
                 input.setMouseCaptured(window.handle(), true);
@@ -640,6 +668,7 @@ int main(int argc, char** argv) {
                 break;
             case dvk::MenuAction::Restart:
                 session.restart();
+                startComm();
                 menu.hide();
                 contacts.clear();
                 automap.open = false;
@@ -1234,10 +1263,10 @@ int main(int argc, char** argv) {
                 hud.targetFade = std::min(1.0f, cur.combat.player.targetHudTime / 0.5f);
             }
         }
-        hud.commActive = opts.comm || cur.game.comm.active;
-        // Forced mode holds on a useful, repeatable frame even when a
-        // frame-limited render runs faster than the fixed simulation clock.
-        hud.commTime = opts.comm ? 1.0f : cur.game.comm.elapsed;
+        const dvk::CommFrame commFrame = commPlayer.at(now);
+        hud.commActive = commFrame.visible;
+        hud.commFrame = commFrame.frame;
+        hud.commAlpha = commFrame.alpha;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.
         hud.aimPoint = rs.shipPos + shipForward * aimDistance;

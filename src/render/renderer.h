@@ -85,10 +85,13 @@ struct HudData {
     float targetEnergy01 = 0.0f;
     float targetFade = 0.0f;
 
-    // The level-opening transmission is simulation-timed. The renderer turns
-    // the time into a texture-array layer; no video decode happens per frame.
+    // The level-opening transmission. The renderer draws what it is handed and
+    // owns no part of the clip's clock or lifetime: CommPlayer decides which
+    // frame is current and how far into its fade it is. No video decode happens
+    // per frame either way - `commFrame` is a texture-array layer.
     bool commActive = false;
-    float commTime = 0.0f;
+    int commFrame = 0;
+    float commAlpha = 0.0f;
 
     // Darkness, as the simulation understands it rather than as the screen
     // shows it. `illumination` is the light reaching the player and
@@ -204,6 +207,15 @@ public:
     // needs it, and building it twice from two places is how the cull and the
     // draw quietly drift apart. Valid after beginFrame, which sizes the target.
     glm::mat4 viewProj(const RenderState& rs) const;
+
+    // What the comm manifest carried. The renderer loads the clip, so this is
+    // where the numbers arrive, but it is CommPlayer that decides what to do
+    // with them. If the frames ever come from a decoder rather than a texture
+    // array this inverts: the player owns the stream and hands the renderer a
+    // texture.
+    int commFrameCount() const { return commFrameCount_; }
+    float commFramesPerSecond() const { return commFramesPerSecond_; }
+    float commDisplaySeconds() const { return commDisplaySeconds_; }
 
     // Per-frame counters for the debug overlay.
     struct Stats {

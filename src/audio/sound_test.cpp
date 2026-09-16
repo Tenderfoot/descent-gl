@@ -293,6 +293,144 @@ int runSoundTest(const std::string& soundDir) {
         if (afterStop != 0) fail("stopping an ambient channel left a voice running");
     }
 
+    // --- a protected channel under pressure ------------------------------
+    //
+    // Two things the slot search used to get wrong. Neither is visible until
+    // every voice is busy, which is how an ambient channel could be documented
+    // as unstealable and not actually be.
+    {
+        renderBlocks(mixer, 400);
+        const int engineClip = bank.ambientClip[static_cast<size_t>(Ambient::Engine)];
+
+        // The pool is quiet, so this takes slot 0 - precisely the case that
+        // used to make the search seed on a slot it had already skipped and
+        // then hand it back as the quietest thing it found.
+        Command amb;
+        amb.kind = Command::Kind::SetAmbient;
+        amb.ambient = static_cast<uint8_t>(Ambient::Engine);
+        amb.clip = engineClip;
+        amb.gain = 1.0f;
+        amb.positional = false;
+        mixer.push(amb);
+        renderBlocks(mixer, 1);
+
+        // Fill what is left of the pool and mix one block, so every one of
+        // those voices has a measured gain before the next burst arrives. That
+        // detail is the whole test: while the other voices are still at the
+        // "not yet computed" sentinel, the old search happened to seed on one
+        // of them and left the channel alone. Once they carry real gains
+        // nothing ever compares quieter than the seed, and the seed was the
+        // slot the loop had skipped - so the channel was what it returned.
+        const auto burst = [&](int count) {
+            for (int i = 0; i < count; ++i) {
+                Command c;
+                c.kind = Command::Kind::Play;
+                c.clip = explosionClip;
+                c.position = glm::vec3(static_cast<float>(i) * 4.0f, 0.0f, 0.0f);
+                c.gain = 1.0f;
+                mixer.push(c);
+            }
+        };
+        burst(kMaxVoices - 1);
+        renderBlocks(mixer, 1);
+        burst(kMaxVoices);
+        // Long enough for every one-shot to run out, so whatever is still
+        // playing afterwards is the channel or nothing.
+        renderBlocks(mixer, 400);
+        const int survivors = mixer.activeVoices();
+        const float level = rms(renderBlocks(mixer, 20).samples, 0);
+
+        log::info("  protection: {} voice(s) left after {} one-shots over a running ambient, "
+                  "level {:.4f}",
+                  survivors, kMaxVoices * 2 - 1, level);
+        if (survivors != 1) {
+            fail("a burst of one-shots stole the ambient channel it was told not to touch");
+        }
+        if (level <= 0.0f) fail("the protected ambient channel went silent under pressure");
+
+        amb.clip = -1;
+        amb.gain = 0.0f;
+        mixer.push(amb);
+        renderBlocks(mixer, 400);
+
+        // And the second: a voice that has not been through a block yet has no
+        // measured gain. Reading that sentinel as silence made it the preferred
+        // victim, so a burst arriving in one drain cut its own earliest and
+        // loudest member and kept the near-silent ones behind it.
+        Command loud;
+        loud.kind = Command::Kind::Play;
+        loud.clip = explosionClip;
+        loud.position = glm::vec3(0.0f, 0.0f, -4.0f);
+        loud.gain = 1.0f;
+        loud.positional = true;
+        mixer.push(loud);
+        const float soloPeak = peak(renderBlocks(mixer, 20).samples);
+        renderBlocks(mixer, 400);
+
+        // The same sound, then enough near-silent ones to overrun the pool
+        // twice. All of it arrives before a single block is rendered, so not
+        // one of them has a gain to compare when the stealing starts.
+        mixer.push(loud);
+        for (int i = 0; i < kMaxVoices * 2; ++i) {
+            Command c = loud;
+            c.gain = 0.002f;
+            mixer.push(c);
+        }
+        const float floodPeak = peak(renderBlocks(mixer, 20).samples);
+
+        log::info("  steal order: loudest alone {:.4f}, loudest under {} quiet arrivals {:.4f}",
+                  soloPeak, kMaxVoices * 2, floodPeak);
+        if (soloPeak <= 0.0f) fail("the reference sound for the steal-order check was silent");
+        if (floodPeak < soloPeak * 0.5f) {
+            fail("the voice pool cut its loudest sound and kept the near-silent ones");
+        }
+        renderBlocks(mixer, 400);
+    }
+
+    // --- a protected channel that is not a loop --------------------------
+    {
+        // Protection and looping used to be one decision: SetAmbient always
+        // looped, so a channel taken for something that ends by itself would
+        // repeat instead of stopping. The engine still loops; this does not.
+        const int engineClip = bank.ambientClip[static_cast<size_t>(Ambient::Engine)];
+        const float clipLength = engineClip >= 0
+                                     ? bank.clips[static_cast<size_t>(engineClip)].seconds()
+                                     : 0.0f;
+        Command c;
+        c.kind = Command::Kind::SetAmbient;
+        c.ambient = static_cast<uint8_t>(Ambient::Engine);
+        c.clip = engineClip;
+        c.gain = 1.0f;
+        c.positional = false;
+        c.loop = false;
+        mixer.push(c);
+        renderBlocks(mixer, 1);
+        const int afterStart = mixer.activeVoices();
+
+        const int blocksPastEnd =
+            static_cast<int>((clipLength * static_cast<float>(kSampleRate)) / kBlock) + 20;
+        renderBlocks(mixer, blocksPastEnd);
+        const int afterEnd = mixer.activeVoices();
+
+        // Ending has to hand the channel back, or the next thing to ask for it
+        // would be updating a voice that is no longer running.
+        c.loop = true;
+        mixer.push(c);
+        renderBlocks(mixer, 1);
+        const int afterReuse = mixer.activeVoices();
+        c.clip = -1;
+        c.gain = 0.0f;
+        mixer.push(c);
+        renderBlocks(mixer, 1);
+
+        log::info("  one-shot channel: {} voice after start, {} after its {:.2f}s clip ran out, "
+                  "{} after the channel was taken again",
+                  afterStart, afterEnd, clipLength, afterReuse);
+        if (afterStart != 1) fail("a non-looping ambient channel did not start");
+        if (afterEnd != 0) fail("a non-looping ambient channel looped instead of ending");
+        if (afterReuse != 1) fail("a finished ambient channel could not be taken again");
+    }
+
     // --- the heap --------------------------------------------------------
     {
         // The same rule main.cpp instruments on the sim step, for the same
