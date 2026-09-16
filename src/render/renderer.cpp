@@ -9,6 +9,7 @@
 #include "sim/robots.h"
 #include "render/camera.h"
 #include "render/comm_clip.h"
+#include "render/font.h"
 #include "render/procedural.h"
 #include "render/sprites.h"
 
@@ -29,7 +30,7 @@ constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
-constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
+constexpr const char* kCommRoot = "assets/comm";
 
 constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
 constexpr float kChaseLookAhead = 6.0f;
@@ -117,14 +118,23 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         kPickupSpriteSize, loadPickupSprites(kPickupSpriteSize), "pickups",
         TextureArray::Wrap::ClampToEdge);
     {
-        CommClip clip = loadCommClip(kCommManifestPath);
-        commFrameCount_ = static_cast<int>(clip.frames.size());
-        commWidth_ = clip.width;
-        commHeight_ = clip.height;
-        commFramesPerSecond_ = clip.framesPerSecond;
-        commDisplaySeconds_ = clip.displaySeconds;
+        commClips_ = loadCommClips(kCommRoot);
+        GLint maxLayers = 0;
+        glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
+        if (static_cast<int>(commClips_.frames.size()) > maxLayers) {
+            log::fatal("comm library needs {} texture layers; GL supports {}",
+                       commClips_.frames.size(), maxLayers);
+        }
+        commWidth_ = commClips_.width;
+        commHeight_ = commClips_.height;
+        commFrameCount_ = static_cast<int>(commClips_.frames.size());
+        if (!commClips_.clips.empty()) {
+            commFramesPerSecond_ = commClips_.clips.front().framesPerSecond;
+            commDisplaySeconds_ = commClips_.clips.front().displaySeconds;
+        }
         commFrames_ = std::make_unique<TextureArray>(
-            clip.width, clip.height, clip.frames, "comm intro", TextureArray::Wrap::ClampToEdge);
+            commClips_.width, commClips_.height, commClips_.frames, "comm clips",
+            TextureArray::Wrap::ClampToEdge);
         // hud.frag is also used by world-space door signs. Bind the optional
         // sampler immediately so that shared program never observes an
         // incomplete texture on unit 3 before the first HUD pass.
@@ -674,11 +684,8 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // Incoming transmission, below the key row in the otherwise open upper
     // right. The authored frames loop for the duration of the message; the
     // short fades keep it from arriving and vanishing as a hard rectangle.
-    if (hud.commActive && hud.commTime < commDisplaySeconds_ && commFrameCount_ > 0) {
-        const float fadeIn = std::clamp(hud.commTime / 0.18f, 0.0f, 1.0f);
-        const float fadeOut = std::clamp((commDisplaySeconds_ - hud.commTime) / 0.45f,
-                                         0.0f, 1.0f);
-        const float alpha = std::min(fadeIn, fadeOut);
+    if (hud.commActive && commFrameCount_ > 0) {
+        const float alpha = hud.commAlpha;
         const float panelW = std::min(w * 0.28f, 92.0f * s);
         const float panelH = panelW * static_cast<float>(commHeight_) /
                              static_cast<float>(commWidth_);
@@ -688,11 +695,36 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f,
                   panelH + frame * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
-        const int layer = static_cast<int>(std::floor(hud.commTime * commFramesPerSecond_)) %
-                          commFrameCount_;
+        const int layer = std::clamp(hud.commFrame, 0, commFrameCount_ - 1);
         hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
-        hud_.text("incoming transmission", x, y + panelH + 3.0f * s, s * 0.62f, cyan);
+        hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);
+
+        // Wrap by taking string_view slices; no temporary strings and no draw-
+        // path allocation. Long messages are clipped to the space below the
+        // portrait, while the load-time limit still bounds worst-case geometry.
+        const std::string_view body(hud.commText ? hud.commText : "");
+        const float bodyScale = s * 0.52f;
+        const int columns = std::max(1, static_cast<int>(panelW /
+            (static_cast<float>(font::kAdvance) * bodyScale)));
+        size_t first = 0;
+        float lineY = y + panelH + 12.0f * s;
+        for (int line = 0; line < 6 && first < body.size(); ++line) {
+            while (first < body.size() && body[first] == ' ') ++first;
+            size_t last = std::min(body.size(), first + static_cast<size_t>(columns));
+            const size_t newline = body.find('\n', first);
+            if (newline != std::string_view::npos && newline < last) {
+                last = newline;
+            } else if (last < body.size()) {
+                const size_t space = body.rfind(' ', last);
+                if (space != std::string_view::npos && space > first) last = space;
+            }
+            hud_.text(body.substr(first, last - first), x, lineY, bodyScale,
+                      glm::vec4(0.78f, 0.94f, 1.0f, alpha));
+            first = last;
+            if (first < body.size() && body[first] == '\n') ++first;
+            lineY += 6.0f * s;
+        }
     }
 
     // Reticle: a gap in the middle so it frames the target rather than

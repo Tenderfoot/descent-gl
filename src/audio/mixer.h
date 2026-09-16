@@ -71,6 +71,11 @@ struct Command {
     float pitch = 1.0f;
     bool positional = true;
     uint8_t ambient = 0;         // which Ambient channel, for SetAmbient
+    // Whether a SetAmbient voice repeats when it runs out. Ignored by Play,
+    // which is a one-shot by definition. The engine and the klaxon both want
+    // this; a channel taken for something that ends on its own does not, and
+    // asks for the channel's protection from being stolen without its loop.
+    bool loop = true;
     Listener listener;
 };
 
@@ -159,8 +164,9 @@ private:
     void drain();
     void start(const Command& command);
     // Which slot a new voice should take: a free one, else the quietest active
-    // one. Never returns -1, because dropping the newest sound is worse than
-    // cutting the least audible one.
+    // one that is not a protected ambient channel. Dropping the newest sound is
+    // worse than cutting the least audible one, so this only returns -1 when
+    // every slot is a protected channel and there is nothing left to cut.
     int claimSlot() const;
     void spatialise(const Voice& voice, float& left, float& right) const;
 

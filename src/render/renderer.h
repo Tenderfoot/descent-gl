@@ -2,6 +2,7 @@
 
 #include "render/gl.h"
 #include "render/billboards.h"
+#include "render/comm_clip.h"
 #include "render/debug_lines.h"
 #include "render/gpu_timer.h"
 #include "render/hud.h"
@@ -18,6 +19,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -85,10 +87,16 @@ struct HudData {
     float targetEnergy01 = 0.0f;
     float targetFade = 0.0f;
 
-    // The level-opening transmission is simulation-timed. The renderer turns
-    // the time into a texture-array layer; no video decode happens per frame.
+    // The level-opening transmission. The renderer draws what it is handed and
+    // owns no part of the clip's clock or lifetime: CommPlayer decides which
+    // frame is current and how far into its fade it is. No video decode happens
+    // per frame either way - `commFrame` is a texture-array layer.
     bool commActive = false;
-    float commTime = 0.0f;
+    int commFrame = 0;
+    float commAlpha = 0.0f;
+    int commClip = 0;
+    const char* commSpeaker = "incoming transmission";
+    const char* commText = "";
 
     // Darkness, as the simulation understands it rather than as the screen
     // shows it. `illumination` is the light reaching the player and
@@ -175,6 +183,7 @@ public:
     static constexpr GLsizei kSamples = 4;
 
     Renderer(const Level& level, const sim::RobotConfig& robots);
+    int commClipIndex(std::string_view name) const { return commClips_.find(name); }
 
     // Point the renderer at a different mine. Rebuilds the level mesh, the
     // mine occluder and the static props; everything else - shaders, wall
@@ -208,6 +217,15 @@ public:
     // needs it, and building it twice from two places is how the cull and the
     // draw quietly drift apart. Valid after beginFrame, which sizes the target.
     glm::mat4 viewProj(const RenderState& rs) const;
+
+    // What the comm manifest carried. The renderer loads the clip, so this is
+    // where the numbers arrive, but it is CommPlayer that decides what to do
+    // with them. If the frames ever come from a decoder rather than a texture
+    // array this inverts: the player owns the stream and hands the renderer a
+    // texture.
+    int commFrameCount() const { return commFrameCount_; }
+    float commFramesPerSecond() const { return commFramesPerSecond_; }
+    float commDisplaySeconds() const { return commDisplaySeconds_; }
 
     // Per-frame counters for the debug overlay.
     struct Stats {
@@ -313,11 +331,9 @@ private:
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<TextureArray> commFrames_;
-    int commFrameCount_ = 0;
+    CommClipLibrary commClips_;
     int commWidth_ = 1;
     int commHeight_ = 1;
-    float commFramesPerSecond_ = 1.0f;
-    float commDisplaySeconds_ = 0.0f;
     std::unique_ptr<LevelMesh> levelMesh_;
     std::unique_ptr<Mesh> ship_;
     std::unique_ptr<Mesh> gizmo_;

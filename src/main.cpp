@@ -16,7 +16,9 @@
 #include "game/loop_test.h"
 #include "game/progress.h"
 #include "game/robots_test.h"
+#include "game/comm_player.h"
 #include "game/session.h"
+#include "game/script.h"
 #include "game/settings.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
@@ -71,7 +73,7 @@ constexpr const char* kLevelDir = "assets/levels";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
-constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
+constexpr const char* kCommRoot = "assets/comm";
 
 // How the ship's drive is heard.
 //
@@ -151,7 +153,13 @@ int main(int argc, char** argv) {
 
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
-    if (opts.commTest) return dvk::gl::runCommTest(kCommManifestPath);
+    if (opts.commTest) {
+        const int clip = dvk::gl::runCommTest(kCommRoot);
+        const int player = dvk::runCommPlayerTest();
+        return clip != 0 || player != 0 ? 1 : 0;
+    }
+    if (opts.scriptTest) return dvk::runScriptTest(opts.level);
+
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -243,6 +251,34 @@ int main(int argc, char** argv) {
     dvk::Level level = dvk::loadLevel(levelFile);
     const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
     dvk::gl::Renderer renderer(level, robotConfig);
+
+    dvk::ScriptHost script;
+
+    const auto loadScript = [&] {
+        script.load(level);
+        for (const dvk::ScriptMessage& message : script.messages()) {
+            if (renderer.commClipIndex(message.clip) < 0) {
+                dvk::log::fatal("Lua message '{}' names unknown comm clip '{}'", message.id,
+                                message.clip);
+            }
+        }
+    };
+    loadScript();
+    if (!opts.comm.empty() && renderer.commClipIndex(opts.comm) < 0) {
+        dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
+    }
+
+    dvk::Clock clock;
+    dvk::CommPlayer commPlayer;
+    int activeCommMessage = -1;
+    const auto startComm = [&]() {
+        activeCommMessage = -1;
+        commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
+                              renderer.commDisplaySeconds()});
+        if (!opts.comm.empty()) commPlayer.hold(1.0);
+        else commPlayer.start(clock.seconds());
+    };
+
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
     renderer.showStencil = opts.stencilView;
     renderer.drawWallNormals = opts.debugLines;
@@ -306,6 +342,7 @@ int main(int argc, char** argv) {
                                  opts.screenshot.empty() && !opts.resizeTest;
     if (commandLineRun) {
         session.start();
+        startComm();
         menu.hide();
     } else if (opts.settingsMenu) {
         menu.showMain();
@@ -404,6 +441,9 @@ int main(int argc, char** argv) {
 
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
+        script.load(level);
+        activeCommMessage = -1;
+        commPlayer.stop();
         if (opts.headlight) {
             session.initial().combat.player.headlightOn = true;
             prev.combat.player.headlightOn = true;
@@ -423,7 +463,6 @@ int main(int argc, char** argv) {
     const std::string switchTestFrom = levelFile;
     const int switchTestFromSegments = level.segmentCount();
 
-    dvk::Clock clock;
     // Measured from here, not from construction: startup (window, GL, texture,
     // shader compile) runs no sim steps and would drag the average down.
     const double loopStart = clock.seconds();
@@ -625,7 +664,9 @@ int main(int argc, char** argv) {
                 if (menu.selectedLevel() >= 0) {
                     loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
                 }
+                loadScript();
                 session.start();
+                startComm();
                 menu.hide();
                 lightDoorSignature = -1;
                 input.setMouseCaptured(window.handle(), true);
@@ -639,7 +680,9 @@ int main(int argc, char** argv) {
                 prev = cur;
                 break;
             case dvk::MenuAction::Restart:
+                loadScript();
                 session.restart();
+                startComm();
                 menu.hide();
                 contacts.clear();
                 automap.open = false;
@@ -855,7 +898,8 @@ int main(int argc, char** argv) {
                                                 static_cast<float>(kSimStep), &solidDoors,
                                                 &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
-                               cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
+                               cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
+                               &script.triggers());
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -878,6 +922,20 @@ int main(int argc, char** argv) {
             worstSimAllocs = std::max(worstSimAllocs, simAllocCount);
             simAllocFrames += simAllocCount > 0 ? 1 : 0;
             if (simAllocCount > 0 && firstSimAllocFrame < 0) firstSimAllocFrame = frame;
+        }
+        // Lua is deliberately outside the measured fixed step. Every step in
+        // this rendered frame has already latched its trigger ids into POD
+        // state; callbacks may allocate without compromising sim determinism.
+        script.drain(cur.game);
+        if (const int requested = script.takeMessage(); requested >= 0) {
+            if (const dvk::ScriptMessage* message = script.message(requested)) {
+                activeCommMessage = requested;
+                dvk::CommClipTiming timing{renderer.commFrameCount(), renderer.commFramesPerSecond(),
+                                           renderer.commDisplaySeconds()};
+                timing.displaySeconds = message->seconds;
+                commPlayer.configure(timing);
+                commPlayer.start(clock.seconds());
+            }
         }
 
         if (runFinished) {
@@ -1234,10 +1292,16 @@ int main(int argc, char** argv) {
                 hud.targetFade = std::min(1.0f, cur.combat.player.targetHudTime / 0.5f);
             }
         }
-        hud.commActive = opts.comm || cur.game.comm.active;
-        // Forced mode holds on a useful, repeatable frame even when a
-        // frame-limited render runs faster than the fixed simulation clock.
-        hud.commTime = opts.comm ? 1.0f : cur.game.comm.elapsed;
+        const dvk::CommFrame commFrame = commPlayer.at(now);
+        hud.commActive = commFrame.visible;
+        hud.commFrame = commFrame.frame;
+        hud.commAlpha = commFrame.alpha;
+        hud.commSpeaker = "incoming transmission";
+        hud.commText = "";
+        if (const dvk::ScriptMessage* message = script.message(activeCommMessage)) {
+            hud.commSpeaker = message->speaker.c_str();
+            hud.commText = message->text.c_str();
+        }
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.
         hud.aimPoint = rs.shipPos + shipForward * aimDistance;

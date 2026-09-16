@@ -40,10 +40,12 @@ Options Options::parse(int argc, char** argv) {
             o.robotsTest = true;
         } else if (a == "--loop-test") {
             o.loopTest = true;
+        } else if (a == "--script-test") {
+            o.scriptTest = true;
         } else if (a == "--comm-test") {
             o.commTest = true;
         } else if (a == "--comm") {
-            o.comm = true;
+            o.comm = hasNext && argv[i + 1][0] != '-' ? argv[++i] : "intro";
         } else if (a == "--target-hud") {
             o.targetHud = true;
         } else if (a == "--light-test") {

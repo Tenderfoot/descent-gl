@@ -182,7 +182,7 @@ into simulation controls; gameplay call sites identify actions, not GLFW codes.
 ## Dependencies
 
 Allowlist, all from vcpkg: `glfw3`, `glad`, `glm`, `imgui` (glfw and opengl3
-bindings), `stb`, `nlohmann-json`, `tinyobjloader`.
+bindings), `stb`, `nlohmann-json`, `tinyobjloader`, `lua`.
 
 Plus one vendored, committed under `third_party/`: **miniaudio** (single header,
 public domain). It is not on vcpkg and has no usable Debian package, and it has

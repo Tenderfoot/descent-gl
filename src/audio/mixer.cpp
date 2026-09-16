@@ -140,6 +140,10 @@ void Mixer::start(const Command& command) {
     if (!clip.valid()) return;
 
     const int slot = claimSlot();
+    // Only when every slot is a protected channel. Nothing to steal, so the
+    // newest sound is the one that goes, exactly as a full command queue drops
+    // its newest push.
+    if (slot < 0) return;
     Voice& v = voices_[static_cast<size_t>(slot)];
     if (v.active) {
         ++stolen_;
@@ -159,7 +163,11 @@ void Mixer::start(const Command& command) {
     v.active = true;
 
     if (command.kind == Command::Kind::SetAmbient) {
-        v.loop = true;
+        // Protection and looping are separate questions. The engine and the
+        // klaxon want both; a voice that has to survive a firefight but still
+        // end by itself wants only the first, and forcing the loop here used to
+        // deny it that.
+        v.loop = command.loop;
         v.ambient = static_cast<int>(command.ambient);
         ambientSlots_[static_cast<size_t>(command.ambient)] = slot;
     }
@@ -167,7 +175,12 @@ void Mixer::start(const Command& command) {
 }
 
 int Mixer::claimSlot() const {
-    int quietest = 0;
+    // -1 until the first eligible slot is examined. Seeding the search on slot
+    // 0 instead was wrong twice over: when slot 0 held an ambient voice the
+    // loop skipped it without ever seeding, every later comparison ran against
+    // a gain of 0.0 that no real voice is quieter than, and the function
+    // returned the one slot it promises never to touch.
+    int quietest = -1;
     float quietestGain = 0.0f;
     for (int i = 0; i < kMaxVoices; ++i) {
         const Voice& v = voices_[static_cast<size_t>(i)];
@@ -176,12 +189,25 @@ int Mixer::claimSlot() const {
         // a burst of gunfire and never getting it back is worse than losing a
         // shot.
         if (v.ambient >= 0) continue;
-        const float current = std::max(v.gainL, v.gainR);
-        if (i == 0 || current < quietestGain) {
+        // gainL is -1 until the voice has been through a block, so a voice
+        // started earlier in this same drain has no gain to compare yet.
+        // Reading the sentinel as a level would make it the quietest thing in
+        // the pool and therefore the first victim, which is backwards: it has
+        // not been heard at all, so stealing it drops the sound entirely rather
+        // than cutting one short. Ask what it is about to be mixed at instead.
+        float left = v.gainL;
+        float right = v.gainR;
+        if (left < 0.0f) spatialise(v, left, right);
+        const float current = std::max(left, right);
+        if (quietest < 0 || current < quietestGain) {
             quietest = i;
             quietestGain = current;
         }
     }
+    // Every slot is a protected channel. Dropping the new sound is the right
+    // answer: the only alternative is cutting one of the channels this function
+    // exists to keep. Unreachable while there are fewer ambients than voices,
+    // which is why the caller only has to handle it and not recover from it.
     return quietest;
 }
 

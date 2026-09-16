@@ -3,6 +3,7 @@
 #include "game/level.h"
 #include "sim/body.h"
 #include "sim/events.h"
+#include "sim/triggers.h"
 
 #include <glm/vec3.hpp>
 
@@ -70,11 +71,6 @@ enum class GamePhase : uint8_t {
 inline constexpr int kMaxDoors = 32;
 inline constexpr int kMaxPickups = 96;
 
-struct CommState {
-    bool active = true;       // the level-opening transmission
-    float elapsed = 0.0f;     // simulation time, so playback is deterministic
-};
-
 struct GameState {
     GamePhase phase = GamePhase::Playing;
     float countdown = 0.0f;         // seconds left once the reactor is gone
@@ -85,7 +81,6 @@ struct GameState {
     bool reactorAlive = false;
     bool exitOpen = false;
     const char* endReason = "";
-    CommState comm;
 
     std::array<DoorState, kMaxDoors> doors{};
     std::array<bool, kMaxPickups> collected{};
@@ -106,11 +101,11 @@ struct GameState {
     glm::vec3 reactorPosition{0.0f};   // last known, valid once reactorSeen
 
     DoorField doorField;
+    TriggerState triggers;
 };
 
 struct GameConfig {
     float countdownSeconds = 45.0f;
-    float commSeconds = 4.5f;
     float shieldPickup = 25.0f;
     float energyPickup = 30.0f;
     int concussionPickup = 3;
@@ -124,7 +119,7 @@ void initGame(const Level& level, const RobotState& robots, GameState& out);
 // queue and may be null. See sim/events.h.
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events = nullptr);
+              EventQueue* events = nullptr, const TriggerSet* triggers = nullptr);
 
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.

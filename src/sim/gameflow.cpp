@@ -82,14 +82,12 @@ void initGame(const Level& level, const RobotState& robots, GameState& out) {
 
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events) {
+              EventQueue* events, const TriggerSet* triggers) {
     if (state.phase == GamePhase::Won || state.phase == GamePhase::Lost) return;
 
     state.elapsed += dt;
-    if (state.comm.active) {
-        state.comm.elapsed += dt;
-        if (state.comm.elapsed >= cfg.commSeconds) state.comm.active = false;
-    }
+
+    stepTriggers(state.triggers, player, triggers);
 
     // --- what the player has found ---------------------------------------
     //
