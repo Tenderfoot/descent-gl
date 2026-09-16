@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace dvk::gl {
@@ -19,7 +21,27 @@ struct CommClip {
     int frameAt(float seconds) const;
 };
 
+struct CommClipInfo {
+    std::string name;
+    int baseLayer = 0;
+    int frameCount = 0;
+    float framesPerSecond = 0.0f;
+    float displaySeconds = 0.0f;
+
+    int frameAt(float seconds) const;
+};
+
+struct CommClipLibrary {
+    int width = 0;
+    int height = 0;
+    std::vector<CommClipInfo> clips;
+    std::vector<std::vector<uint8_t>> frames;
+
+    int find(std::string_view name) const;
+};
+
 CommClip loadCommClip(const std::filesystem::path& manifestPath);
-int runCommTest(const std::filesystem::path& manifestPath);
+CommClipLibrary loadCommClips(const std::filesystem::path& root);
+int runCommTest(const std::filesystem::path& root);
 
 } // namespace dvk::gl

@@ -68,7 +68,8 @@ namespace dvk {
 //                       evaluation allocates nothing. Needs no window or GL.
 //   --comm-test         decode and validate every frame of the HUD comm clip,
 //                       check deterministic playback timing, then exit.
-//   --comm              keep the comm panel visible for screenshot checks.
+//   --comm [NAME]       keep a named comm clip visible for screenshot checks;
+//                       defaults to intro when NAME is omitted.
 //   --target-hud        show a disabled robot in the target panel for a
 //                       deterministic screenshot check.
 //   --level PATH        load a level other than the default mine01
@@ -104,7 +105,7 @@ struct Options {
     bool loopTest = false;
     bool scriptTest = false;
     bool commTest = false;
-    bool comm = false;
+    std::string comm;
     bool targetHud = false;
     bool lightTest = false;
     bool headlight = false;

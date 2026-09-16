@@ -41,6 +41,7 @@ public:
     void drain(sim::GameState& game);
 
     const sim::TriggerSet& triggers() const { return triggers_; }
+    const std::vector<ScriptMessage>& messages() const { return messages_; }
     const ScriptMessage* message(int index) const;
     int takeMessage();
     bool loaded() const { return state_ != nullptr; }
