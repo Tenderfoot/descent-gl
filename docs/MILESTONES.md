@@ -2169,3 +2169,78 @@ frame source is local to `CommPlayer` and the one draw call that reads
 
 Windows/MSVC was not built — no dev machine in this container. Everything above
 is the Linux container path.
+
+## Repairing the Lua bridge and the comm clip library after the merge
+
+Three pull requests landed in a row and the result did not build. Two of them
+touched the comm panel from opposite sides — one moved its clock out of the
+simulation, the other turned its single clip into a library — and git merged
+both without reporting a conflict.
+
+### What was actually broken
+
+`Renderer` kept `commFrameCount()`, `commFramesPerSecond()` and
+`commDisplaySeconds()`, reading three members the library change had deleted in
+the same file. That is the compile error, and it is the least of it.
+
+Everything downstream of those three accessors had quietly become wrong in a
+way that still compiled once they were restored, and would have gone on looking
+correct for exactly as long as the library held one clip:
+
+- `HudData::commClip` was added by the library change and written by nobody.
+- The draw call used `hud.commFrame` as an absolute texture-array layer,
+  clamped against the total frame count of every clip in the library.
+- `CommPlayer` was configured with the library's **total** frame count and the
+  **first** clip's rate and duration, so a message's frames would have looped
+  through its neighbours' and run for the wrong length.
+- `--comm NAME` validated the name against the library and then played clip
+  zero regardless.
+- A Lua message's `clip` field was parsed, length-checked, validated at load —
+  and then never read again.
+- A level switch called `script.load` directly rather than the wrapper that
+  validates clip names, so only the first level loaded got that check.
+
+### The fix
+
+`commClip(int)` replaces the three whole-clip accessors and returns the
+`CommClipInfo` — null for an index no clip answers to, so a lookup that failed
+cannot pass for clip zero. `commFrame` is now defined as an index **within** a
+clip and the renderer resolves `baseLayer + commFrame` itself, clamping both
+ends. The game layer holds the selected clip index beside the `CommPlayer` and
+sets both together, from `--comm`, from a Lua message's own `clip`, or from
+`intro` by default. `--comm`'s validated name is the clip that plays.
+See `docs/ARCHITECTURE.md` for the layer layout and the sandbox the scripts run
+in, neither of which had been written down.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` | ✅ clean, no warnings |
+| `cmake --build --preset linux-release` | ✅ clean, no warnings |
+| `--validate-assets --flight-test --world-test --collision-test --weapons-test --robots-test --loop-test --sound-test --light-test --settings-test --progress-test` | ✅ all exit 0, no `[ERROR]` or `[FATAL]` |
+| `--comm-test` | ✅ 1 clip, 16 consistent 256×192 frames, deterministic timing and loop |
+| `--script-test` | ✅ 2 triggers, callbacks healthy, 10,000 evaluations and **0** allocations; all 4 shipped levels |
+| `--comm intro` screenshot | ✅ panel upper-right, frame held, speaker line drawn |
+| Two clips in the library | ✅ a throwaway clip sorting *before* `intro` pushed `intro` to `baseLayer` 4; `--comm intro` and `--comm <probe>` each drew their own frames. This is the case the merge got wrong and the shipped one-clip library cannot catch |
+| A Lua message picks its own clip | ✅ `--segment 12` fires the `lower_mine` trigger; repointing it at the probe clip changed the picture and kept `MINE CONTROL` and its text |
+| Unknown clip name | ✅ fatal at startup, naming the message: `Lua message 'lower_mine' names unknown comm clip 'nonexistent'`; `--comm nope` likewise |
+| `--level-switch-test` | ✅ PASS — 604 steps in the new mine, and the switch now validates the incoming level's clip names |
+| `--resize-test` | ✅ completed, 61.9 steps/s against 65.8 on the pre-merge commit (one run each; software rendering at 1920×1080, bounded by the loop's frame clamp, not by the simulation) |
+| Step rate, 640×360 | ✅ 119.8 steps/s against the 120 target; 119.8 on the pre-merge commit |
+| Sim-step allocations | ✅ `none on 0 of 90` |
+| Draw-path allocations | ✅ `none on 0 of 90` with `--no-ui`; with the ImGui overlay up it reads `SOME on 89 of 90` **on the pre-merge commit too**. Pre-existing and ImGui's, not introduced or worsened here |
+
+The probe clip was four magenta 256×192 frames written into `build/Debug/assets/comm`
+for the run and deleted afterwards. Nothing under `assets/` changed: the shipped
+library is still `intro` alone.
+
+### Not done here
+
+No second clip is shipped. `mine01.lua`'s two messages both name `intro`,
+because that is the only transmission that has been authored, and inventing art
+was not part of repairing the merge. The library, the selection path and the
+validation are all in place for the second one.
+
+Windows/MSVC was not built — no dev machine in this container. Everything above
+is the Linux container path.

@@ -2494,3 +2494,109 @@ meant taking its loop. A voice that has to survive a firefight but still end by
 itself — a spoken transmission, for instance — could not be expressed. `Command`
 carries `loop` now, defaulting to true so the engine and the klaxon are
 unchanged. No channel uses the non-looping form yet; `--sound-test` drives it.
+
+## Lua level scripts
+
+A level may name a script: `"script": "mine01.lua"` in the level JSON, resolved
+at load against the level file's own directory. `loadLevel` refuses an absolute
+path and refuses one that climbs out of that directory, and `saveLevel` writes
+it back relative or refuses to write at all. A level with no `script` key has an
+empty `Level::scriptPath` and no Lua state is ever created for it.
+
+`src/game/script.h` owns the one state. The rule it exists to keep is the one in
+CLAUDE.md: **no Lua object crosses into `sim` or `render`**. Lua executes in
+exactly two places, both in the game layer:
+
+- once at load, running the file to collect its `message` and `trigger`
+  declarations into POD, and
+- once per **rendered** frame, in `drain()`, after the accumulator has finished
+  stepping.
+
+What the fixed step sees is `sim::TriggerSet` — an authored array of volumes —
+and what it produces is `sim::TriggerState`, plain arrays of bytes that copy
+with the rest of `SimState`. `stepTriggers` is a standalone sim function so
+`--script-test` can prove enter/re-enter behaviour without building a game
+around it. Every step latches trigger ids; `drain()` runs the callbacks
+afterwards. That ordering is deliberate and is why Lua may allocate: it is
+outside the measured step, so a callback cannot compromise sim determinism or
+show up in the sim-step allocation report.
+
+`latched` deduplicates the pending list, so however many fixed steps fall
+between two rendered frames, a trigger enqueues at most once and its callback
+runs at most once per frame.
+
+### The sandbox is a budget, not a promise
+
+Level scripts are content, and content is the thing most likely to be wrong.
+The state gets base, `math`, `string` and `table` and nothing else — no `io`,
+no `os`, no `package`. `dofile`, `load`, `loadfile` and `collectgarbage` are
+removed from the globals afterwards, so a script cannot reach back out through
+the loader or stall the frame in a collection it asked for.
+
+Two hard limits back that up. The allocator is the host's own, counting against
+an 8 MB budget and returning null past it, so a runaway table fails the
+allocation rather than the machine. A count hook fires every 100,000 VM
+instructions and errors out, so a `while true do end` in a trigger callback
+ends that callback instead of the process. Both are armed around the load call
+and around each callback, and disarmed in between.
+
+Declarations are bounded too: 64 triggers per level, and message ids, clip
+names, speakers and body text are all length-capped at declaration. The HUD
+relies on that last one — `Hud` reserves its worst-case vertex count up front
+precisely because the longest message a level may declare is known at load, and
+the draw path must not grow a vector.
+
+## One comm library, one texture array
+
+`assets/comm` is a directory of clips, not a single clip: every subdirectory
+holding a `comm.json` is one, and its directory name is the name scripts use.
+`loadCommClips` walks them in sorted order — sorted so the layer assignment is
+the same on every machine and every run — and concatenates every frame into one
+`CommClipLibrary`. Each `CommClipInfo` keeps the `baseLayer` where its own
+frames start.
+
+That concatenation is the whole design. All the frames become layers of a
+single texture array, which is why every clip must share one width and height
+and why `loadCommClips` is fatal when one does not; the layer count is checked
+against `GL_MAX_ARRAY_TEXTURE_LAYERS` at construction rather than discovered as
+a silently truncated upload. One array means selecting a transmission never
+rebinds a texture and never decodes anything: it changes which layer the HUD
+quad samples and nothing else.
+
+Selection is split across the three layers the way everything else here is.
+`HudData` carries `commClip` and `commFrame`; `commFrame` counts **within** the
+clip, and the renderer resolves `clip.baseLayer + commFrame` on its own. The
+game layer holds the clip index beside the `CommPlayer` that produces the frame
+index, because the two are meaningless apart — a frame index against the wrong
+clip is another transmission's pictures. `CommPlayer` is configured from that
+clip's `frameCount` and `framesPerSecond`, so a clip shorter than its message
+loops rather than freezing on its last frame.
+
+Names are resolved once, at load, and never at playback: `Renderer::commClipIndex`
+answers a name, `Renderer::commClip` answers an index, and both are checked at
+startup. Every clip a level's Lua names, and any name given to `--comm`, is
+validated before the first frame — an unknown one is fatal there, with the
+message id that named it, rather than a blank panel ten minutes into a mine.
+Resolution at the draw call clamps instead of trusting, so a stale index left
+over from a level switch cannot sample past the end of the array.
+
+### The merge that lost the selection
+
+The library landed alongside the move of the comm panel out of the simulation,
+and the two merged without a textual conflict while contradicting each other.
+`Renderer` had kept three whole-clip accessors — `commFrameCount()`,
+`commFramesPerSecond()`, `commDisplaySeconds()` — reading members the library
+change had deleted. That much was a compile error and could not survive.
+
+What would have survived is the rest of it. `HudData::commClip` was added and
+never written by anyone; the draw call went on treating `commFrame` as an
+absolute layer; `CommPlayer` was configured with the *library's* total frame
+count and the *first* clip's rate and duration. With one clip shipped, all of
+that is indistinguishable from correct. It is wrong the moment a second clip
+exists, and it is wrong silently: `--comm NAME` validated the name and then
+played clip zero, and a Lua message's `clip` field was parsed, length-checked,
+validated against the library — and then never read again.
+
+A clean automatic merge is not evidence of a correct one. The check that
+catches this class of thing is a second clip in the library and a screenshot of
+each, which is what `--comm NAME` is for.

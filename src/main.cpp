@@ -53,6 +53,7 @@
 #include <filesystem>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -74,6 +75,10 @@ constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
 constexpr const char* kCommRoot = "assets/comm";
+// What the level-opening transmission plays when no script and no --comm has
+// named anything else. A clip library with no "intro" falls back to its first
+// clip rather than showing nothing.
+constexpr const char* kDefaultCommClip = "intro";
 
 // How the ship's drive is heard.
 //
@@ -271,10 +276,25 @@ int main(int argc, char** argv) {
     dvk::Clock clock;
     dvk::CommPlayer commPlayer;
     int activeCommMessage = -1;
+    // Which clip the panel is drawing. Every frame index the player produces is
+    // relative to this one, so the two have to be set together or a message
+    // ends up playing another message's pictures.
+    int activeCommClip = 0;
+    const auto commTiming = [&](int clip) {
+        const dvk::gl::CommClipInfo* info = renderer.commClip(clip);
+        if (!info) return dvk::CommClipTiming{};
+        return dvk::CommClipTiming{info->frameCount, info->framesPerSecond, info->displaySeconds};
+    };
+    // Names are validated at load, so an unknown one here means the library
+    // changed underneath us; clip 0 keeps the panel showing something rather
+    // than indexing off the end of the array.
+    const auto selectCommClip = [&](std::string_view name) {
+        return std::max(0, renderer.commClipIndex(name));
+    };
     const auto startComm = [&]() {
         activeCommMessage = -1;
-        commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
-                              renderer.commDisplaySeconds()});
+        activeCommClip = selectCommClip(opts.comm.empty() ? kDefaultCommClip : opts.comm);
+        commPlayer.configure(commTiming(activeCommClip));
         if (!opts.comm.empty()) commPlayer.hold(1.0);
         else commPlayer.start(clock.seconds());
     };
@@ -441,8 +461,9 @@ int main(int argc, char** argv) {
 
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
-        script.load(level);
+        loadScript();
         activeCommMessage = -1;
+        activeCommClip = 0;
         commPlayer.stop();
         if (opts.headlight) {
             session.initial().combat.player.headlightOn = true;
@@ -930,8 +951,11 @@ int main(int argc, char** argv) {
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 activeCommMessage = requested;
-                dvk::CommClipTiming timing{renderer.commFrameCount(), renderer.commFramesPerSecond(),
-                                           renderer.commDisplaySeconds()};
+                activeCommClip = selectCommClip(message->clip);
+                dvk::CommClipTiming timing = commTiming(activeCommClip);
+                // The clip's own displaySeconds is how long the pictures run;
+                // the message says how long it is on screen, and the frames
+                // loop to fill it.
                 timing.displaySeconds = message->seconds;
                 commPlayer.configure(timing);
                 commPlayer.start(clock.seconds());
@@ -1296,6 +1320,7 @@ int main(int argc, char** argv) {
         hud.commActive = commFrame.visible;
         hud.commFrame = commFrame.frame;
         hud.commAlpha = commFrame.alpha;
+        hud.commClip = activeCommClip;
         hud.commSpeaker = "incoming transmission";
         hud.commText = "";
         if (const dvk::ScriptMessage* message = script.message(activeCommMessage)) {
