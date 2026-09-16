@@ -30,7 +30,7 @@ constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
 constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
-constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
+constexpr const char* kCommRoot = "assets/comm";
 
 constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
 constexpr float kChaseLookAhead = 6.0f;
@@ -118,14 +118,23 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         kPickupSpriteSize, loadPickupSprites(kPickupSpriteSize), "pickups",
         TextureArray::Wrap::ClampToEdge);
     {
-        CommClip clip = loadCommClip(kCommManifestPath);
-        commFrameCount_ = static_cast<int>(clip.frames.size());
-        commWidth_ = clip.width;
-        commHeight_ = clip.height;
-        commFramesPerSecond_ = clip.framesPerSecond;
-        commDisplaySeconds_ = clip.displaySeconds;
+        commClips_ = loadCommClips(kCommRoot);
+        GLint maxLayers = 0;
+        glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
+        if (static_cast<int>(commClips_.frames.size()) > maxLayers) {
+            log::fatal("comm library needs {} texture layers; GL supports {}",
+                       commClips_.frames.size(), maxLayers);
+        }
+        commWidth_ = commClips_.width;
+        commHeight_ = commClips_.height;
+        commFrameCount_ = static_cast<int>(commClips_.frames.size());
+        if (!commClips_.clips.empty()) {
+            commFramesPerSecond_ = commClips_.clips.front().framesPerSecond;
+            commDisplaySeconds_ = commClips_.clips.front().displaySeconds;
+        }
         commFrames_ = std::make_unique<TextureArray>(
-            clip.width, clip.height, clip.frames, "comm intro", TextureArray::Wrap::ClampToEdge);
+            commClips_.width, commClips_.height, commClips_.frames, "comm clips",
+            TextureArray::Wrap::ClampToEdge);
         // hud.frag is also used by world-space door signs. Bind the optional
         // sampler immediately so that shared program never observes an
         // incomplete texture on unit 3 before the first HUD pass.

@@ -73,7 +73,7 @@ constexpr const char* kLevelDir = "assets/levels";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
-constexpr const char* kCommManifestPath = "assets/comm/intro/comm.json";
+constexpr const char* kCommRoot = "assets/comm";
 
 // How the ship's drive is heard.
 //
@@ -154,7 +154,7 @@ int main(int argc, char** argv) {
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
     if (opts.commTest) {
-        const int clip = dvk::gl::runCommTest(kCommManifestPath);
+        const int clip = dvk::gl::runCommTest(kCommRoot);
         const int player = dvk::runCommPlayerTest();
         return clip != 0 || player != 0 ? 1 : 0;
     }
@@ -253,7 +253,20 @@ int main(int argc, char** argv) {
     dvk::gl::Renderer renderer(level, robotConfig);
 
     dvk::ScriptHost script;
-    script.load(level);
+
+    const auto loadScript = [&] {
+        script.load(level);
+        for (const dvk::ScriptMessage& message : script.messages()) {
+            if (renderer.commClipIndex(message.clip) < 0) {
+                dvk::log::fatal("Lua message '{}' names unknown comm clip '{}'", message.id,
+                                message.clip);
+            }
+        }
+    };
+    loadScript();
+    if (!opts.comm.empty() && renderer.commClipIndex(opts.comm) < 0) {
+        dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
+    }
 
     dvk::Clock clock;
     dvk::CommPlayer commPlayer;
@@ -262,7 +275,7 @@ int main(int argc, char** argv) {
         activeCommMessage = -1;
         commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
                               renderer.commDisplaySeconds()});
-        if (opts.comm) commPlayer.hold(1.0);
+        if (!opts.comm.empty()) commPlayer.hold(1.0);
         else commPlayer.start(clock.seconds());
     };
 
@@ -651,7 +664,7 @@ int main(int argc, char** argv) {
                 if (menu.selectedLevel() >= 0) {
                     loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
                 }
-                script.load(level);
+                loadScript();
                 session.start();
                 startComm();
                 menu.hide();
@@ -667,7 +680,7 @@ int main(int argc, char** argv) {
                 prev = cur;
                 break;
             case dvk::MenuAction::Restart:
-                script.load(level);
+                loadScript();
                 session.restart();
                 startComm();
                 menu.hide();

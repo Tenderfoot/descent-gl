@@ -2,6 +2,7 @@
 
 #include "render/gl.h"
 #include "render/billboards.h"
+#include "render/comm_clip.h"
 #include "render/debug_lines.h"
 #include "render/gpu_timer.h"
 #include "render/hud.h"
@@ -18,6 +19,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -92,6 +94,7 @@ struct HudData {
     bool commActive = false;
     int commFrame = 0;
     float commAlpha = 0.0f;
+    int commClip = 0;
     const char* commSpeaker = "incoming transmission";
     const char* commText = "";
 
@@ -176,6 +179,7 @@ public:
     static constexpr GLsizei kSamples = 4;
 
     Renderer(const Level& level, const sim::RobotConfig& robots);
+    int commClipIndex(std::string_view name) const { return commClips_.find(name); }
 
     // Point the renderer at a different mine. Rebuilds the level mesh, the
     // mine occluder and the static props; everything else - shaders, wall
@@ -323,11 +327,9 @@ private:
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<TextureArray> commFrames_;
-    int commFrameCount_ = 0;
+    CommClipLibrary commClips_;
     int commWidth_ = 1;
     int commHeight_ = 1;
-    float commFramesPerSecond_ = 1.0f;
-    float commDisplaySeconds_ = 0.0f;
     std::unique_ptr<LevelMesh> levelMesh_;
     std::unique_ptr<Mesh> ship_;
     std::unique_ptr<Mesh> gizmo_;

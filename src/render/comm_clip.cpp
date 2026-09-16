@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace dvk::gl {
@@ -16,6 +17,19 @@ int CommClip::frameAt(float seconds) const {
     if (frames.empty() || framesPerSecond <= 0.0f) return 0;
     const int raw = static_cast<int>(std::floor(std::max(0.0f, seconds) * framesPerSecond));
     return raw % static_cast<int>(frames.size());
+}
+
+int CommClipInfo::frameAt(float seconds) const {
+    if (frameCount <= 0 || framesPerSecond <= 0.0f) return baseLayer;
+    const int raw = static_cast<int>(std::floor(std::max(0.0f, seconds) * framesPerSecond));
+    return baseLayer + raw % frameCount;
+}
+
+int CommClipLibrary::find(std::string_view name) const {
+    for (size_t i = 0; i < clips.size(); ++i) {
+        if (clips[i].name == name) return static_cast<int>(i);
+    }
+    return -1;
 }
 
 CommClip loadCommClip(const std::filesystem::path& manifestPath) {
@@ -78,23 +92,68 @@ CommClip loadCommClip(const std::filesystem::path& manifestPath) {
     return clip;
 }
 
-int runCommTest(const std::filesystem::path& manifestPath) {
-    const CommClip clip = loadCommClip(manifestPath);
-    bool ok = clip.width > 0 && clip.height > 0 && !clip.frames.empty();
-    ok &= clip.frameAt(0.0f) == 0;
-    if (clip.frames.size() > 1) {
-        ok &= clip.frameAt(1.0f / clip.framesPerSecond) == 1;
-        ok &= clip.frameAt(static_cast<float>(clip.frames.size()) / clip.framesPerSecond) == 0;
+CommClipLibrary loadCommClips(const std::filesystem::path& root) {
+    std::vector<std::filesystem::path> manifests;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(root)) {
+        const std::filesystem::path manifest = entry.path() / "comm.json";
+        if (entry.is_directory() && std::filesystem::is_regular_file(manifest)) {
+            manifests.push_back(manifest);
+        }
     }
-    const size_t expected = static_cast<size_t>(clip.width) * static_cast<size_t>(clip.height) * 4;
-    for (const auto& frame : clip.frames) ok &= frame.size() == expected;
+    std::sort(manifests.begin(), manifests.end());
+    if (manifests.empty()) log::fatal("comm root '{}' contains no clips", root.string());
+
+    CommClipLibrary library;
+    for (const std::filesystem::path& manifest : manifests) {
+        CommClip clip = loadCommClip(manifest);
+        if (library.clips.empty()) {
+            library.width = clip.width;
+            library.height = clip.height;
+        } else if (clip.width != library.width || clip.height != library.height) {
+            log::fatal("comm clip '{}' is {}x{}; library requires {}x{}", manifest.string(),
+                       clip.width, clip.height, library.width, library.height);
+        }
+
+        CommClipInfo info;
+        info.name = manifest.parent_path().filename().string();
+        info.baseLayer = static_cast<int>(library.frames.size());
+        info.frameCount = static_cast<int>(clip.frames.size());
+        info.framesPerSecond = clip.framesPerSecond;
+        info.displaySeconds = clip.displaySeconds;
+        if (library.find(info.name) >= 0) log::fatal("duplicate comm clip '{}'", info.name);
+        library.clips.push_back(std::move(info));
+        library.frames.insert(library.frames.end(),
+                              std::make_move_iterator(clip.frames.begin()),
+                              std::make_move_iterator(clip.frames.end()));
+    }
+    log::info("comm library '{}': {} clip(s), {} total frame(s)", root.string(),
+              library.clips.size(), library.frames.size());
+    return library;
+}
+
+int runCommTest(const std::filesystem::path& root) {
+    const CommClipLibrary library = loadCommClips(root);
+    bool ok = library.width > 0 && library.height > 0 && !library.frames.empty();
+    const size_t expected = static_cast<size_t>(library.width) *
+                            static_cast<size_t>(library.height) * 4;
+    for (const auto& frame : library.frames) ok &= frame.size() == expected;
+    for (const CommClipInfo& clip : library.clips) {
+        ok &= clip.frameCount > 0;
+        ok &= clip.frameAt(0.0f) == clip.baseLayer;
+        if (clip.frameCount > 1) {
+            ok &= clip.frameAt(1.0f / clip.framesPerSecond) == clip.baseLayer + 1;
+            ok &= clip.frameAt(static_cast<float>(clip.frameCount) / clip.framesPerSecond) ==
+                  clip.baseLayer;
+        }
+    }
 
     if (!ok) {
-        log::error("comm-test: failed frame dimensions or playback timing");
+        log::error("comm-test: failed shared dimensions, layers, or playback timing");
         return 1;
     }
-    log::info("comm-test: {} consistent {}x{} frames, deterministic timing and loop: passed",
-              clip.frames.size(), clip.width, clip.height);
+    log::info("comm-test: {} clip(s), {} consistent {}x{} frames, deterministic timing and loop: passed",
+              library.clips.size(), library.frames.size(), library.width, library.height);
     return 0;
 }
 
