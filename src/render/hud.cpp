@@ -8,6 +8,9 @@ namespace dvk::gl {
 
 Hud::Hud() {
     font_ = font::makeTexture();
+    // The longest authored comm message is bounded at load. Reserve its worst
+    // case up front so a transmission cannot grow this vector in the draw path.
+    vertices_.reserve(16'384);
 
     glCreateVertexArrays(1, &vao_);
     glCreateBuffers(1, &vbo_);

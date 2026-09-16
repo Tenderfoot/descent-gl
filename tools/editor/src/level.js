@@ -34,6 +34,7 @@ export function parseLevel(json, path = '<memory>') {
         keyOrder: Object.keys(j),
         name: j.name ?? path,
         comment: j.comment ?? null,
+        script: j.script ?? null,
         vertices: [],
         segments: [],
         lights: [],
@@ -203,6 +204,7 @@ export function serializeLevel(level) {
     const j = {};
     j.name = level.name;
     if (level.comment !== null && level.comment !== undefined) j.comment = level.comment;
+    if (level.script !== null && level.script !== undefined) j.script = level.script;
 
     j.vertices = level.vertices.map((v) => [v[0], v[1], v[2]]);
 

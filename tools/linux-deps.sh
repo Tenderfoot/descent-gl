@@ -13,7 +13,7 @@ imgui_version="v1.90.1"
 echo "==> distribution packages"
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build git python3-pip \
-    libglfw3-dev libglm-dev nlohmann-json3-dev libstb-dev libtinyobjloader-dev \
+    libglfw3-dev libglm-dev nlohmann-json3-dev libstb-dev libtinyobjloader-dev liblua5.4-dev \
     libgl-dev libgl1-mesa-dri mesa-vulkan-drivers mesa-utils xvfb x11-utils \
     libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
 

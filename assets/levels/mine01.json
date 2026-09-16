@@ -1,6 +1,7 @@
 {
   "name": "mine01",
   "comment": "The real mine. Hub with the exit, three keyed doors gating progression, the reactor room at the far end. Keys sit in branches off the area before the door they open, so the mine is walked outward for keys and back again with the countdown running.",
+  "script": "mine01.lua",
   "vertices": [
     [
       0.0,

@@ -18,6 +18,7 @@
 #include "game/robots_test.h"
 #include "game/comm_player.h"
 #include "game/session.h"
+#include "game/script.h"
 #include "game/settings.h"
 #include "game/weapons_test.h"
 #include "game/world_test.h"
@@ -153,12 +154,12 @@ int main(int argc, char** argv) {
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
     if (opts.commTest) {
-        // The clip and the clock that plays it are checked separately, and both
-        // run before either can report. A failure in one must not hide the other.
         const int clip = dvk::gl::runCommTest(kCommManifestPath);
         const int player = dvk::runCommPlayerTest();
         return clip != 0 || player != 0 ? 1 : 0;
     }
+    if (opts.scriptTest) return dvk::runScriptTest(opts.level);
+
 
     // Measures the flight model and exits. Deliberately before the window
     // exists: it needs no GL and no display, so it runs anywhere.
@@ -251,22 +252,20 @@ int main(int argc, char** argv) {
     const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
     dvk::gl::Renderer renderer(level, robotConfig);
 
-    // The transmission runs on the application clock rather than on simulation
-    // time, so the clock has to exist before anything can start playing. It is
-    // monotonic from construction and the step-rate measurement takes its own
-    // stamp below, so moving it up here costs that measurement nothing. See
-    // game/comm_player.h for why it is not the fixed-step clock.
+    dvk::ScriptHost script;
+    script.load(level);
+
     dvk::Clock clock;
     dvk::CommPlayer commPlayer;
-    commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
-                          renderer.commDisplaySeconds()});
-    // --comm pins a repeatable frame so a screenshot shows the panel without
-    // depending on how fast the run got here. Determinism comes from the flag,
-    // which is where it came from before the clock moved.
+    int activeCommMessage = -1;
     const auto startComm = [&]() {
+        activeCommMessage = -1;
+        commPlayer.configure({renderer.commFrameCount(), renderer.commFramesPerSecond(),
+                              renderer.commDisplaySeconds()});
         if (opts.comm) commPlayer.hold(1.0);
         else commPlayer.start(clock.seconds());
     };
+
     renderer.drawVolumeWireframe = opts.wireframeVolumes;
     renderer.showStencil = opts.stencilView;
     renderer.drawWallNormals = opts.debugLines;
@@ -429,8 +428,8 @@ int main(int argc, char** argv) {
 
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
-        // Nothing plays until the new level starts; the outgoing level's
-        // transmission must not carry over into it.
+        script.load(level);
+        activeCommMessage = -1;
         commPlayer.stop();
         if (opts.headlight) {
             session.initial().combat.player.headlightOn = true;
@@ -652,6 +651,7 @@ int main(int argc, char** argv) {
                 if (menu.selectedLevel() >= 0) {
                     loadLevelFile(menu.levels()[static_cast<size_t>(menu.selectedLevel())].path);
                 }
+                script.load(level);
                 session.start();
                 startComm();
                 menu.hide();
@@ -667,6 +667,7 @@ int main(int argc, char** argv) {
                 prev = cur;
                 break;
             case dvk::MenuAction::Restart:
+                script.load(level);
                 session.restart();
                 startComm();
                 menu.hide();
@@ -884,7 +885,8 @@ int main(int argc, char** argv) {
                                                 static_cast<float>(kSimStep), &solidDoors,
                                                 &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
-                               cur.ship.body, static_cast<float>(kSimStep), &soundEvents);
+                               cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
+                               &script.triggers());
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -907,6 +909,20 @@ int main(int argc, char** argv) {
             worstSimAllocs = std::max(worstSimAllocs, simAllocCount);
             simAllocFrames += simAllocCount > 0 ? 1 : 0;
             if (simAllocCount > 0 && firstSimAllocFrame < 0) firstSimAllocFrame = frame;
+        }
+        // Lua is deliberately outside the measured fixed step. Every step in
+        // this rendered frame has already latched its trigger ids into POD
+        // state; callbacks may allocate without compromising sim determinism.
+        script.drain(cur.game);
+        if (const int requested = script.takeMessage(); requested >= 0) {
+            if (const dvk::ScriptMessage* message = script.message(requested)) {
+                activeCommMessage = requested;
+                dvk::CommClipTiming timing{renderer.commFrameCount(), renderer.commFramesPerSecond(),
+                                           renderer.commDisplaySeconds()};
+                timing.displaySeconds = message->seconds;
+                commPlayer.configure(timing);
+                commPlayer.start(clock.seconds());
+            }
         }
 
         if (runFinished) {
@@ -1267,6 +1283,12 @@ int main(int argc, char** argv) {
         hud.commActive = commFrame.visible;
         hud.commFrame = commFrame.frame;
         hud.commAlpha = commFrame.alpha;
+        hud.commSpeaker = "incoming transmission";
+        hud.commText = "";
+        if (const dvk::ScriptMessage* message = script.message(activeCommMessage)) {
+            hud.commSpeaker = message->speaker.c_str();
+            hud.commText = message->text.c_str();
+        }
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.
         hud.aimPoint = rs.shipPos + shipForward * aimDistance;
