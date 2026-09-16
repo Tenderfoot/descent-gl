@@ -2688,6 +2688,10 @@ same frame. Over a transmission's length the two clocks drift by well under the
 threshold either is worth correcting for, and the larger offset is the device's
 own output latency at the start, which is a few milliseconds.
 
+The duration a transmission is held for is declared in more places than agree
+with each other, and a voice can outlive its own panel; both are written up in
+`docs/KNOWN_ISSUES.md` rather than fixed here.
+
 Doing better would mean the mixer publishing a playback cursor and the video
 slaving to it, which is the standard answer and is not built. That is a
 deliberate stopping point, not an oversight: it buys nothing until something

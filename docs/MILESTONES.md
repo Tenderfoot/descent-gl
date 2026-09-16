@@ -2321,3 +2321,7 @@ needs close lip-sync.
 
 `intro` is still authored frames. Converting it is now one command and a content
 decision — a re-encode of committed art — rather than an engineering one.
+
+Nothing triggers a decoded clip in a running game, the panel's display duration
+is declared in four places that do not agree, and a voice can outlive its panel.
+All three are written up in `docs/KNOWN_ISSUES.md`, which this milestone adds.
