@@ -28,6 +28,11 @@ inline constexpr int kMaxVoices = 32;
 enum class Ambient : uint8_t {
     Engine,     // the ship's own drive, gained by throttle
     Alarm,      // the countdown klaxon
+    // A transmission's voice. Unlike the two above it carries a different clip
+    // each time and does not loop, so it has no default file in the bank - the
+    // caller names the recording. What it wants from this list is the one thing
+    // every entry gets: a burst of gunfire cannot steal it mid-sentence.
+    Comm,
     Count,
 };
 

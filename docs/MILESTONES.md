@@ -2152,3 +2152,206 @@ off the bottom of the screen once it shows all 34. See `docs/ARCHITECTURE.md`,
 | Visited reads brighter than unvisited | ✅ `--automap --reveal`, every segment shaded as flown: walls peak at (76, 115, 158), 2.5x the unvisited (31, 43, 61) of the same lines |
 | Nothing clipped by the frame | ✅ every `mine01` vertex projects inside NDC with 7% to spare (worst 0.93); the previous constant put the worst at 1.015, outside the frustum |
 | Per-frame allocations | ✅ `--automap` run: `sim step none on 0 of 30 frames, draw path none on 0 of 30`. The `--reveal` run's `draw path SOME on 1 of 30 (worst 11)` is byte-for-byte what `main` reports on the same run |
+| `cmake --build --preset linux-debug` | ✅ clean, no warnings |
+| `cmake --build --preset linux-release` | ✅ clean, no warnings |
+| `--validate-assets --flight-test --world-test --collision-test --weapons-test --robots-test --loop-test --sound-test --light-test --settings-test --progress-test` | ✅ all exit 0, no `[ERROR]` or `[FATAL]` |
+| `--comm-test` | ✅ 16 consistent 256×192 frames, plus the new `comm-player-test` |
+| `--level-switch-test` | ✅ PASS — the switch stops the outgoing transmission |
+| `--comm` screenshot | ✅ panel draws upper-right at full alpha on frame 8, unchanged from `main` |
+| `--resize-test` | ✅ completed, 41.3 steps/s against 46.6 on `main` (one run each; software rendering at 1920×1080, bounded by the loop's frame clamp, not by the simulation) |
+| Draw-path allocations | ⚠️ `draw path SOME on 29 of 30 (worst 6, first at frame 31)` — **byte-identical to `main` under the same command.** Pre-existing, not introduced here |
+| Sim-step allocations | ✅ `none on 0 of 30` |
+
+Both `--resize-test` figures are single runs, not medians, and 41.3 against 46.6
+is inside the spread lavapipe gives between runs — but it is one sample each and
+should be read that way.
+
+### The two mixer defects, and how they are pinned down
+
+Both were verified by reverting `claimSlot` to its original body and re-running
+`--sound-test`, which is the only thing that makes them regression tests rather
+than assertions that happen to hold:
+
+| Test | Original `claimSlot` | Fixed |
+| --- | --- | --- |
+| `protection:` voices left after 63 one-shots over a running ambient | **0** — the channel was stolen | **1** |
+| `steal order:` loudest sound under 64 near-silent arrivals | **0.0403** peak — it was cut | **0.5839** against 0.5576 alone |
+
+The first needs a block mixed between filling the pool and overrunning it, which
+is the part worth recording: while the other voices still carry the "not yet
+computed" gain sentinel, the old search seeds on one of *them* and leaves the
+channel alone. The bug only appears once the pool holds real gains. A test that
+pushes everything in one drain passes against the broken code.
+
+`Command::loop` splits protection from looping. Nothing ships a non-looping
+protected channel yet — the narration that would use one does not exist — so
+`--sound-test` is its only caller, checking that it starts, ends with its clip
+instead of repeating, and hands the channel back afterwards.
+
+### Not done here
+
+pl_mpeg and a narration track were scoped out of this change. The decoder is a
+new vendored dependency and CLAUDE.md says to ask first; the video and audio
+assets do not exist. This lands the part that needs neither, and shrinks what is
+left: once the player owns the clock and the presentation lifetime, swapping the
+frame source is local to `CommPlayer` and the one draw call that reads
+`commFrame`.
+
+Windows/MSVC was not built — no dev machine in this container. Everything above
+is the Linux container path.
+
+## Repairing the Lua bridge and the comm clip library after the merge
+
+Three pull requests landed in a row and the result did not build. Two of them
+touched the comm panel from opposite sides — one moved its clock out of the
+simulation, the other turned its single clip into a library — and git merged
+both without reporting a conflict.
+
+### What was actually broken
+
+`Renderer` kept `commFrameCount()`, `commFramesPerSecond()` and
+`commDisplaySeconds()`, reading three members the library change had deleted in
+the same file. That is the compile error, and it is the least of it.
+
+Everything downstream of those three accessors had quietly become wrong in a
+way that still compiled once they were restored, and would have gone on looking
+correct for exactly as long as the library held one clip:
+
+- `HudData::commClip` was added by the library change and written by nobody.
+- The draw call used `hud.commFrame` as an absolute texture-array layer,
+  clamped against the total frame count of every clip in the library.
+- `CommPlayer` was configured with the library's **total** frame count and the
+  **first** clip's rate and duration, so a message's frames would have looped
+  through its neighbours' and run for the wrong length.
+- `--comm NAME` validated the name against the library and then played clip
+  zero regardless.
+- A Lua message's `clip` field was parsed, length-checked, validated at load —
+  and then never read again.
+- A level switch called `script.load` directly rather than the wrapper that
+  validates clip names, so only the first level loaded got that check.
+
+### The fix
+
+`commClip(int)` replaces the three whole-clip accessors and returns the
+`CommClipInfo` — null for an index no clip answers to, so a lookup that failed
+cannot pass for clip zero. `commFrame` is now defined as an index **within** a
+clip and the renderer resolves `baseLayer + commFrame` itself, clamping both
+ends. The game layer holds the selected clip index beside the `CommPlayer` and
+sets both together, from `--comm`, from a Lua message's own `clip`, or from
+`intro` by default. `--comm`'s validated name is the clip that plays.
+See `docs/ARCHITECTURE.md` for the layer layout and the sandbox the scripts run
+in, neither of which had been written down.
+
+### Verified
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` | ✅ clean, no warnings |
+| `cmake --build --preset linux-release` | ✅ clean, no warnings |
+| `--validate-assets --flight-test --world-test --collision-test --weapons-test --robots-test --loop-test --sound-test --light-test --settings-test --progress-test` | ✅ all exit 0, no `[ERROR]` or `[FATAL]` |
+| `--comm-test` | ✅ 1 clip, 16 consistent 256×192 frames, deterministic timing and loop |
+| `--script-test` | ✅ 2 triggers, callbacks healthy, 10,000 evaluations and **0** allocations; all 4 shipped levels |
+| `--comm intro` screenshot | ✅ panel upper-right, frame held, speaker line drawn |
+| Two clips in the library | ✅ a throwaway clip sorting *before* `intro` pushed `intro` to `baseLayer` 4; `--comm intro` and `--comm <probe>` each drew their own frames. This is the case the merge got wrong and the shipped one-clip library cannot catch |
+| A Lua message picks its own clip | ✅ `--segment 12` fires the `lower_mine` trigger; repointing it at the probe clip changed the picture and kept `MINE CONTROL` and its text |
+| Unknown clip name | ✅ fatal at startup, naming the message: `Lua message 'lower_mine' names unknown comm clip 'nonexistent'`; `--comm nope` likewise |
+| `--level-switch-test` | ✅ PASS — 604 steps in the new mine, and the switch now validates the incoming level's clip names |
+| `--resize-test` | ✅ completed, 61.9 steps/s against 65.8 on the pre-merge commit (one run each; software rendering at 1920×1080, bounded by the loop's frame clamp, not by the simulation) |
+| Step rate, 640×360 | ✅ 119.8 steps/s against the 120 target; 119.8 on the pre-merge commit |
+| Sim-step allocations | ✅ `none on 0 of 90` |
+| Draw-path allocations | ✅ `none on 0 of 90` with `--no-ui`; with the ImGui overlay up it reads `SOME on 89 of 90` **on the pre-merge commit too**. Pre-existing and ImGui's, not introduced or worsened here |
+
+The probe clip was four magenta 256×192 frames written into `build/Debug/assets/comm`
+for the run and deleted afterwards. Nothing under `assets/` changed: the shipped
+library is still `intro` alone.
+
+### Not done here
+
+No second clip is shipped. `mine01.lua`'s two messages both name `intro`,
+because that is the only transmission that has been authored, and inventing art
+was not part of repairing the merge. The library, the selection path and the
+validation are all in place for the second one.
+
+Windows/MSVC was not built — no dev machine in this container. Everything above
+is the Linux container path.
+
+## The comm panel decodes video, and a transmission gets a voice
+
+pl_mpeg is vendored under `third_party/pl_mpeg` and a comm clip may now be an
+MPEG-1 video instead of a folder of PNGs. Both kinds coexist in one library, so
+a set converts a clip at a time; `intro` is untouched authored art and
+`testcard` is a synthetic placeholder proving the decoded path.
+
+What it buys, measured on the placeholder rather than argued:
+
+| 20s at 24 fps, 256×192 | Authored frames | Decoded |
+| --- | --- | --- |
+| Files in the repository | 480 PNGs, ~39 MB | one `.mpg`, **544 KiB** |
+| Texture layers | 480 (~126 MB with mipmaps) | **1** |
+| Cost of a longer clip | linear in both | none |
+
+The library now reports `2 clip(s) (1 decoded), 17 texture layer(s)` — sixteen
+authored frames plus one scratch layer carrying all 476 decoded ones.
+
+`Ambient::Comm` carries a transmission's voice: an optional `comm.wav` beside
+the pictures, on a protected non-looping channel, which is what `Command::loop`
+was split from channel ownership for one milestone ago.
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` / `linux-release` | ✅ both clean, no warnings |
+| All eleven headless tests plus `--script-test` | ✅ exit 0, no `[ERROR]`/`[FATAL]` |
+| `--comm-test` | ✅ decode-forward, seek-back, wrap, opacity, allocations |
+| `--sound-test` | ✅ including the new comm-channel case |
+| `--level-switch-test` | ✅ PASS |
+| `--comm testcard` screenshot | ✅ decoded frame 24 matches ffmpeg's extraction of the same frame |
+| Decoder allocations | ✅ **0 over 111 decoded frames**, measured with the counter `--sound-test` uses |
+| Sim-step allocations | ✅ `none on 0 of 30` |
+| `--resize-test` | ✅ completed, 51.3 steps/s against 55.0 on `main` (one run each, software rendering, bounded by the loop's frame clamp) |
+| Draw-path allocations | ⚠️ `SOME on 29 of 30` — the same pre-existing line `main` reports; unchanged here |
+
+Both resize figures are single runs and sit inside lavapipe's spread. Windows/
+MSVC was not built — no dev machine in this container.
+
+### Three findings, each caught by a test that fails without its fix
+
+**`plm_frame_to_rgba` does not write alpha.** It writes three bytes per pixel and
+leaves the fourth as it found it, so a zero-filled buffer decodes to a perfectly
+correct, entirely transparent picture. On screen that is the panel's backing
+rectangle with nothing in it — indistinguishable from a broken decoder. Found by
+dumping a decoded frame and comparing it against `ffmpeg`'s extraction of the
+same frame: identical RGB, alpha 0. `--comm-test` now checks every pixel is
+opaque.
+
+**Taking a channel twice kept the first recording.** `SetAmbient` updated gain,
+pitch and position in place and never reassigned `clip`, so a second
+transmission was swallowed — the channel played the first to its end and the new
+one was never heard. Reverting just that comparison fails the new test with
+`the comm channel kept playing the recording it was told to replace`.
+
+**Restarting instead leaked a voice.** `start()` claims a free slot, so the old
+recording kept playing in a slot the channel no longer pointed at — still
+flagged as a channel, therefore never stolen, and with nothing able to stop it.
+The test caught it as `2 after switching recording` and, after the stop, 31
+voices that should have been none.
+
+The last two are worth noting as a pair: the first fix is what exposed the
+second, and neither is reachable by the engine or the klaxon, which each play
+one file forever. A channel that carries different content each time is new, and
+it found both.
+
+### Not done
+
+The mixer still publishes no playback cursor, so picture and voice are started
+together and never corrected against each other. Over a transmission that drift
+is far below what either is worth correcting for and the bigger offset is the
+device's output latency at the start. Slaving video to the audio clock is the
+standard answer and is deliberately not built: it buys nothing until something
+needs close lip-sync.
+
+`intro` is still authored frames. Converting it is now one command and a content
+decision — a re-encode of committed art — rather than an engineering one.
+
+Nothing triggers a decoded clip in a running game, the panel's display duration
+is declared in four places that do not agree, and a voice can outlive its panel.
+All three are written up in `docs/KNOWN_ISSUES.md`, which this milestone adds.

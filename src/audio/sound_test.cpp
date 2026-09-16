@@ -121,6 +121,10 @@ int runSoundTest(const std::string& soundDir) {
                          static_cast<int>(bank.cueClip.size())));
     }
     for (size_t i = 0; i < bank.ambientClip.size(); ++i) {
+        // Comm is the one channel with no standing recording: it is handed a
+        // different one per transmission, so no default file is the correct
+        // state rather than a missing asset.
+        if (i == static_cast<size_t>(Ambient::Comm)) continue;
         if (bank.ambientClip[i] < 0) {
             fail(std::format("ambient channel {} has no clip", i));
         }
@@ -429,6 +433,97 @@ int runSoundTest(const std::string& soundDir) {
         if (afterStart != 1) fail("a non-looping ambient channel did not start");
         if (afterEnd != 0) fail("a non-looping ambient channel looped instead of ending");
         if (afterReuse != 1) fail("a finished ambient channel could not be taken again");
+    }
+
+    // --- the comm channel ------------------------------------------------
+    {
+        // Unlike the engine and the klaxon, this channel carries a different
+        // recording every time it is used. Nothing else in the mixer does, so
+        // nothing else exercised the paths below.
+        renderBlocks(mixer, 400);
+        const int engineClip = bank.ambientClip[static_cast<size_t>(Ambient::Engine)];
+        const float engineLength = engineClip >= 0
+                                       ? bank.clips[static_cast<size_t>(engineClip)].seconds()
+                                       : 0.0f;
+        const float laserLength = bank.clips[static_cast<size_t>(laserClip)].seconds();
+
+        const auto comm = [&](int clip, float gain) {
+            Command c;
+            c.kind = Command::Kind::SetAmbient;
+            c.ambient = static_cast<uint8_t>(Ambient::Comm);
+            c.clip = clip;
+            c.gain = gain;
+            c.positional = false;
+            c.loop = false;
+            mixer.push(c);
+        };
+
+        comm(engineClip, 1.0f);
+        renderBlocks(mixer, 1);
+        const int afterStart = mixer.activeVoices();
+
+        // Taking the channel again with a different recording has to play the
+        // new one. The in-place update that keeps the engine from stuttering
+        // never reassigned the clip, so a second transmission used to be
+        // swallowed: the channel kept playing the first to its end and the new
+        // one was simply never heard.
+        comm(laserClip, 1.0f);
+        renderBlocks(mixer, 1);
+        const int afterSwitch = mixer.activeVoices();
+
+        // Long enough for the short clip to finish and not nearly long enough
+        // for the one it replaced. Still playing here means the switch did not
+        // take.
+        const int blocks = static_cast<int>((laserLength + 0.2f) *
+                                            static_cast<float>(kSampleRate) / kBlock);
+        renderBlocks(mixer, blocks);
+        const int afterShortClipEnds = mixer.activeVoices();
+
+        // And it is protected while it runs, which is the reason a transmission
+        // is on a channel at all rather than being a one-shot.
+        comm(engineClip, 1.0f);
+        renderBlocks(mixer, 1);
+        for (int i = 0; i < kMaxVoices - 1; ++i) {
+            Command c;
+            c.kind = Command::Kind::Play;
+            c.clip = laserClip;
+            c.position = glm::vec3(static_cast<float>(i) * 4.0f, 0.0f, 0.0f);
+            c.gain = 1.0f;
+            mixer.push(c);
+        }
+        renderBlocks(mixer, 1);
+        for (int i = 0; i < kMaxVoices; ++i) {
+            Command c;
+            c.kind = Command::Kind::Play;
+            c.clip = laserClip;
+            c.position = glm::vec3(static_cast<float>(i) * 4.0f, 0.0f, 0.0f);
+            c.gain = 1.0f;
+            mixer.push(c);
+        }
+        renderBlocks(mixer, 2);
+        // Let the one-shots ring out but not the transmission: the short clip
+        // is long gone by here and the one on the channel has most of itself
+        // left, so exactly one voice should remain and it should be that one.
+        renderBlocks(mixer, static_cast<int>((laserLength + 0.15f) *
+                                             static_cast<float>(kSampleRate) / kBlock));
+        const int underPressure = mixer.activeVoices();
+        comm(-1, 0.0f);
+        renderBlocks(mixer, 1);
+        const int afterStop = mixer.activeVoices();
+
+        log::info("  comm channel: {} voice after start, {} after switching recording, {} once "
+                  "the {:.2f}s replacement ended (the {:.2f}s original would still be running), "
+                  "{} left after a full pool of one-shots rang out, {} after stop",
+                  afterStart, afterSwitch, afterShortClipEnds, laserLength, engineLength,
+                  underPressure, afterStop);
+        if (afterStart != 1) fail("the comm channel did not start");
+        if (afterSwitch != 1) fail("switching the comm channel's recording stopped it");
+        if (afterShortClipEnds != 0) {
+            fail("the comm channel kept playing the recording it was told to replace");
+        }
+        if (underPressure != 1) fail("a full voice pool stole the comm channel");
+        if (afterStop != 0) fail("stopping the comm channel left a voice running");
+        renderBlocks(mixer, 400);
     }
 
     // --- the heap --------------------------------------------------------

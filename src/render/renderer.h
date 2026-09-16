@@ -87,7 +87,7 @@ struct HudData {
     float targetEnergy01 = 0.0f;
     float targetFade = 0.0f;
 
-    // The level-opening transmission. The renderer draws what it is handed and
+    // A transmission. The renderer draws what it is handed and
     // owns no part of the clip's clock or lifetime: CommPlayer decides which
     // frame is current and how far into its fade it is. No video decode happens
     // per frame either way - `commFrame` is a texture-array layer.
@@ -218,14 +218,18 @@ public:
     // draw quietly drift apart. Valid after beginFrame, which sizes the target.
     glm::mat4 viewProj(const RenderState& rs) const;
 
-    // What the comm manifest carried. The renderer loads the clip, so this is
+    // What a comm manifest carried. The renderer loads the library, so this is
     // where the numbers arrive, but it is CommPlayer that decides what to do
-    // with them. If the frames ever come from a decoder rather than a texture
-    // array this inverts: the player owns the stream and hands the renderer a
-    // texture.
-    int commFrameCount() const { return commFrameCount_; }
-    float commFramesPerSecond() const { return commFramesPerSecond_; }
-    float commDisplaySeconds() const { return commDisplaySeconds_; }
+    // with them. Null for an index no clip answers to, rather than an answer
+    // about some other clip: what to do about a name that did not resolve is
+    // the caller's decision and it should have to make it. If the frames ever
+    // come from a decoder rather than a texture array this inverts: the player
+    // owns the stream and hands the renderer a texture.
+    const CommClipInfo* commClip(int index) const {
+        return index >= 0 && index < static_cast<int>(commClips_.clips.size())
+                   ? &commClips_.clips[static_cast<size_t>(index)]
+                   : nullptr;
+    }
 
     // Per-frame counters for the debug overlay.
     struct Stats {

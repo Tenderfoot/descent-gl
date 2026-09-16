@@ -8,6 +8,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dvk::audio {
@@ -33,6 +34,22 @@ struct Bank {
     std::array<int, static_cast<size_t>(sim::Cue::Count)> cueClip{};
     std::array<int, static_cast<size_t>(Ambient::Count)> ambientClip{};
     int missing = 0;
+
+    // A transmission's voice track, keyed by the comm clip it belongs to. Named
+    // rather than enumerated because which transmissions exist is content: a
+    // level's Lua names one, and the directory under assets/comm either has a
+    // comm.wav beside its pictures or it does not.
+    std::vector<std::string> commNames;
+    std::vector<int> commClips;
+
+    // -1 for a transmission with no voice track, which is not an error - the
+    // panel plays silently.
+    int commClip(std::string_view name) const;
+
+    // Scans `root` (assets/comm) for <clip>/comm.wav and appends what it finds.
+    // Call after load(): it adds to the same bank, so a voice track costs the
+    // mixer nothing it does not already do.
+    void loadComm(const std::string& root);
 
     // Loads from `dir` (assets/sounds). Missing or malformed files are warned
     // about and left as a silent cue; sound is never a reason the game will not
@@ -62,7 +79,11 @@ public:
     // warning, not an error: the game runs silently and everything else is
     // unaffected. --sound-test passes false and exercises the whole mixer with
     // no device at all.
-    bool init(const std::string& soundDir, bool openDevice = true);
+    //
+    // `commDir` is assets/comm, scanned for transmission voice tracks; empty
+    // skips that and every transmission plays silently.
+    bool init(const std::string& soundDir, bool openDevice = true,
+              const std::string& commDir = "");
     void shutdown();
 
     bool deviceOpen() const { return deviceOpen_; }
@@ -85,6 +106,18 @@ public:
     // The continuous channels. `gain` of zero stops one. `pitch` is how the
     // engine is made to rise with the throttle.
     void setAmbient(Ambient channel, float gain, float pitch = 1.0f);
+
+    // A transmission's voice. `clip` indexes the bank (Bank::commClip), and -1
+    // or a gain of zero stops whatever is playing. It rides the Comm ambient
+    // channel, so it survives a firefight, and it does not loop: it ends with
+    // its own recording.
+    //
+    // Nothing here tries to hold it in step with the picture beyond starting
+    // them together. The video runs on the application clock and this runs on
+    // the device's, and over a transmission's length the two drift by less than
+    // either is worth correcting for. See docs/ARCHITECTURE.md.
+    void playComm(int clip, float gain = 1.0f);
+    void stopComm();
 
     void setMasterGain(float gain);
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }

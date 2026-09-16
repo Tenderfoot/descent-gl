@@ -125,13 +125,10 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
             log::fatal("comm library needs {} texture layers; GL supports {}",
                        commClips_.frames.size(), maxLayers);
         }
+        // Every clip in the library shares these; loadCommClips is fatal if a
+        // manifest disagrees, because they all become layers of one array.
         commWidth_ = commClips_.width;
         commHeight_ = commClips_.height;
-        commFrameCount_ = static_cast<int>(commClips_.frames.size());
-        if (!commClips_.clips.empty()) {
-            commFramesPerSecond_ = commClips_.clips.front().framesPerSecond;
-            commDisplaySeconds_ = commClips_.clips.front().displaySeconds;
-        }
         commFrames_ = std::make_unique<TextureArray>(
             commClips_.width, commClips_.height, commClips_.frames, "comm clips",
             TextureArray::Wrap::ClampToEdge);
@@ -684,7 +681,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // Incoming transmission, below the key row in the otherwise open upper
     // right. The authored frames loop for the duration of the message; the
     // short fades keep it from arriving and vanishing as a hard rectangle.
-    if (hud.commActive && commFrameCount_ > 0) {
+    if (hud.commActive && !commClips_.clips.empty()) {
         const float alpha = hud.commAlpha;
         const float panelW = std::min(w * 0.28f, 92.0f * s);
         const float panelH = panelW * static_cast<float>(commHeight_) /
@@ -695,7 +692,26 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f,
                   panelH + frame * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
-        const int layer = std::clamp(hud.commFrame, 0, commFrameCount_ - 1);
+        // `commFrame` counts within the clip the game layer selected; the layer
+        // it lands on is that clip's slice of the shared array. Both indices are
+        // clamped rather than trusted, because HudData is filled by the game
+        // layer and an index that outlived the clip it was chosen for would
+        // otherwise sample another transmission's frames.
+        const CommClipInfo& clip = commClips_.clips[static_cast<size_t>(
+            std::clamp(hud.commClip, 0, static_cast<int>(commClips_.clips.size()) - 1))];
+        int layer =
+            clip.baseLayer + std::clamp(hud.commFrame, 0, std::max(0, clip.frameCount - 1));
+        if (clip.video >= 0 && clip.video < static_cast<int>(commClips_.videos.size())) {
+            // A decoded clip owns one layer rather than a run of them, so the
+            // picture is fetched and written rather than indexed. The decoder
+            // returns null when the frame has not changed since it was last
+            // asked, which on a 120 Hz loop showing 24 fps is most draws.
+            CommVideo& video = commClips_.videos[static_cast<size_t>(clip.video)];
+            if (const uint8_t* rgba = video.frame(hud.commFrame)) {
+                commFrames_->updateLayer(clip.baseLayer, rgba);
+            }
+            layer = clip.baseLayer;
+        }
         hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
         hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);

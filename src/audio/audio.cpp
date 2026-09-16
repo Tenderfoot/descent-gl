@@ -1,5 +1,7 @@
 #include "audio/audio.h"
 
+#include <filesystem>
+
 #include "audio/device.h"
 #include "core/log.h"
 
@@ -51,12 +53,47 @@ constexpr std::array<CueDef, static_cast<size_t>(Cue::Count)> kCues{{
 constexpr std::array<const char*, static_cast<size_t>(Ambient::Count)> kAmbientFiles{{
     "engine.wav",   // Engine
     "alarm.wav",    // Alarm
+    "",             // Comm - supplied per transmission, see Bank::loadComm
 }};
 
 } // namespace
 
 const std::array<CueDef, static_cast<size_t>(Cue::Count)>& cueTable() {
     return kCues;
+}
+
+int Bank::commClip(std::string_view name) const {
+    for (size_t i = 0; i < commNames.size(); ++i) {
+        if (commNames[i] == name) return commClips[i];
+    }
+    return -1;
+}
+
+void Bank::loadComm(const std::string& root) {
+    commNames.clear();
+    commClips.clear();
+    std::error_code error;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(root, error)) {
+        if (!entry.is_directory()) continue;
+        const std::filesystem::path wav = entry.path() / "comm.wav";
+        // A transmission with no voice track is the ordinary case, not a
+        // missing asset: the panel plays silently and nothing warns.
+        if (!std::filesystem::is_regular_file(wav)) continue;
+        Clip clip = loadWav(wav.string());
+        if (!clip.valid()) {
+            ++missing;
+            continue;
+        }
+        resample(clip, kSampleRate);
+        clips.push_back(std::move(clip));
+        commNames.push_back(entry.path().filename().string());
+        commClips.push_back(static_cast<int>(clips.size() - 1));
+    }
+    if (error) {
+        log::warn("sound: comm root '{}' would not be read: {}", root, error.message());
+    }
+    log::info("sound: {} transmission voice track(s) from '{}'", commNames.size(), root);
 }
 
 void Bank::load(const std::string& dir) {
@@ -98,8 +135,12 @@ Audio::~Audio() {
     shutdown();
 }
 
-bool Audio::init(const std::string& soundDir, bool openDevice) {
+bool Audio::init(const std::string& soundDir, bool openDevice, const std::string& commDir) {
     bank_.load(soundDir);
+    // Before setClips, and before anything can be playing: a voice holds a
+    // pointer into bank_.clips, and appending to that vector after one exists
+    // would leave it pointing at freed memory.
+    if (!commDir.empty()) bank_.loadComm(commDir);
     mixer_.setClips(&bank_.clips);
 
     int silent = 0;
@@ -223,6 +264,24 @@ void Audio::setAmbient(Ambient channel, float gain, float pitch) {
     // ship and the klaxon is the whole mine.
     command.positional = false;
     mixer_.push(command);
+}
+
+void Audio::playComm(int clip, float gain) {
+    Command command;
+    command.kind = Command::Kind::SetAmbient;
+    command.ambient = static_cast<uint8_t>(Ambient::Comm);
+    command.clip = gain > 0.0f ? clip : -1;
+    command.gain = gain;
+    command.pitch = 1.0f;
+    // A voice in the player's own cockpit, not a point in the mine.
+    command.positional = false;
+    // The channel is for the protection, not the repetition.
+    command.loop = false;
+    mixer_.push(command);
+}
+
+void Audio::stopComm() {
+    playComm(-1, 0.0f);
 }
 
 void Audio::setMuted(bool muted) {

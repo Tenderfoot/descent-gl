@@ -2432,6 +2432,9 @@ leave the mine without any sub-stepping at all, so that code came back out.
 
 ## The comm panel is presentation, not simulation
 
+*(Historical: there is no longer a level-opening transmission at all — see
+"Transmissions are level content" below. The clock described here is unchanged.)*
+
 The level-opening transmission used to be `sim::CommState` inside
 `sim::GameState`, advanced by `stepGame` and retired against
 `GameConfig::commSeconds`. Nothing in the simulation ever read it back: the
@@ -2513,3 +2516,233 @@ meant taking its loop. A voice that has to survive a firefight but still end by
 itself — a spoken transmission, for instance — could not be expressed. `Command`
 carries `loop` now, defaulting to true so the engine and the klaxon are
 unchanged. No channel uses the non-looping form yet; `--sound-test` drives it.
+
+## Lua level scripts
+
+A level may name a script: `"script": "mine01.lua"` in the level JSON, resolved
+at load against the level file's own directory. `loadLevel` refuses an absolute
+path and refuses one that climbs out of that directory, and `saveLevel` writes
+it back relative or refuses to write at all. A level with no `script` key has an
+empty `Level::scriptPath` and no Lua state is ever created for it.
+
+`src/game/script.h` owns the one state. The rule it exists to keep is the one in
+CLAUDE.md: **no Lua object crosses into `sim` or `render`**. Lua executes in
+exactly two places, both in the game layer:
+
+- once at load, running the file to collect its `message` and `trigger`
+  declarations into POD, and
+- once per **rendered** frame, in `drain()`, after the accumulator has finished
+  stepping.
+
+What the fixed step sees is `sim::TriggerSet` — an authored array of volumes —
+and what it produces is `sim::TriggerState`, plain arrays of bytes that copy
+with the rest of `SimState`. `stepTriggers` is a standalone sim function so
+`--script-test` can prove enter/re-enter behaviour without building a game
+around it. Every step latches trigger ids; `drain()` runs the callbacks
+afterwards. That ordering is deliberate and is why Lua may allocate: it is
+outside the measured step, so a callback cannot compromise sim determinism or
+show up in the sim-step allocation report.
+
+`latched` deduplicates the pending list, so however many fixed steps fall
+between two rendered frames, a trigger enqueues at most once and its callback
+runs at most once per frame.
+
+### The sandbox is a budget, not a promise
+
+Level scripts are content, and content is the thing most likely to be wrong.
+The state gets base, `math`, `string` and `table` and nothing else — no `io`,
+no `os`, no `package`. `dofile`, `load`, `loadfile` and `collectgarbage` are
+removed from the globals afterwards, so a script cannot reach back out through
+the loader or stall the frame in a collection it asked for.
+
+Two hard limits back that up. The allocator is the host's own, counting against
+an 8 MB budget and returning null past it, so a runaway table fails the
+allocation rather than the machine. A count hook fires every 100,000 VM
+instructions and errors out, so a `while true do end` in a trigger callback
+ends that callback instead of the process. Both are armed around the load call
+and around each callback, and disarmed in between.
+
+Declarations are bounded too: 64 triggers per level, and message ids, clip
+names, speakers and body text are all length-capped at declaration. The HUD
+relies on that last one — `Hud` reserves its worst-case vertex count up front
+precisely because the longest message a level may declare is known at load, and
+the draw path must not grow a vector.
+
+## One comm library, one texture array
+
+`assets/comm` is a directory of clips, not a single clip: every subdirectory
+holding a `comm.json` is one, and its directory name is the name scripts use.
+`loadCommClips` walks them in sorted order — sorted so the layer assignment is
+the same on every machine and every run — and concatenates every frame into one
+`CommClipLibrary`. Each `CommClipInfo` keeps the `baseLayer` where its own
+frames start.
+
+That concatenation is the whole design. All the frames become layers of a
+single texture array, which is why every clip must share one width and height
+and why `loadCommClips` is fatal when one does not; the layer count is checked
+against `GL_MAX_ARRAY_TEXTURE_LAYERS` at construction rather than discovered as
+a silently truncated upload. One array means selecting a transmission never
+rebinds a texture and never decodes anything: it changes which layer the HUD
+quad samples and nothing else.
+
+Selection is split across the three layers the way everything else here is.
+`HudData` carries `commClip` and `commFrame`; `commFrame` counts **within** the
+clip, and the renderer resolves `clip.baseLayer + commFrame` on its own. The
+game layer holds the clip index beside the `CommPlayer` that produces the frame
+index, because the two are meaningless apart — a frame index against the wrong
+clip is another transmission's pictures. `CommPlayer` is configured from that
+clip's `frameCount` and `framesPerSecond`, so a clip shorter than its message
+loops rather than freezing on its last frame.
+
+Names are resolved once, at load, and never at playback: `Renderer::commClipIndex`
+answers a name, `Renderer::commClip` answers an index, and both are checked at
+startup. Every clip a level's Lua names, and any name given to `--comm`, is
+validated before the first frame — an unknown one is fatal there, with the
+message id that named it, rather than a blank panel ten minutes into a mine.
+Resolution at the draw call clamps instead of trusting, so a stale index left
+over from a level switch cannot sample past the end of the array.
+
+### The merge that lost the selection
+
+The library landed alongside the move of the comm panel out of the simulation,
+and the two merged without a textual conflict while contradicting each other.
+`Renderer` had kept three whole-clip accessors — `commFrameCount()`,
+`commFramesPerSecond()`, `commDisplaySeconds()` — reading members the library
+change had deleted. That much was a compile error and could not survive.
+
+What would have survived is the rest of it. `HudData::commClip` was added and
+never written by anyone; the draw call went on treating `commFrame` as an
+absolute layer; `CommPlayer` was configured with the *library's* total frame
+count and the *first* clip's rate and duration. With one clip shipped, all of
+that is indistinguishable from correct. It is wrong the moment a second clip
+exists, and it is wrong silently: `--comm NAME` validated the name and then
+played clip zero, and a Lua message's `clip` field was parsed, length-checked,
+validated against the library — and then never read again.
+
+A clean automatic merge is not evidence of a correct one. The check that
+catches this class of thing is a second clip in the library and a screenshot of
+each, which is what `--comm NAME` is for.
+
+## The comm panel decodes video
+
+A comm clip is now either an authored frame sequence or an MPEG-1 video, and
+`CommClipLibrary` loads both so a set can be converted one clip at a time.
+
+The reason is that the frame-sequence design costs `width * height * 4` bytes of
+texture for every frame of every clip, resident from startup, and the same
+frames as PNGs in the repository. Both grow with the total authored seconds
+across the whole library — which stopped being hypothetical when clips became
+named and script-triggerable, because that is the point at which anyone would
+start adding them. `testcard` is 20 seconds at 24 fps: 480 frames, about 39 MB
+of PNGs and 126 MB of texture with mipmaps. Decoded it is 544 KiB on disk and
+**one** texture layer, and a longer clip costs neither more.
+
+`src/render/comm_video.cpp` is the only file that includes pl_mpeg and the only
+one that defines `PL_MPEG_IMPLEMENTATION`; `comm_video.h` hands back RGBA and
+nothing else. That is the containment `device.cpp` gives miniaudio.
+
+### One layer, rewritten
+
+A decoded clip owns a single scratch layer in the same texture array the
+authored sequences live in, rewritten as its picture changes, so the draw path
+is the one it always was: compute a layer, call `hud_.image`. `CommVideo::frame`
+returns null when the requested frame is the one already showing, which on a
+120 Hz loop drawing a 24 fps clip is four draws in five.
+
+`TextureArray::updateLayer` regenerates the whole array's mipmaps, because GL
+has no per-layer form of it and the HUD samples this array minified. The cost is
+proportional to the array's total layers rather than to the one that changed,
+and it is paid when a video frame changes rather than once a draw. With a
+handful of clips that is nothing; it is the thing to revisit if a library ever
+holds enough authored sequences for the sweep to matter.
+
+Playing forward is a decode and anything else is an exact seek, which decodes
+from the preceding intra frame — so `make-comm-video.py` pins a short GOP, and
+`--comm-test` asserts that sequential playback takes the cheap path rather than
+seeking its way through. Decoding allocates nothing after `open()`: pl_mpeg
+takes its buffers up front and the RGBA target is allocated beside them, which
+`--comm-test` measures with the same counter `--sound-test` uses on the mixer.
+
+### A finding: plm_frame_to_rgba does not write alpha
+
+It writes the three colour bytes of each pixel and leaves the fourth exactly as
+it found it. A zero-filled target therefore decodes to a perfectly correct,
+entirely transparent picture, and what reaches the screen is the panel's backing
+rectangle with nothing in it — which reads as a broken decoder and is not one.
+The buffer is filled with `0xFF` once at open, so alpha is right and never
+written again. `--comm-test` checks every pixel is opaque, because the failure
+is silent and the fix is one byte per pixel that nothing else would notice.
+
+## A transmission's voice
+
+`Ambient::Comm` is a third channel beside the engine and the klaxon, and it is
+the first one that carries a different recording each time it is used. A clip
+directory may hold a `comm.wav` beside its pictures; `Bank::loadComm` scans
+`assets/comm` and appends what it finds to the ordinary bank. A clip without one
+plays silently, which is not an error.
+
+It is on a channel rather than being a one-shot for the protection: `claimSlot`
+never steals a channel, and a 20-second voice is otherwise the ideal victim the
+moment a firefight fills the 32-voice pool. It does not loop, which is what
+`Command::loop` was separated from channel ownership for.
+
+### Two findings in taking a channel twice
+
+Reusing a channel for a different recording was broken in two ways that only a
+channel like this could reach, because the engine and the klaxon each play one
+file forever.
+
+`SetAmbient` updated the running voice in place — gain, pitch, position — and
+never reassigned `clip`. A second transmission was therefore swallowed whole:
+the channel kept playing the first to its end and the new one was never heard.
+Comparing the clip and restarting when it differs is the fix.
+
+Restarting alone then leaked. `start()` claims a *free* slot, so the voice
+holding the old recording kept playing in a slot the channel no longer pointed
+at — still flagged as a channel, so never stolen, and with nothing able to stop
+it. The old voice is now retired before the channel is taken again.
+
+### Sync is start-together and nothing else
+
+The picture runs on the application clock and the voice runs on the audio
+device's, and nothing tries to hold them in step beyond starting them in the
+same frame. Over a transmission's length the two clocks drift by well under the
+threshold either is worth correcting for, and the larger offset is the device's
+own output latency at the start, which is a few milliseconds.
+
+The duration a transmission is held for is declared in more places than agree
+with each other, and a voice can outlive its own panel; both are written up in
+`docs/KNOWN_ISSUES.md` rather than fixed here.
+
+Doing better would mean the mixer publishing a playback cursor and the video
+slaving to it, which is the standard answer and is not built. That is a
+deliberate stopping point, not an oversight: it buys nothing until something
+needs close lip-sync, and `--comm` plays no voice at all so screenshots stay
+reproducible either way.
+
+Nothing pauses, for the reason the comm player already did not: the mixer has no
+pause and no way to address a voice once started, so pausing the picture alone
+would leave a voice talking over a frozen frame.
+
+
+## Transmissions are level content
+
+Entering a level shows nothing. Nothing raises a transmission on its own: the
+only thing that starts one is a level script calling `comm("<message id>")`, and
+the message names the clip. A level with no `.lua` beside it has no
+transmissions, and a level that wants one says when.
+
+Before this, a level opened by playing whatever `kDefaultCommClip` named, and
+`mine01` then showed the same `intro` clip twice more from its script. The
+opening showing was not authored by anything — it was a default in `main.cpp`,
+so every level got it whether it suited the level or not, it re-fired on every
+restart, and a script trigger placed near the spawn would have cut it off
+mid-play. Deleting it leaves one way in, which is the script.
+
+`--comm <name>` still pins a clip to a fixed frame with no voice, and is now the
+only thing that puts a transmission on screen without a script. That is what
+keeps a panel screenshot reproducible.
+
+`startComm()` still runs when a level starts, and now only clears: it stops the
+player and the voice channel. That is what retires a transmission the previous
+attempt was part way through when a level is restarted.

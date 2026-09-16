@@ -56,10 +56,13 @@ add_executable(descent
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
+    src/render/debug_ui.cpp
     src/render/billboards.cpp
     src/render/comm_clip.cpp
+    src/render/comm_video.cpp
     src/render/debug_lines.cpp
     src/render/font.cpp
+    src/render/frame_prepare.cpp
     src/render/gpu_timer.cpp
     src/render/hud.cpp
     src/render/level_mesh.cpp
@@ -94,6 +97,8 @@ target_include_directories(descent SYSTEM PRIVATE ${Stb_INCLUDE_DIR})
 # for it, or through apt. See third_party/miniaudio/README.md. SYSTEM so its
 # four megabytes of single-header C do not answer to this project's /W4.
 target_include_directories(descent SYSTEM PRIVATE third_party/miniaudio)
+# pl_mpeg, vendored for the same reason. See third_party/pl_mpeg/README.md.
+target_include_directories(descent SYSTEM PRIVATE third_party/pl_mpeg)
 target_link_libraries(descent PRIVATE
     glfw
     glad::glad

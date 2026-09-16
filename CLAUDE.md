@@ -81,6 +81,10 @@ milestone rather than describing what the code should do:
 | `--loop-test` | Play the level's win and lose conditions through: keys against doors, a shut door against light, the reactor, the countdown, the exit and every pickup. Reports SKIPPED on a level with no doors or exit. Needs no window and no GL. |
 | `--light-test` | Run the CPU illumination query headlessly: the falloff against the shader's own formula, the spot cone, the segment walk against brute-force ray/triangle over every wall, and whether the level has both lit and dark places to stand. Needs no window and no GL. |
 | `--headlight` | Start with the headlight on. It is off by default, so a screenshot cannot otherwise show it without a keypress. |
+| `--comm-test` | Load every clip in `assets/comm`, check the frames all share one size, and check the playback clock: that a clip's frame index is a pure function of elapsed time and that a jump lands where small steps would. For a decoded clip it also plays frames forward, seeks back, wraps past the end, checks every pixel is opaque, and counts the heap allocations decoding makes. Needs no window and no GL. |
+| `--comm [NAME]` | Pin the named comm clip to a repeatable frame so a screenshot can show the panel; the name is a directory under `assets/comm`, and defaults to `intro`. Plays no voice track, so the frame is the same every run. An unknown name is fatal at startup. |
+| `--script-test` | Run the level's Lua through its sandbox: declarations, the trigger enter/re-enter rules against the fixed step, the instruction and memory budgets, and that evaluation allocates nothing in the step. Needs no window and no GL. |
+| `--target-hud` | Show a disabled robot in the target panel, so a screenshot can show it without shooting one. |
 | `--level PATH` | Load a level other than the default `mine01`. |
 | `--debug-ui` | Start with the ImGui debug panels open. They are off by default from M7; F3 toggles them at runtime. |
 | `--robots-test` | Drive the robot state machine through idle, alert, chase, attack, retreat and death; check pathing crosses portals, that robot fire hurts, that deaths drop, and that no robot leaves the mine. Needs no window and no GL. |
@@ -184,11 +188,15 @@ into simulation controls; gameplay call sites identify actions, not GLFW codes.
 Allowlist, all from vcpkg: `glfw3`, `glad`, `glm`, `imgui` (glfw and opengl3
 bindings), `stb`, `nlohmann-json`, `tinyobjloader`, `lua`.
 
-Plus one vendored, committed under `third_party/`: **miniaudio** (single header,
-public domain). It is not on vcpkg and has no usable Debian package, and it has
-to exist on both build paths, so it is in the repository rather than fetched.
-It needs no new apt package on Linux — it `dlopen`s ALSA and PulseAudio at
-runtime.
+Plus two vendored, committed under `third_party/`:
+
+- **miniaudio** (single header, public domain). It needs no new apt package on
+  Linux — it `dlopen`s ALSA and PulseAudio at runtime.
+- **pl_mpeg** (single header, MIT). MPEG-1 video for the HUD comm panel; only
+  `src/render/comm_video.cpp` includes it.
+
+Neither is on vcpkg or has a usable Debian package, and both have to exist on
+both build paths, so they are in the repository rather than fetched.
 
 **Ask before adding anything else.**
 
