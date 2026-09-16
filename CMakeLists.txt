@@ -56,11 +56,13 @@ add_executable(descent
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
+    src/render/debug_ui.cpp
     src/render/billboards.cpp
     src/render/comm_clip.cpp
     src/render/comm_video.cpp
     src/render/debug_lines.cpp
     src/render/font.cpp
+    src/render/frame_prepare.cpp
     src/render/gpu_timer.cpp
     src/render/hud.cpp
     src/render/level_mesh.cpp
