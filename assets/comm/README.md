@@ -3,9 +3,13 @@
 The runtime does not decode video. Each communication is a JSON manifest and
 a set of equal-sized RGBA PNG frames, uploaded once into a texture array.
 
-`intro/comm.json` is the level-opening transmission. It loops its authored
-frames for `displaySeconds`; simulation time selects the frame, so fixed-step
-tests and screenshots remain deterministic.
+Nothing plays a clip on its own. A transmission is raised by a level's script
+calling `comm("<message id>")`, and the message names which clip it shows; a
+level with no script has no transmissions. `--comm <name>` pins one for a
+screenshot and is the only other way to put one on screen.
+
+`intro/comm.json` loops its authored frames for `displaySeconds`, which is what
+lets a 2.0s sequence fill a longer message.
 
 To author or replace a sequence:
 

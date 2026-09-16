@@ -18,7 +18,7 @@ struct CommFrame {
     float alpha = 0.0f;
 };
 
-// The level-opening transmission's clock and lifetime.
+// A transmission's clock and lifetime.
 //
 // This used to be sim::CommState, advanced by stepGame. Nothing in the
 // simulation ever read it back - it was a playback cursor living inside the

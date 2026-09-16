@@ -15,6 +15,12 @@ ffmpeg's choice of defaults. Two details are not cosmetic:
     a re-triggered message does - decodes forward from the preceding intra
     frame, so a long GOP makes every seek cost more.
 
+The video carries no audio stream, because pl_mpeg would decode one and the
+game plays a transmission's voice through its own mixer instead. The soundtrack
+is not thrown away though: it is written beside the video as comm.wav, trimmed
+to the same length, which is where the engine looks for it. --no-audio skips
+that, and --tone writes a synthetic one for a source that has none.
+
 With --pattern this needs no input file and writes a synthetic placeholder: a
 test pattern with a burnt-in frame counter, so which frame is on screen can be
 read off a screenshot.
@@ -29,6 +35,59 @@ import struct
 import subprocess
 import wave
 from pathlib import Path
+
+
+def probe(source: Path, entries: str) -> str:
+    """One ffprobe field, or empty if ffprobe cannot answer."""
+    try:
+        done = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", entries, "-of", "csv=p=0", str(source)],
+            check=True, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    return done.stdout.strip()
+
+
+def source_seconds(source: Path, requested: float) -> float:
+    """`requested`, but never longer than the source actually is.
+
+    Asking for more than the file holds does not make a longer video - ffmpeg
+    stops at the end - it just makes the manifest claim a duration the stream
+    does not have. Clamping here is the cheapest place to keep the two honest.
+    """
+    raw = probe(source, "format=duration")
+    try:
+        actual = float(raw)
+    except ValueError:
+        return requested
+    if actual > 0.0 and actual < requested:
+        print(f"note: {source.name} is {actual:.2f}s, shorter than the {requested:.2f}s asked "
+              f"for; using {actual:.2f}s")
+        return actual
+    return requested
+
+
+def has_audio(source: Path) -> bool:
+    return "audio" in probe(source, "stream=codec_type").split()
+
+
+def extract_audio(source: Path, destination: Path, seconds: float, rate: int = 22050) -> Path:
+    """The source's own soundtrack, as the voice track the engine expects.
+
+    The video deliberately carries no audio stream, so without this the sound
+    is simply dropped. Mono because audio::Clip is mono and a stereo file is
+    downmixed on load anyway; 22 kHz because everything is resampled to 44.1 on
+    load, so authoring higher costs the repository size and buys nothing.
+
+    Trimmed to the same `seconds` as the video, so picture and voice are the
+    same length by construction rather than by someone remembering.
+    """
+    out = destination / "comm.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
+         "-t", str(seconds), "-vn", "-ac", "1", "-ar", str(rate), "-c:a", "pcm_s16le", str(out)],
+        check=True)
+    return out
 
 
 def encode(source: Path | None, destination: Path, width: int, height: int, fps: float,
@@ -103,27 +162,41 @@ def main() -> None:
     parser.add_argument("--gop", type=int, default=12)
     parser.add_argument("--speaker", default="incoming transmission")
     parser.add_argument("--tone", action="store_true",
-                        help="also write a placeholder comm.wav voice track")
+                        help="write a synthetic placeholder comm.wav (for --pattern, which has "
+                             "no soundtrack to take)")
+    parser.add_argument("--no-audio", action="store_true",
+                        help="discard the source's soundtrack instead of writing comm.wav")
     args = parser.parse_args()
 
-    out = encode(args.source, args.destination, args.width, args.height, args.fps,
-                 args.seconds, args.bitrate, args.gop, args.pattern)
+    seconds = args.seconds
+    if args.source is not None and not args.pattern:
+        seconds = source_seconds(args.source, seconds)
 
-    # displaySeconds is how long the panel stays up, which a Lua message may
-    # override; the decoder loops to fill it if the video is shorter.
-    manifest = {
-        "video": out.name,
-        "framesPerSecond": args.fps,
-        "displaySeconds": args.seconds,
-        "speaker": args.speaker,
-    }
+    out = encode(args.source, args.destination, args.width, args.height, args.fps,
+                 seconds, args.bitrate, args.gop, args.pattern)
+
+    # Neither framesPerSecond nor displaySeconds is written. The stream carries
+    # both and the loader reads them from it; restating them here only creates a
+    # second number that can disagree with the file, which is exactly how
+    # testcard ended up declaring 20.0s for a 19.833s video. Add displaySeconds
+    # by hand only to hold a clip on screen for longer than it runs, or say so
+    # in the Lua message, which overrides either way.
+    manifest = {"video": out.name, "speaker": args.speaker}
     (args.destination / "comm.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    size = out.stat().st_size
+
     note = ""
     if args.tone:
-        wav = write_tone(args.destination, args.seconds)
-        note = f", {wav.name} ({wav.stat().st_size / 1024:.0f} KiB)"
-    print(f"{out} ({size / 1024:.0f} KiB){note} and comm.json written; "
+        wav = write_tone(args.destination, seconds)
+        note = f", {wav.name} ({wav.stat().st_size / 1024:.0f} KiB, synthetic)"
+    elif args.no_audio:
+        note = ", soundtrack discarded (--no-audio)"
+    elif args.source is not None and has_audio(args.source):
+        wav = extract_audio(args.source, args.destination, seconds)
+        note = f", {wav.name} ({wav.stat().st_size / 1024:.0f} KiB, from the source)"
+    elif args.source is not None:
+        note = ", no soundtrack in the source"
+
+    print(f"{out} ({out.stat().st_size / 1024:.0f} KiB){note} and comm.json written; "
           f"run 'descent --comm-test' to validate")
 
 

@@ -87,7 +87,7 @@ struct HudData {
     float targetEnergy01 = 0.0f;
     float targetFade = 0.0f;
 
-    // The level-opening transmission. The renderer draws what it is handed and
+    // A transmission. The renderer draws what it is handed and
     // owns no part of the clip's clock or lifetime: CommPlayer decides which
     // frame is current and how far into its fade it is. No video decode happens
     // per frame either way - `commFrame` is a texture-array layer.
