@@ -86,10 +86,6 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
     if (state.phase == GamePhase::Won || state.phase == GamePhase::Lost) return;
 
     state.elapsed += dt;
-    if (state.comm.active) {
-        state.comm.elapsed += dt;
-        if (state.comm.elapsed >= cfg.commSeconds) state.comm.active = false;
-    }
 
     // --- what the player has found ---------------------------------------
     //

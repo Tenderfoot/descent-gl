@@ -672,13 +672,11 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     }
 
     // Incoming transmission, below the key row in the otherwise open upper
-    // right. The authored frames loop for the duration of the message; the
-    // short fades keep it from arriving and vanishing as a hard rectangle.
-    if (hud.commActive && hud.commTime < commDisplaySeconds_ && commFrameCount_ > 0) {
-        const float fadeIn = std::clamp(hud.commTime / 0.18f, 0.0f, 1.0f);
-        const float fadeOut = std::clamp((commDisplaySeconds_ - hud.commTime) / 0.45f,
-                                         0.0f, 1.0f);
-        const float alpha = std::min(fadeIn, fadeOut);
+    // right.
+    if (hud.commActive && commFrameCount_ > 0) {
+        // Which frame, and how far through its fade, are CommPlayer's answers.
+        // Everything below is geometry.
+        const float alpha = hud.commAlpha;
         const float panelW = std::min(w * 0.28f, 92.0f * s);
         const float panelH = panelW * static_cast<float>(commHeight_) /
                              static_cast<float>(commWidth_);
@@ -688,8 +686,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f,
                   panelH + frame * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
-        const int layer = static_cast<int>(std::floor(hud.commTime * commFramesPerSecond_)) %
-                          commFrameCount_;
+        const int layer = std::clamp(hud.commFrame, 0, commFrameCount_ - 1);
         hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
         hud_.text("incoming transmission", x, y + panelH + 3.0f * s, s * 0.62f, cyan);

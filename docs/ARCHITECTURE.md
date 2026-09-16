@@ -2410,3 +2410,87 @@ The wrong test also made the fix look wrong: sub-stepping the ball's
 integration appeared not to help, then appeared to make things worse. Under the
 right test, 150 u/s shoves from every floating light in all 26 directions never
 leave the mine without any sub-stepping at all, so that code came back out.
+
+## The comm panel is presentation, not simulation
+
+The level-opening transmission used to be `sim::CommState` inside
+`sim::GameState`, advanced by `stepGame` and retired against
+`GameConfig::commSeconds`. Nothing in the simulation ever read it back: the
+only consumer was the HUD. It was a playback cursor living inside the thing the
+simulation is, in the same category as the automap's `visited`/`seen` arrays
+but weaker still — those are at least knowledge the player has acquired.
+
+`src/game/comm_player.h` owns it now. `CommPlayer` holds the clip's timing, a
+start stamp and nothing else, and `at(now)` answers which frame to draw and how
+far into its fade it is. `HudData` carries `commFrame` and `commAlpha` instead
+of `commTime`; the renderer draws what it is handed and no longer owns any part
+of the clip's clock. `sim::GameState` and `GameConfig` lost their comm fields
+entirely.
+
+### Why an epoch and not a delta
+
+The clock is `now - startSeconds_`, never an accumulated per-frame delta, and
+that is the whole reason the type exists rather than a free float somewhere.
+
+The main loop clamps its frame delta to `kMaxFrameTime` before banking it, and
+drops it altogether while the window is minimized — both deliberate, so the
+simulation cannot bank time it did not simulate. Anything that adds those
+deltas up inherits that: a frame that overran the clamp, or a spell behind
+another window, leaves a gap it never makes up. For the simulation that is
+correct. For a transmission meant to run beside a voice on the audio device's
+clock it is drift with no ceiling, and the obvious wiring —
+`comm.advance(elapsed)` in the loop body — picks up the clamped value silently,
+because the clamp reassigns the variable it clamps. Subtracting a start stamp
+cannot drift however sparse the samples are, and `--comm-test` asserts exactly
+that: a jump straight to t=3.0 lands on the same frame as stepping there.
+
+`--comm` still pins a repeatable frame for screenshots, so determinism comes
+from the flag, which is where it came from before. The clip itself is still
+authored PNG frames in a texture array; only the clock moved.
+
+### Nothing pauses
+
+A transmission keeps running behind the pause menu. That is a decision, not an
+oversight. `Mixer` has no pause and no way to address a voice once it has
+started, so pausing the picture alone would leave a voice talking over a frozen
+frame. The HUD renders while paused anyway. A level switch stops the player, so
+the outgoing level's transmission does not carry into the incoming one.
+
+## A finding: an ambient channel was not protected
+
+`Mixer::claimSlot` promised in its own comment that an ambient channel is never
+the voice stolen when the pool is full. It was not true, for two reasons in the
+same four lines.
+
+`quietest` was seeded to slot 0 and `quietestGain` to `0.0f`, with the first
+candidate taken on `i == 0`. When slot 0 held an ambient voice the loop skipped
+it without ever seeding, every later comparison ran `current < 0.0f` against a
+gain no real voice is below, and the function returned slot 0 — the one slot it
+had just decided not to touch. Slot 0 is where the engine loop lands, because
+it is the first sound a level starts with a quiet pool.
+
+The second is `Voice::gainL`, which is `-1` until the voice has been through a
+block. Read as a level, `-1` is quieter than anything, so a voice started
+earlier in the same `drain()` was the preferred victim: a burst arriving
+together cut its own earliest and loudest member and kept the near-silent ones
+behind it. `claimSlot` now asks `spatialise` what an unmixed voice is about to
+be mixed at, which is the number it meant to compare all along.
+
+The engine survived this in practice because `setAmbient` is pushed every
+frame and a stolen channel releases its slot, so the next frame restarts it —
+an audible cursor reset rather than silence, which is why it went unnoticed. A
+voice started once would simply die, which is what makes it worth fixing before
+anything is built on the guarantee.
+
+`claimSlot` can now return -1, when every slot is a protected channel and
+there is nothing left to cut. `start()` drops the sound, the way a full command
+queue drops its newest push. Unreachable while there are fewer ambient channels
+than voices.
+
+### Protection and looping are separate questions
+
+`SetAmbient` forced `v.loop = true`, so taking a channel for its protection also
+meant taking its loop. A voice that has to survive a firefight but still end by
+itself — a spoken transmission, for instance — could not be expressed. `Command`
+carries `loop` now, defaulting to true so the engine and the klaxon are
+unchanged. No channel uses the non-looping form yet; `--sound-test` drives it.

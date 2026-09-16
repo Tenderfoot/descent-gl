@@ -2106,3 +2106,66 @@ Two decisions taken deliberately rather than discovered:
   M8 the query said "lit" whenever a robot visually blocked a lamp, which is the
   common case, and now it agrees with the screen there. A frequent disagreement
   traded for a rare one.
+
+## The comm panel leaves the simulation, and an ambient channel becomes protected in fact
+
+Groundwork for putting real video behind the comm panel. The clip is still the
+authored PNG sequence; what changed is who owns its clock, plus two defects in
+the voice pool found while working out where a spoken transmission would live.
+
+`sim::CommState` and `GameConfig::commSeconds` are gone. `src/game/comm_player.h`
+owns the transmission's clock and lifetime on an absolute epoch taken from the
+application clock, and the renderer is handed a frame index and an alpha instead
+of a time. See `docs/ARCHITECTURE.md` for why an epoch and not an accumulated
+delta — the short version is that the loop's frame delta is clamped and dropped
+while minimized, both correctly, and a video clock must not inherit either.
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` | ✅ clean, no warnings |
+| `cmake --build --preset linux-release` | ✅ clean, no warnings |
+| `--validate-assets --flight-test --world-test --collision-test --weapons-test --robots-test --loop-test --sound-test --light-test --settings-test --progress-test` | ✅ all exit 0, no `[ERROR]` or `[FATAL]` |
+| `--comm-test` | ✅ 16 consistent 256×192 frames, plus the new `comm-player-test` |
+| `--level-switch-test` | ✅ PASS — the switch stops the outgoing transmission |
+| `--comm` screenshot | ✅ panel draws upper-right at full alpha on frame 8, unchanged from `main` |
+| `--resize-test` | ✅ completed, 41.3 steps/s against 46.6 on `main` (one run each; software rendering at 1920×1080, bounded by the loop's frame clamp, not by the simulation) |
+| Draw-path allocations | ⚠️ `draw path SOME on 29 of 30 (worst 6, first at frame 31)` — **byte-identical to `main` under the same command.** Pre-existing, not introduced here |
+| Sim-step allocations | ✅ `none on 0 of 30` |
+
+Both `--resize-test` figures are single runs, not medians, and 41.3 against 46.6
+is inside the spread lavapipe gives between runs — but it is one sample each and
+should be read that way.
+
+### The two mixer defects, and how they are pinned down
+
+Both were verified by reverting `claimSlot` to its original body and re-running
+`--sound-test`, which is the only thing that makes them regression tests rather
+than assertions that happen to hold:
+
+| Test | Original `claimSlot` | Fixed |
+| --- | --- | --- |
+| `protection:` voices left after 63 one-shots over a running ambient | **0** — the channel was stolen | **1** |
+| `steal order:` loudest sound under 64 near-silent arrivals | **0.0403** peak — it was cut | **0.5839** against 0.5576 alone |
+
+The first needs a block mixed between filling the pool and overrunning it, which
+is the part worth recording: while the other voices still carry the "not yet
+computed" gain sentinel, the old search seeds on one of *them* and leaves the
+channel alone. The bug only appears once the pool holds real gains. A test that
+pushes everything in one drain passes against the broken code.
+
+`Command::loop` splits protection from looping. Nothing ships a non-looping
+protected channel yet — the narration that would use one does not exist — so
+`--sound-test` is its only caller, checking that it starts, ends with its clip
+instead of repeating, and hands the channel back afterwards.
+
+### Not done here
+
+pl_mpeg and a narration track were scoped out of this change. The decoder is a
+new vendored dependency and CLAUDE.md says to ask first; the video and audio
+assets do not exist. This lands the part that needs neither, and shrinks what is
+left: once the player owns the clock and the presentation lifetime, swapping the
+frame source is local to `CommPlayer` and the one draw call that reads
+`commFrame`.
+
+Windows/MSVC was not built — no dev machine in this container. Everything above
+is the Linux container path.
