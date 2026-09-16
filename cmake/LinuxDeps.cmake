@@ -7,7 +7,8 @@
 # is in use:
 #
 #   glfw  glad::glad  glm::glm  imgui::imgui
-#   nlohmann_json::nlohmann_json  tinyobjloader::tinyobjloader  ${Stb_INCLUDE_DIR}
+#   nlohmann_json::nlohmann_json  tinyobjloader::tinyobjloader  dvk::lua
+#   ${Stb_INCLUDE_DIR}
 #
 # glad and Dear ImGui are not packaged usably on Debian/Ubuntu (no glad at all;
 # imgui ships without the glfw and opengl3 backend sources), so tools/linux-deps.sh
@@ -26,10 +27,16 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(glm QUIET)          # Debian's glm has no config in 0.9.9; header-only either way.
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
+find_package(Lua 5.4 REQUIRED)
 
 find_path(Stb_INCLUDE_DIR NAMES stb_image.h PATH_SUFFIXES stb REQUIRED)
 
 find_package(OpenGL REQUIRED)
+
+add_library(lua_system INTERFACE)
+target_include_directories(lua_system SYSTEM INTERFACE ${LUA_INCLUDE_DIR})
+target_link_libraries(lua_system INTERFACE ${LUA_LIBRARIES})
+add_library(dvk::lua ALIAS lua_system)
 
 if(NOT TARGET glm::glm)
     add_library(glm_headers INTERFACE)

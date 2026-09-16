@@ -63,6 +63,9 @@ namespace dvk {
 //                       keys against doors, a shut door against light, the
 //                       reactor, the countdown, the exit and every pickup.
 //                       Needs no window and no GL.
+//   --script-test       load the level's Lua declarations, enter and re-enter
+//                       every trigger, run its callback, and prove trigger
+//                       evaluation allocates nothing. Needs no window or GL.
 //   --comm-test         decode and validate every frame of the HUD comm clip,
 //                       check deterministic playback timing, then exit.
 //   --comm              keep the comm panel visible for screenshot checks.
@@ -99,6 +102,7 @@ struct Options {
     bool weaponsTest = false;
     bool robotsTest = false;
     bool loopTest = false;
+    bool scriptTest = false;
     bool commTest = false;
     bool comm = false;
     bool targetHud = false;

@@ -17,6 +17,10 @@ if(VCPKG_TOOLCHAIN OR MSVC)
     find_package(Stb REQUIRED)
     find_package(nlohmann_json CONFIG REQUIRED)
     find_package(tinyobjloader CONFIG REQUIRED)
+    find_package(unofficial-lua CONFIG REQUIRED)
+    add_library(dvk_lua INTERFACE)
+    target_link_libraries(dvk_lua INTERFACE unofficial::lua::lua)
+    add_library(dvk::lua ALIAS dvk_lua)
 else()
     include(${CMAKE_SOURCE_DIR}/cmake/LinuxDeps.cmake)
 endif()
@@ -48,6 +52,7 @@ add_executable(descent
     src/game/robots_test.cpp
     src/game/session.cpp
     src/game/settings.cpp
+    src/game/script.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
@@ -79,6 +84,7 @@ add_executable(descent
     src/sim/props.cpp
     src/sim/robots.cpp
     src/sim/ship.cpp
+    src/sim/triggers.cpp
     src/sim/weapons.cpp
 )
 
@@ -95,6 +101,7 @@ target_link_libraries(descent PRIVATE
     imgui::imgui
     nlohmann_json::nlohmann_json
     tinyobjloader::tinyobjloader
+    dvk::lua
 )
 # What miniaudio's backends need. On Windows it reaches WASAPI through
 # libraries the CRT already links; on Linux it dlopen()s ALSA and PulseAudio at

@@ -40,6 +40,8 @@ Options Options::parse(int argc, char** argv) {
             o.robotsTest = true;
         } else if (a == "--loop-test") {
             o.loopTest = true;
+        } else if (a == "--script-test") {
+            o.scriptTest = true;
         } else if (a == "--comm-test") {
             o.commTest = true;
         } else if (a == "--comm") {

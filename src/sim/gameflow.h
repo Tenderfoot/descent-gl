@@ -3,6 +3,7 @@
 #include "game/level.h"
 #include "sim/body.h"
 #include "sim/events.h"
+#include "sim/triggers.h"
 
 #include <glm/vec3.hpp>
 
@@ -100,6 +101,7 @@ struct GameState {
     glm::vec3 reactorPosition{0.0f};   // last known, valid once reactorSeen
 
     DoorField doorField;
+    TriggerState triggers;
 };
 
 struct GameConfig {
@@ -117,7 +119,7 @@ void initGame(const Level& level, const RobotState& robots, GameState& out);
 // queue and may be null. See sim/events.h.
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events = nullptr);
+              EventQueue* events = nullptr, const TriggerSet* triggers = nullptr);
 
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.

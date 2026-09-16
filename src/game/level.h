@@ -210,6 +210,9 @@ struct SwingingLightDef {
 
 struct Level {
     std::string name;
+    // Resolved at load against the level file's directory. Empty means this
+    // level has no script.
+    std::string scriptPath;
     std::vector<glm::vec3> vertices;
     std::vector<Segment> segments;
     std::vector<Light> lights;

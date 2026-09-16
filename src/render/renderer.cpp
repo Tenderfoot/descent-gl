@@ -9,6 +9,7 @@
 #include "sim/robots.h"
 #include "render/camera.h"
 #include "render/comm_clip.h"
+#include "render/font.h"
 #include "render/procedural.h"
 #include "render/sprites.h"
 
@@ -672,10 +673,9 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     }
 
     // Incoming transmission, below the key row in the otherwise open upper
-    // right.
+    // right. The authored frames loop for the duration of the message; the
+    // short fades keep it from arriving and vanishing as a hard rectangle.
     if (hud.commActive && commFrameCount_ > 0) {
-        // Which frame, and how far through its fade, are CommPlayer's answers.
-        // Everything below is geometry.
         const float alpha = hud.commAlpha;
         const float panelW = std::min(w * 0.28f, 92.0f * s);
         const float panelH = panelW * static_cast<float>(commHeight_) /
@@ -689,7 +689,33 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const int layer = std::clamp(hud.commFrame, 0, commFrameCount_ - 1);
         hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
-        hud_.text("incoming transmission", x, y + panelH + 3.0f * s, s * 0.62f, cyan);
+        hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);
+
+        // Wrap by taking string_view slices; no temporary strings and no draw-
+        // path allocation. Long messages are clipped to the space below the
+        // portrait, while the load-time limit still bounds worst-case geometry.
+        const std::string_view body(hud.commText ? hud.commText : "");
+        const float bodyScale = s * 0.52f;
+        const int columns = std::max(1, static_cast<int>(panelW /
+            (static_cast<float>(font::kAdvance) * bodyScale)));
+        size_t first = 0;
+        float lineY = y + panelH + 12.0f * s;
+        for (int line = 0; line < 6 && first < body.size(); ++line) {
+            while (first < body.size() && body[first] == ' ') ++first;
+            size_t last = std::min(body.size(), first + static_cast<size_t>(columns));
+            const size_t newline = body.find('\n', first);
+            if (newline != std::string_view::npos && newline < last) {
+                last = newline;
+            } else if (last < body.size()) {
+                const size_t space = body.rfind(' ', last);
+                if (space != std::string_view::npos && space > first) last = space;
+            }
+            hud_.text(body.substr(first, last - first), x, lineY, bodyScale,
+                      glm::vec4(0.78f, 0.94f, 1.0f, alpha));
+            first = last;
+            if (first < body.size() && body[first] == '\n') ++first;
+            lineY += 6.0f * s;
+        }
     }
 
     // Reticle: a gap in the middle so it frames the target rather than

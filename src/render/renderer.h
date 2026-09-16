@@ -92,6 +92,8 @@ struct HudData {
     bool commActive = false;
     int commFrame = 0;
     float commAlpha = 0.0f;
+    const char* commSpeaker = "incoming transmission";
+    const char* commText = "";
 
     // Darkness, as the simulation understands it rather than as the screen
     // shows it. `illumination` is the light reaching the player and

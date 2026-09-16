@@ -10,6 +10,7 @@
 #include <glm/geometric.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 
 namespace dvk {
@@ -358,6 +359,20 @@ Level loadLevel(const std::string& path) {
     Level level;
     try {
         level.name = j.value("name", path);
+        if (j.contains("script")) {
+            const std::filesystem::path authored = j.at("script").get<std::string>();
+            if (authored.empty() || authored.is_absolute()) {
+                log::fatal("{}: script must be a non-empty relative path", path);
+            }
+            const std::filesystem::path levelDir =
+                std::filesystem::absolute(std::filesystem::path(path)).parent_path().lexically_normal();
+            const std::filesystem::path resolved = (levelDir / authored).lexically_normal();
+            const std::filesystem::path relative = resolved.lexically_relative(levelDir);
+            if (relative.empty() || *relative.begin() == "..") {
+                log::fatal("{}: script '{}' escapes the level directory", path, authored.string());
+            }
+            level.scriptPath = resolved.string();
+        }
 
         for (const auto& v : j.at("vertices")) level.vertices.push_back(readVec3(v));
 
@@ -635,6 +650,19 @@ Level loadLevel(const std::string& path) {
 bool saveLevel(const std::string& path, const Level& level) {
     nlohmann::json j;
     j["name"] = level.name;
+    if (!level.scriptPath.empty()) {
+        const std::filesystem::path levelDir =
+            std::filesystem::absolute(std::filesystem::path(path)).parent_path().lexically_normal();
+        const std::filesystem::path relative =
+            std::filesystem::path(level.scriptPath).lexically_normal().lexically_relative(levelDir);
+        if (!relative.empty() && *relative.begin() != "..") {
+            j["script"] = relative.generic_string();
+        } else {
+            log::error("refusing to save script path '{}' outside '{}'", level.scriptPath,
+                       levelDir.string());
+            return false;
+        }
+    }
 
     for (const glm::vec3& v : level.vertices) j["vertices"].push_back({v.x, v.y, v.z});
 
