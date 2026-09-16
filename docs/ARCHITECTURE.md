@@ -2600,3 +2600,100 @@ validated against the library — and then never read again.
 A clean automatic merge is not evidence of a correct one. The check that
 catches this class of thing is a second clip in the library and a screenshot of
 each, which is what `--comm NAME` is for.
+
+## The comm panel decodes video
+
+A comm clip is now either an authored frame sequence or an MPEG-1 video, and
+`CommClipLibrary` loads both so a set can be converted one clip at a time.
+
+The reason is that the frame-sequence design costs `width * height * 4` bytes of
+texture for every frame of every clip, resident from startup, and the same
+frames as PNGs in the repository. Both grow with the total authored seconds
+across the whole library — which stopped being hypothetical when clips became
+named and script-triggerable, because that is the point at which anyone would
+start adding them. `testcard` is 20 seconds at 24 fps: 480 frames, about 39 MB
+of PNGs and 126 MB of texture with mipmaps. Decoded it is 544 KiB on disk and
+**one** texture layer, and a longer clip costs neither more.
+
+`src/render/comm_video.cpp` is the only file that includes pl_mpeg and the only
+one that defines `PL_MPEG_IMPLEMENTATION`; `comm_video.h` hands back RGBA and
+nothing else. That is the containment `device.cpp` gives miniaudio.
+
+### One layer, rewritten
+
+A decoded clip owns a single scratch layer in the same texture array the
+authored sequences live in, rewritten as its picture changes, so the draw path
+is the one it always was: compute a layer, call `hud_.image`. `CommVideo::frame`
+returns null when the requested frame is the one already showing, which on a
+120 Hz loop drawing a 24 fps clip is four draws in five.
+
+`TextureArray::updateLayer` regenerates the whole array's mipmaps, because GL
+has no per-layer form of it and the HUD samples this array minified. The cost is
+proportional to the array's total layers rather than to the one that changed,
+and it is paid when a video frame changes rather than once a draw. With a
+handful of clips that is nothing; it is the thing to revisit if a library ever
+holds enough authored sequences for the sweep to matter.
+
+Playing forward is a decode and anything else is an exact seek, which decodes
+from the preceding intra frame — so `make-comm-video.py` pins a short GOP, and
+`--comm-test` asserts that sequential playback takes the cheap path rather than
+seeking its way through. Decoding allocates nothing after `open()`: pl_mpeg
+takes its buffers up front and the RGBA target is allocated beside them, which
+`--comm-test` measures with the same counter `--sound-test` uses on the mixer.
+
+### A finding: plm_frame_to_rgba does not write alpha
+
+It writes the three colour bytes of each pixel and leaves the fourth exactly as
+it found it. A zero-filled target therefore decodes to a perfectly correct,
+entirely transparent picture, and what reaches the screen is the panel's backing
+rectangle with nothing in it — which reads as a broken decoder and is not one.
+The buffer is filled with `0xFF` once at open, so alpha is right and never
+written again. `--comm-test` checks every pixel is opaque, because the failure
+is silent and the fix is one byte per pixel that nothing else would notice.
+
+## A transmission's voice
+
+`Ambient::Comm` is a third channel beside the engine and the klaxon, and it is
+the first one that carries a different recording each time it is used. A clip
+directory may hold a `comm.wav` beside its pictures; `Bank::loadComm` scans
+`assets/comm` and appends what it finds to the ordinary bank. A clip without one
+plays silently, which is not an error.
+
+It is on a channel rather than being a one-shot for the protection: `claimSlot`
+never steals a channel, and a 20-second voice is otherwise the ideal victim the
+moment a firefight fills the 32-voice pool. It does not loop, which is what
+`Command::loop` was separated from channel ownership for.
+
+### Two findings in taking a channel twice
+
+Reusing a channel for a different recording was broken in two ways that only a
+channel like this could reach, because the engine and the klaxon each play one
+file forever.
+
+`SetAmbient` updated the running voice in place — gain, pitch, position — and
+never reassigned `clip`. A second transmission was therefore swallowed whole:
+the channel kept playing the first to its end and the new one was never heard.
+Comparing the clip and restarting when it differs is the fix.
+
+Restarting alone then leaked. `start()` claims a *free* slot, so the voice
+holding the old recording kept playing in a slot the channel no longer pointed
+at — still flagged as a channel, so never stolen, and with nothing able to stop
+it. The old voice is now retired before the channel is taken again.
+
+### Sync is start-together and nothing else
+
+The picture runs on the application clock and the voice runs on the audio
+device's, and nothing tries to hold them in step beyond starting them in the
+same frame. Over a transmission's length the two clocks drift by well under the
+threshold either is worth correcting for, and the larger offset is the device's
+own output latency at the start, which is a few milliseconds.
+
+Doing better would mean the mixer publishing a playback cursor and the video
+slaving to it, which is the standard answer and is not built. That is a
+deliberate stopping point, not an oversight: it buys nothing until something
+needs close lip-sync, and `--comm` plays no voice at all so screenshots stay
+reproducible either way.
+
+Nothing pauses, for the reason the comm player already did not: the mixer has no
+pause and no way to address a voice once started, so pausing the picture alone
+would leave a voice talking over a frozen frame.

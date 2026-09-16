@@ -14,7 +14,7 @@ TextureArray::TextureArray(int size, const std::vector<std::vector<uint8_t>>& la
 TextureArray::TextureArray(int width, int height,
                            const std::vector<std::vector<uint8_t>>& layers,
                            const char* label, Wrap wrap)
-    : layers_(static_cast<int>(layers.size())) {
+    : layers_(static_cast<int>(layers.size())), width_(width), height_(height) {
     if (layers.empty()) log::fatal("texture array '{}' has no layers", label);
 
     const int longest = std::max(width, height);
@@ -48,6 +48,13 @@ TextureArray::TextureArray(int width, int height,
 
     log::info("texture array '{}' {}x{} x {} layers ({} levels)", label, width, height, layers_,
               levels);
+}
+
+void TextureArray::updateLayer(int layer, const uint8_t* rgba) const {
+    if (!id_ || !rgba || layer < 0 || layer >= layers_) return;
+    glTextureSubImage3D(id_, 0, 0, 0, layer, width_, height_, 1, GL_RGBA, GL_UNSIGNED_BYTE,
+                        rgba);
+    glGenerateTextureMipmap(id_);
 }
 
 TextureArray::~TextureArray() {

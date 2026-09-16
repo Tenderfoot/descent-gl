@@ -2244,3 +2244,80 @@ validation are all in place for the second one.
 
 Windows/MSVC was not built — no dev machine in this container. Everything above
 is the Linux container path.
+
+## The comm panel decodes video, and a transmission gets a voice
+
+pl_mpeg is vendored under `third_party/pl_mpeg` and a comm clip may now be an
+MPEG-1 video instead of a folder of PNGs. Both kinds coexist in one library, so
+a set converts a clip at a time; `intro` is untouched authored art and
+`testcard` is a synthetic placeholder proving the decoded path.
+
+What it buys, measured on the placeholder rather than argued:
+
+| 20s at 24 fps, 256×192 | Authored frames | Decoded |
+| --- | --- | --- |
+| Files in the repository | 480 PNGs, ~39 MB | one `.mpg`, **544 KiB** |
+| Texture layers | 480 (~126 MB with mipmaps) | **1** |
+| Cost of a longer clip | linear in both | none |
+
+The library now reports `2 clip(s) (1 decoded), 17 texture layer(s)` — sixteen
+authored frames plus one scratch layer carrying all 476 decoded ones.
+
+`Ambient::Comm` carries a transmission's voice: an optional `comm.wav` beside
+the pictures, on a protected non-looping channel, which is what `Command::loop`
+was split from channel ownership for one milestone ago.
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` / `linux-release` | ✅ both clean, no warnings |
+| All eleven headless tests plus `--script-test` | ✅ exit 0, no `[ERROR]`/`[FATAL]` |
+| `--comm-test` | ✅ decode-forward, seek-back, wrap, opacity, allocations |
+| `--sound-test` | ✅ including the new comm-channel case |
+| `--level-switch-test` | ✅ PASS |
+| `--comm testcard` screenshot | ✅ decoded frame 24 matches ffmpeg's extraction of the same frame |
+| Decoder allocations | ✅ **0 over 111 decoded frames**, measured with the counter `--sound-test` uses |
+| Sim-step allocations | ✅ `none on 0 of 30` |
+| `--resize-test` | ✅ completed, 51.3 steps/s against 55.0 on `main` (one run each, software rendering, bounded by the loop's frame clamp) |
+| Draw-path allocations | ⚠️ `SOME on 29 of 30` — the same pre-existing line `main` reports; unchanged here |
+
+Both resize figures are single runs and sit inside lavapipe's spread. Windows/
+MSVC was not built — no dev machine in this container.
+
+### Three findings, each caught by a test that fails without its fix
+
+**`plm_frame_to_rgba` does not write alpha.** It writes three bytes per pixel and
+leaves the fourth as it found it, so a zero-filled buffer decodes to a perfectly
+correct, entirely transparent picture. On screen that is the panel's backing
+rectangle with nothing in it — indistinguishable from a broken decoder. Found by
+dumping a decoded frame and comparing it against `ffmpeg`'s extraction of the
+same frame: identical RGB, alpha 0. `--comm-test` now checks every pixel is
+opaque.
+
+**Taking a channel twice kept the first recording.** `SetAmbient` updated gain,
+pitch and position in place and never reassigned `clip`, so a second
+transmission was swallowed — the channel played the first to its end and the new
+one was never heard. Reverting just that comparison fails the new test with
+`the comm channel kept playing the recording it was told to replace`.
+
+**Restarting instead leaked a voice.** `start()` claims a free slot, so the old
+recording kept playing in a slot the channel no longer pointed at — still
+flagged as a channel, therefore never stolen, and with nothing able to stop it.
+The test caught it as `2 after switching recording` and, after the stop, 31
+voices that should have been none.
+
+The last two are worth noting as a pair: the first fix is what exposed the
+second, and neither is reachable by the engine or the klaxon, which each play
+one file forever. A channel that carries different content each time is new, and
+it found both.
+
+### Not done
+
+The mixer still publishes no playback cursor, so picture and voice are started
+together and never corrected against each other. Over a transmission that drift
+is far below what either is worth correcting for and the bigger offset is the
+device's output latency at the start. Slaving video to the audio clock is the
+standard answer and is deliberately not built: it buys nothing until something
+needs close lip-sync.
+
+`intro` is still authored frames. Converting it is now one command and a content
+decision — a re-encode of committed art — rather than an engineering one.
