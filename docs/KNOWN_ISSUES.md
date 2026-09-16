@@ -8,39 +8,35 @@ shipped and already wrong.
 
 ---
 
-## The panel's display duration has four sources of truth
+## The panel's display duration still has more than one source of truth
 
 **Where:** `assets/comm/<clip>/comm.json`, `assets/levels/*.lua`,
-`src/render/comm_clip.cpp`, `src/main.cpp`.
+`src/render/comm_clip.cpp`.
 
-How long a comm panel stays on screen is declared in four places, and nothing
-cross-checks them. On `testcard` they already disagree:
+**Partly fixed.** `tools/make-comm-video.py` no longer writes `framesPerSecond`
+or `displaySeconds` for a decoded clip — the stream carries both and the loader
+reads them from it — and `testcard`'s manifest has been cleaned, so the
+committed disagreement (a manifest claiming 20.0s for a 19.833s video) is gone
+and the tool can no longer create another. The tool also clamps `--seconds` to
+the source's real length and writes the voice track at that same length, so a
+clip it produces has its video and wav agree by construction.
 
-| Source | Says |
-| --- | --- |
-| `comm.json` `displaySeconds` | 20.0 s |
-| the video's own length | **19.833 s** (476 frames at 24 fps) |
-| `comm.wav` | 20.0 s |
-| `mine01.lua` `seconds` | 5.5 s |
+What remains:
 
-The loader prefers the manifest over the file, so for a decoded clip the
-manifest's number wins even when the stream disagrees with it.
+- A manifest *may* still declare `displaySeconds`, and should when the intent is
+  to hold a clip on screen for longer than it runs. That is the field doing its
+  job, but nothing distinguishes it from a stale copy of the stream's length.
+- For a frame sequence the field is required and means something different —
+  `intro` is 16 frames at 8 fps, 2.0s of pictures held for 4.5s by looping.
+- A Lua message's `seconds` overrides whatever the clip says. This is ordinary
+  layering rather than duplication: a clip cannot know that one use of it wants
+  a short beat.
+- Nothing cross-checks any of it. `--comm-test` does not compare a declared
+  duration against the stream, or the voice track against either.
 
-Not all four are equally wrong. A message's `seconds` overriding a clip default
-is ordinary layering, and a clip cannot know that one use of it wants a 5.5
-second beat. The duplication is `displaySeconds` in a *video's* manifest, which
-restates what the file already knows — `loadCommClips` treats it as optional and
-falls back to the decoder, but `tools/make-comm-video.py` writes it anyway, which
-is how the 0.17 s disagreement above got committed. For a frame sequence the
-field does real work: `intro` is 16 frames at 8 fps, 2.0 s of pictures held for
-4.5 s by looping. So it means two different things depending on the clip kind.
-
-**Workaround:** put the video's real length in the message's `seconds`, which is
-the value that actually governs playback.
-
-**To fix:** stop the authoring tool writing `displaySeconds` for a video, and
-have `--comm-test` check the declared durations against the stream and against
-the voice track so an authoring mismatch fails headlessly.
+**To fix:** have `--comm-test` check the declared durations against the stream
+and the wav, so an authoring mismatch fails headlessly instead of being noticed
+by ear.
 
 **Note:** `docs/ARCHITECTURE.md` claims, in the section on decoupling the comm
 player from the simulation, that collapsing `GameConfig::commSeconds` made "the
@@ -60,7 +56,9 @@ voice when the panel retires, so a clip whose `comm.wav` is longer than the
 message keeps talking with no panel on screen. With `testcard` on `lower_mine`
 that would be 14.5 seconds of audio after the panel closed.
 
-**Workaround:** author `seconds` to match the voice track's length.
+**Workaround:** author `seconds` to match the voice track's length. A clip built
+by `make-comm-video.py` now has its video and wav the same length already, so
+matching `seconds` to the video is enough.
 
 **To fix:** make `seconds` authoritative for both, which is really the same
 decision as the entry above — this is what "nobody owns the duration" looks like

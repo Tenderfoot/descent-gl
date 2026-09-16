@@ -49,7 +49,15 @@ bool CommVideo::open(const std::filesystem::path& file) {
         return false;
     }
     if (plm_get_num_video_streams(s.plm) <= 0) {
-        log::error("comm video '{}' carries no video stream", file.string());
+        // Almost always the wrong codec rather than a missing track: pl_mpeg
+        // reads MPEG-1 video in an MPEG-PS container and nothing else, so an
+        // MPEG-2 or H.264 file with a .mpg on the end parses far enough to look
+        // empty. Saying "no video stream" about a file that plainly has one
+        // sends whoever hits this looking in the wrong place.
+        log::error("comm video '{}' has no stream pl_mpeg can decode. It reads MPEG-1 video in "
+                   "an MPEG-PS container only - MPEG-2 and H.264 both look like this. Re-encode "
+                   "with tools/make-comm-video.py, which pins the right codec and container.",
+                   file.string());
         return false;
     }
     // The game's own mixer plays a transmission's sound. Decoding an audio
