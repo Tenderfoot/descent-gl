@@ -2413,6 +2413,9 @@ leave the mine without any sub-stepping at all, so that code came back out.
 
 ## The comm panel is presentation, not simulation
 
+*(Historical: there is no longer a level-opening transmission at all — see
+"Transmissions are level content" below. The clock described here is unchanged.)*
+
 The level-opening transmission used to be `sim::CommState` inside
 `sim::GameState`, advanced by `stepGame` and retired against
 `GameConfig::commSeconds`. Nothing in the simulation ever read it back: the
@@ -2701,3 +2704,26 @@ reproducible either way.
 Nothing pauses, for the reason the comm player already did not: the mixer has no
 pause and no way to address a voice once started, so pausing the picture alone
 would leave a voice talking over a frozen frame.
+
+
+## Transmissions are level content
+
+Entering a level shows nothing. Nothing raises a transmission on its own: the
+only thing that starts one is a level script calling `comm("<message id>")`, and
+the message names the clip. A level with no `.lua` beside it has no
+transmissions, and a level that wants one says when.
+
+Before this, a level opened by playing whatever `kDefaultCommClip` named, and
+`mine01` then showed the same `intro` clip twice more from its script. The
+opening showing was not authored by anything — it was a default in `main.cpp`,
+so every level got it whether it suited the level or not, it re-fired on every
+restart, and a script trigger placed near the spawn would have cut it off
+mid-play. Deleting it leaves one way in, which is the script.
+
+`--comm <name>` still pins a clip to a fixed frame with no voice, and is now the
+only thing that puts a transmission on screen without a script. That is what
+keeps a panel screenshot reproducible.
+
+`startComm()` still runs when a level starts, and now only clears: it stops the
+player and the voice channel. That is what retires a transmission the previous
+attempt was part way through when a level is restarted.

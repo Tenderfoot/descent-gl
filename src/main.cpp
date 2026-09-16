@@ -75,10 +75,6 @@ constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
 constexpr const char* kCommRoot = "assets/comm";
-// What the level-opening transmission plays when no script and no --comm has
-// named anything else. A clip library with no "intro" falls back to its first
-// clip rather than showing nothing.
-constexpr const char* kDefaultCommClip = "intro";
 
 // How the ship's drive is heard.
 //
@@ -309,19 +305,26 @@ int main(int argc, char** argv) {
         commPlayer.start(clock.seconds());
         audio.playComm(audio.bank().commClip(name));
     };
+    // Entering a level shows nothing. A transmission is level content: the only
+    // thing that raises one is a script calling comm(), so a level with no
+    // script has none, and a level that wants one says when. This also runs on
+    // restart, where it is what clears a transmission the previous attempt was
+    // part way through.
     const auto startComm = [&]() {
         activeCommMessage = -1;
-        const std::string_view name = opts.comm.empty() ? kDefaultCommClip : opts.comm;
+        activeCommClip = 0;
         if (!opts.comm.empty()) {
             // --comm is a screenshot pin, not a performance: a fixed frame and
-            // no voice, so the picture is the same every run.
-            activeCommClip = selectCommClip(name);
+            // no voice, so the picture is the same every run. The only thing
+            // that puts a transmission on screen without a script.
+            activeCommClip = selectCommClip(opts.comm);
             commPlayer.configure(commTiming(activeCommClip));
             commPlayer.hold(1.0);
             audio.stopComm();
             return;
         }
-        startCommClip(name, 0.0f);
+        commPlayer.stop();
+        audio.stopComm();
     };
 
     renderer.drawVolumeWireframe = opts.wireframeVolumes;

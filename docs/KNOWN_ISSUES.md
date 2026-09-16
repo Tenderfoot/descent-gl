@@ -70,9 +70,9 @@ in the mixer.
 
 **Where:** `assets/levels/mine01.lua`, `src/main.cpp` (`kDefaultCommClip`).
 
-`testcard` is the only decoded clip and nothing reaches it. The default
-transmission is `intro`, and both Lua messages name `intro`. So in a running
-game:
+`testcard` is the only decoded clip and nothing reaches it. Both of `mine01`'s
+Lua messages name `intro`, and nothing else raises a transmission at all now
+that a level no longer opens with one. So in a running game:
 
 - sequential decode never happens — `--comm testcard` pins one frame, so
   `CommVideo::frame` returns pixels once and null on every later draw;
@@ -88,7 +88,9 @@ allocations) but is headless by design and touches no GL.
 
 **Workaround:** point a `mine01.lua` message's `clip` at `testcard` and run
 `--segment 12`, which fires the trigger on the first simulation step. Revert
-before release: it is shipped level content.
+before release: it is shipped level content. This is now the only way to see a
+transmission play, since `--comm` pins a single frame and nothing opens a level
+with one.
 
 **To fix:** either a flag that plays a named clip instead of pinning it, or a
 test level that is not shipped content.
