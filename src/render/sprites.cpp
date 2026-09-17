@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <utility>
 
 namespace dvk::gl {
 namespace {
@@ -42,6 +43,57 @@ std::vector<uint8_t> downsample(const uint8_t* src, int srcSize, int dstSize) {
         }
     }
     return dst;
+}
+
+// Carries the colour of the opaque pixels outward into the transparent ones,
+// a ring at a time, leaving the alpha channel alone.
+//
+// The fringe this avoids is the one loadPremultiplied() avoids by
+// premultiplying, arriving by another road. An exported wordmark is
+// transparent *black* outside its letters, and every filtered sample near an
+// edge - bilinear minification and every level of the mip chain - averages
+// that black in and rings the letters in grey. Premultiplying is not the fix
+// here, because the HUD blends straight alpha rather than additively, so
+// instead the colour under the transparent pixels stops being black. Nothing
+// reads it where alpha is zero; it only has to be the wrong thing to average.
+//
+// Four rings is enough for the mip levels a logo drawn at half its size is
+// actually sampled from.
+void bleedEdges(std::vector<uint8_t>& rgba, int w, int h, int rings = 4) {
+    std::vector<uint8_t> known(static_cast<size_t>(w) * static_cast<size_t>(h));
+    for (size_t i = 0; i < known.size(); ++i) known[i] = rgba[i * 4 + 3] > 0 ? 1 : 0;
+
+    std::vector<size_t> filled;
+    for (int ring = 0; ring < rings; ++ring) {
+        filled.clear();
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const size_t index = static_cast<size_t>(y) * w + x;
+                if (known[index]) continue;
+                std::array<uint32_t, 3> sum{0, 0, 0};
+                uint32_t n = 0;
+                for (const auto& [dx, dy] : std::array<std::pair<int, int>, 4>{
+                         {{-1, 0}, {1, 0}, {0, -1}, {0, 1}}}) {
+                    const int nx = x + dx;
+                    const int ny = y + dy;
+                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                    const size_t neighbour = static_cast<size_t>(ny) * w + nx;
+                    if (!known[neighbour]) continue;
+                    for (size_t c = 0; c < 3; ++c) sum[c] += rgba[neighbour * 4 + c];
+                    ++n;
+                }
+                if (n == 0) continue;
+                for (size_t c = 0; c < 3; ++c) {
+                    rgba[index * 4 + c] = static_cast<uint8_t>(sum[c] / n);
+                }
+                // Marked after the ring finishes, so a colour cannot travel
+                // several pixels in one pass and smear along a row.
+                filled.push_back(index);
+            }
+        }
+        if (filled.empty()) break;
+        for (size_t index : filled) known[index] = 1;
+    }
 }
 
 // One RGBA image, premultiplied and resampled to `size`.
@@ -100,6 +152,53 @@ std::vector<std::vector<uint8_t>> loadPickupSprites(int size) {
     layers.reserve(kPaths.size());
     for (const char* path : kPaths) layers.push_back(loadPremultiplied(path, size));
     return layers;
+}
+
+LoadedImage loadMenuLogo(const char* path) {
+    // HUD UVs put v = 0 at the top of a quad, matching a PNG's first row, and
+    // loadPickupSprites() leaves stb_image's process-global flip set for its
+    // world-space sprites. Set explicitly rather than inherited, the same way
+    // comm_clip.cpp does.
+    stbi_set_flip_vertically_on_load(0);
+
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* pixels = stbi_load(path, &w, &h, &channels, 4);
+    if (!pixels) {
+        const char* why = stbi_failure_reason();
+        log::fatal("logo '{}' would not load: {}", path, why ? why : "no reason given");
+    }
+
+    // The opaque bounds. Anything outside them is export padding.
+    int minX = w, minY = h, maxX = -1, maxY = -1;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (pixels[(static_cast<size_t>(y) * w + x) * 4 + 3] == 0) continue;
+            minX = std::min(minX, x);
+            maxX = std::max(maxX, x);
+            minY = std::min(minY, y);
+            maxY = std::max(maxY, y);
+        }
+    }
+    if (maxX < minX || maxY < minY) {
+        stbi_image_free(pixels);
+        log::fatal("logo '{}' is entirely transparent", path);
+    }
+
+    LoadedImage image;
+    image.width = maxX - minX + 1;
+    image.height = maxY - minY + 1;
+    image.rgba.resize(static_cast<size_t>(image.width) * static_cast<size_t>(image.height) * 4);
+    for (int y = 0; y < image.height; ++y) {
+        const uint8_t* src = pixels + (static_cast<size_t>(y + minY) * w + minX) * 4;
+        uint8_t* dst = image.rgba.data() + static_cast<size_t>(y) * image.width * 4;
+        std::copy(src, src + static_cast<size_t>(image.width) * 4, dst);
+    }
+    stbi_image_free(pixels);
+
+    bleedEdges(image.rgba, image.width, image.height);
+
+    log::info("logo '{}' {}x{} -> {}x{} after trim", path, w, h, image.width, image.height);
+    return image;
 }
 
 }   // namespace dvk::gl

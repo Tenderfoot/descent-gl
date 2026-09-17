@@ -1597,10 +1597,43 @@ drift into separate behavior.
 
 The renderer consumes that view through the existing HUD batch. Menus are
 therefore screen-space text and rectangles drawn after the MSAA resolve, with
-no new shader, texture or dependency. The same rectangles drive pointer hit
-testing and rendering. Cursor coordinates are scaled from GLFW window space to
+no new shader, no new pass and no new dependency — one texture, for the logo
+below. The same rectangles drive pointer hit testing and rendering. Cursor coordinates are scaled from GLFW window space to
 framebuffer space so high-DPI windows do not move the clickable area away from
 the visible button.
+
+#### The logo on the main menu
+
+The main menu is topped with the game's wordmark instead of its title text; the
+other screens keep their text, because "paused" is a label rather than a brand.
+The art is `assets/images/logo.png`, a copy of the Steam library logo in
+`marketing/steam/`. It is a copy on purpose: `assets/` is what ships beside the
+executable, `marketing/` is sized and re-exported to a storefront's
+requirements, and the two should be free to move independently.
+
+Two things happen to it at load, in `render/sprites.h` beside the pickup art:
+
+* **It is trimmed to its opaque bounds.** A store logo is padded out to a fixed
+  canvas — the one shipped here is a 1029x193 wordmark inside 1280x300 — and
+  centring that canvas would put the wordmark wherever the exporter left room.
+  Trimming means the menu centres the picture and takes its aspect from the art,
+  so a re-export at another size needs no change in the renderer.
+* **The colour of its edge pixels is carried out into the transparent ones.**
+  This is the fringe `loadPickupSprites` avoids by premultiplying, arriving by
+  another road: the export is transparent *black* outside the letters, and every
+  filtered sample near an edge — bilinear minification and each level of the mip
+  chain — averages that black in and rings the wordmark in grey. Premultiplying
+  is not the fix here, because the HUD blends straight alpha rather than
+  additively, so instead the colour under the transparent pixels stops being
+  black. Nothing reads it where alpha is zero.
+
+It is its own single-layer texture rather than another layer of the comm array,
+because a texture array's layers all share one size and a logo is not the shape
+of a comm frame. `hud.frag` gains a second optional sampler for it, selected by
+a UV band the way the image array already is, so the menu still draws in one
+call with the rest of the HUD. Both samplers are bound once at startup as well
+as per pass, because that fragment shader is shared with the world-space door
+signs and must never see an incomplete texture on a unit.
 
 A normal launch prepares the level as a frozen background and opens the main
 menu. Command-line runs still begin in play so screenshots, resize runs and the

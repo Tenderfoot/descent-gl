@@ -335,6 +335,11 @@ private:
     std::unique_ptr<TextureArray> walls_;
     std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<TextureArray> commFrames_;
+    // One layer, its own shape: the wordmark the main menu is topped with.
+    // Kept apart from commFrames_ because a texture array's layers all share
+    // one size and a logo is not the shape of a comm frame.
+    std::unique_ptr<TextureArray> menuLogo_;
+    float menuLogoAspect_ = 1.0f;
     CommClipLibrary commClips_;
     int commWidth_ = 1;
     int commHeight_ = 1;

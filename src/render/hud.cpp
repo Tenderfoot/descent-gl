@@ -79,6 +79,16 @@ void Hud::image(float x, float y, float w, float h, int layer, const glm::vec4& 
     vertices_.insert(vertices_.end(), {a, b, c, a, c, d});
 }
 
+void Hud::logo(float x, float y, float w, float h, const glm::vec4& color) {
+    // x > 3.5 selects uHudLogo in hud.frag, which is checked before the image
+    // array's band so the two cannot be confused.
+    const Vertex a{{x, y}, {4.0f, 0.0f}, color};
+    const Vertex b{{x + w, y}, {5.0f, 0.0f}, color};
+    const Vertex c{{x + w, y + h}, {5.0f, 1.0f}, color};
+    const Vertex d{{x, y + h}, {4.0f, 1.0f}, color};
+    vertices_.insert(vertices_.end(), {a, b, c, a, c, d});
+}
+
 void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color) {
     float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
     if (!font::glyphUv(c, u0, v0, u1, v1)) return;

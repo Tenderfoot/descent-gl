@@ -24,4 +24,24 @@ enum PickupSprite : int {
 // multiplied by the alpha - see loadSpriteLayers() on why that matters.
 std::vector<std::vector<uint8_t>> loadPickupSprites(int size);
 
+// One image at its own size, for art that is not a square sprite.
+struct LoadedImage {
+    int width = 0;
+    int height = 0;
+    std::vector<uint8_t> rgba;
+};
+
+// The wordmark that tops the main menu, copied from marketing/steam/.
+//
+// Trimmed to its opaque bounds, because a Steam library logo is padded out to a
+// fixed canvas and that padding is not part of the picture: centring the canvas
+// would put the wordmark wherever the exporter happened to leave room. What
+// comes back is the wordmark itself, so the menu can centre it and size it by
+// its own aspect rather than by numbers transcribed from this particular
+// export.
+//
+// Straight alpha, unlike the pickup sprites: the HUD blends with
+// GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA rather than additively.
+LoadedImage loadMenuLogo(const char* path);
+
 } // namespace dvk::gl
