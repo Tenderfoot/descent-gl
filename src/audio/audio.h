@@ -125,10 +125,16 @@ public:
     void playComm(int clip, float gain = 1.0f);
     void stopComm();
 
-    // Both music transports run together. `combat` is 0 for the lull and 1
-    // for combat; intermediate values use an equal-power crossfade. A comm
-    // ducks the shared music bus without changing effects or the voice itself.
-    void setMusicState(float combat, float volume, bool commDucked);
+    // Both music transports run together. `combat` is the state the music is
+    // heading for: 0 for the lull and 1 for combat, with intermediate values
+    // crossfaded at equal power. It is a target rather than a level, because
+    // this holds the envelope that walks towards it - entering combat over
+    // about a second and a half, leaving it over about four, so neither track
+    // arrives or departs on a single frame. `dt` advances that envelope; pass
+    // zero to freeze it, which is what a paused game does. A comm ducks the
+    // shared music bus on its own envelope, over the top of the crossfade and
+    // without touching effects or the voice itself.
+    void setMusicState(float combat, float volume, bool commDucked, float dt);
     void stopMusic();
 
     void setMasterGain(float gain);
@@ -163,9 +169,12 @@ private:
     bool muted_ = false;
     float unmutedGain_ = 0.8f;
     bool musicRunning_ = false;
-    bool musicDucked_ = false;
-    float musicCombat_ = 0.0f;
-    float musicVolume_ = 0.45f;
+    // Where the crossfade and the duck actually are, as opposed to where the
+    // game last asked them to be. Both are walked towards their target a
+    // frame at a time; holding them here is what makes a transition a
+    // duration rather than a step.
+    float musicCombatMix_ = 0.0f;
+    float musicDuck_ = 1.0f;
     uint32_t rng_ = 0x9e3779b9u;
     std::array<uint32_t, static_cast<size_t>(sim::Cue::Count)> played_{};
     uint32_t dropped_ = 0;

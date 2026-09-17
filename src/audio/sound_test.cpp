@@ -157,10 +157,10 @@ int runSoundTest(const std::string& soundDir, const std::string& musicDir) {
     // Both music transports must keep advancing even while one is genuinely
     // silent. Zero gain stopping an ambient is correct for the engine, but it
     // would make every combat transition restart a song from its beginning.
-    audio.setMusicState(0.0f, 0.45f, false);
+    audio.setMusicState(0.0f, 0.45f, false, 1.0f / 60.0f);
     renderBlocks(audio.mixer(), 1);
     const int musicStarted = audio.mixer().activeVoices();
-    audio.setMusicState(1.0f, 0.45f, true);
+    audio.setMusicState(1.0f, 0.45f, true, 1.0f / 60.0f);
     renderBlocks(audio.mixer(), 2);
     const int musicCrossfaded = audio.mixer().activeVoices();
     audio.stopMusic();
