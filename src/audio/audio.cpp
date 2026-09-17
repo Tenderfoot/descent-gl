@@ -15,6 +15,17 @@ namespace {
 
 using sim::Cue;
 
+// Move `value` towards `target` by at most `step`, never overshooting.
+//
+// Linear rather than the exponential glide the mixer uses for its own
+// smoothing: a fade with a stated length should be finished when that length
+// is up, and a one-pole only ever gets close to its target. Four seconds of
+// "nearly silent" is still four seconds of the wrong track.
+float approach(float value, float target, float step) {
+    if (value < target) return std::min(target, value + step);
+    return std::max(target, value - step);
+}
+
 // The mix, as a table. Gains here are relative to each other, not absolute:
 // the master gain sets the level, and these say that a laser is quieter than a
 // missile and that a door is quieter than either.
@@ -315,33 +326,42 @@ void Audio::stopComm() {
     playComm(-1, 0.0f);
 }
 
-void Audio::setMusicState(float combat, float volume, bool commDucked) {
+void Audio::setMusicState(float combat, float volume, bool commDucked, float dt) {
+    // Rising into combat is quicker than falling out of it. The mine noticing
+    // the player is an event; the player having survived it is not, and
+    // hurrying that half of the transition is what makes a soundtrack sound
+    // like it is switching tracks rather than easing off.
+    constexpr float kCombatFadeIn = 1.50f;
+    constexpr float kCombatFadeOut = 4.00f;
     constexpr float kDuckGain = 0.22f;
     constexpr float kDuckAttack = 0.12f;
     constexpr float kDuckRelease = 0.70f;
-    constexpr float kCombatAttack = 0.80f;
-    constexpr float kCombatRelease = 4.50f;
-    constexpr float kVolumeGlide = 0.25f;
 
     combat = std::clamp(combat, 0.0f, 1.0f);
     volume = std::clamp(volume, 0.0f, 1.0f);
+    dt = std::max(dt, 0.0f);
 
-    float glide = 0.0f;
-    if (musicRunning_) {
-        if (commDucked != musicDucked_) {
-            glide = commDucked ? kDuckAttack : kDuckRelease;
-        } else if (combat != musicCombat_) {
-            glide = combat > musicCombat_ ? kCombatAttack : kCombatRelease;
-        } else if (volume != musicVolume_) {
-            glide = kVolumeGlide;
-        }
+    const float duckTarget = commDucked ? kDuckGain : 1.0f;
+    if (!musicRunning_) {
+        // A level that opens in combat opens in combat. Fading in from the
+        // lull here would be a transition between two states, one of which
+        // the player was never in.
+        musicCombatMix_ = combat;
+        musicDuck_ = duckTarget;
+    } else {
+        const float fade = combat > musicCombatMix_ ? kCombatFadeIn : kCombatFadeOut;
+        musicCombatMix_ = approach(musicCombatMix_, combat, dt / fade);
+        const float duckFade = duckTarget < musicDuck_ ? kDuckAttack : kDuckRelease;
+        musicDuck_ = approach(musicDuck_, duckTarget, dt * (1.0f - kDuckGain) / duckFade);
     }
 
-    const float angle = combat * 0.5f * 3.14159265358979323846f;
-    const float duck = commDucked ? kDuckGain : 1.0f;
+    // Equal power, so the crossfade has no hole in the middle: at the halfway
+    // point both tracks are at about 0.71 rather than 0.5, and the pair keeps
+    // a constant total.
+    const float angle = musicCombatMix_ * 0.5f * 3.14159265358979323846f;
     const std::array<float, 2> gains{{
-        volume * duck * std::cos(angle),
-        volume * duck * std::sin(angle),
+        volume * musicDuck_ * std::cos(angle),
+        volume * musicDuck_ * std::sin(angle),
     }};
     constexpr std::array<Ambient, 2> channels{{Ambient::MusicLull, Ambient::MusicCombat}};
 
@@ -354,14 +374,17 @@ void Audio::setMusicState(float combat, float volume, bool commDucked) {
         command.positional = false;
         command.loop = true;
         command.keepAliveAtZero = true;
-        command.gainGlideSeconds = glide;
+        // The envelopes above are the transition, so the mixer only has to
+        // keep a frame's step from clicking. Asking it for a long glide as
+        // well would be two smoothers fighting over the same gain - and its
+        // own is overwritten every frame by the next command anyway, which is
+        // what used to collapse a four second fade into the anti-zipper
+        // default one frame in.
+        command.gainGlideSeconds = 0.0f;
         mixer_.push(command);
     }
 
     musicRunning_ = true;
-    musicDucked_ = commDucked;
-    musicCombat_ = combat;
-    musicVolume_ = volume;
 }
 
 void Audio::stopMusic() {
@@ -375,8 +398,8 @@ void Audio::stopMusic() {
         mixer_.push(command);
     }
     musicRunning_ = false;
-    musicDucked_ = false;
-    musicCombat_ = 0.0f;
+    musicCombatMix_ = 0.0f;
+    musicDuck_ = 1.0f;
 }
 
 void Audio::setMuted(bool muted) {

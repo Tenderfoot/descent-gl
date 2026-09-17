@@ -2208,14 +2208,40 @@ The game layer takes the maximum awareness of every living, enabled robot as a
 0..1 combat value. Awareness snaps to one when a robot acquires the player and
 decays for about three seconds after contact breaks, so the AI's existing memory
 is also the soundtrack's hysteresis. Player damage and the reactor countdown
-force combat to one. The mixer turns that value into an equal-power crossfade:
-the lull uses `cos(k*pi/2)` and combat uses `sin(k*pi/2)`, with a fast rise and a
-slower return.
+force combat to one.
 
-A scripted transmission multiplies both music gains by 0.22 with a short attack
-and a longer release. It does not touch master gain, effects or the transmission
-voice. The fixed `--comm` screenshot panel is deliberately excluded because it
-is not a live transmission and plays no voice.
+Awareness dies with the robot holding it, though, and hysteresis that lives on
+the robots cannot survive the last one of them. So the game layer holds the
+combat value for five seconds after combat stops: anything at or above 0.5
+refreshes the hold, and only five uninterrupted seconds start the return to the
+lull. A robot waking up inside that window resets the hold without a transition
+ever having begun. The hold sits at the level combat actually reached rather
+than at one, so a robot that half noticed the player does not buy five seconds
+of full combat music. The hold is frozen while the game is paused, a pause not
+being five seconds of not fighting.
+
+`Audio::setMusicState` takes that value as a target rather than a level and
+holds the envelope that walks towards it: about 1.5 seconds into combat and
+about 4 seconds back out, so the two tracks cross rather than swap. The
+envelope is linear and is stepped by the frame delta the caller passes, which
+is zero while paused. Its position feeds an equal-power pair - the lull at
+`cos(k*pi/2)` and combat at `sin(k*pi/2)` - so the two are at about 0.71 each
+halfway through and the crossfade has no hole in the middle. A level that opens
+in combat opens in combat: the first call after the music starts snaps rather
+than fading in from a lull the player was never in.
+
+The envelope is deliberately not the mixer's own gain glide. That glide is a
+one-pole, which only ever approaches its target, and the voice's glide is
+overwritten by every following command - and this state is re-sent every frame,
+so a four second music fade used to become the anti-zipper default one frame in
+and read as an instant switch. The mixer is now asked only to keep a frame's
+step from clicking.
+
+A scripted transmission multiplies both music gains by 0.22, on its own
+envelope over the top of the crossfade, with a short attack and a longer
+release. It does not touch master gain, effects or the transmission voice. The
+fixed `--comm` screenshot panel is deliberately excluded because it is not a
+live transmission and plays no voice.
 
 The WAV loader retains stereo for two-channel sources and keeps mono for
 positional effects. Non-positional stereo voices go straight to left and right;
