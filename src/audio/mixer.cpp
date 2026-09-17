@@ -48,7 +48,7 @@ void Mixer::render(float* out, int frames) {
             v.gainR = targetR;
         }
 
-        const auto sourceFrames = static_cast<double>(v.clip->samples.size());
+        const auto sourceFrames = static_cast<double>(v.clip->frames());
         const double step = static_cast<double>(v.pitch);
 
         for (int f = 0; f < frames; ++f) {
@@ -71,17 +71,32 @@ void Mixer::render(float* out, int frames) {
             // random detune so a burst of vulcan fire does not sound like the
             // same 40 ms of audio stamped out twelve times.
             const auto i0 = static_cast<size_t>(v.cursor);
-            const size_t i1 = i0 + 1 < v.clip->samples.size() ? i0 + 1 : i0;
+            const size_t i1 = i0 + 1 < v.clip->frames() ? i0 + 1 : i0;
             const auto t = static_cast<float>(v.cursor - static_cast<double>(i0));
-            const float s = v.clip->samples[i0] * (1.0f - t) + v.clip->samples[i1] * t;
+            const auto interpolate = [&](int channel) {
+                const size_t channels = static_cast<size_t>(v.clip->channels);
+                const size_t a = i0 * channels + static_cast<size_t>(channel);
+                const size_t b = i1 * channels + static_cast<size_t>(channel);
+                return v.clip->samples[a] * (1.0f - t) + v.clip->samples[b] * t;
+            };
+            float sourceL = interpolate(0);
+            float sourceR = v.clip->channels == 2 ? interpolate(1) : sourceL;
+            if (v.positional && v.clip->channels == 2) {
+                sourceL = sourceR = (sourceL + sourceR) * 0.5f;
+            }
 
             // Glide per frame rather than per block: gliding per block would
             // still step, just less often.
-            v.gainL += (targetL - v.gainL) * kGainGlide / static_cast<float>(frames);
-            v.gainR += (targetR - v.gainR) * kGainGlide / static_cast<float>(frames);
+            const float glide =
+                v.gainGlideSeconds > 0.0f
+                    ? std::min(1.0f, 4.6052f /
+                                         (v.gainGlideSeconds * static_cast<float>(kSampleRate)))
+                    : kGainGlide / static_cast<float>(frames);
+            v.gainL += (targetL - v.gainL) * glide;
+            v.gainR += (targetR - v.gainR) * glide;
 
-            out[f * kChannels] += s * v.gainL;
-            out[f * kChannels + 1] += s * v.gainR;
+            out[f * kChannels] += sourceL * v.gainL;
+            out[f * kChannels + 1] += sourceR * v.gainR;
             v.cursor += step;
         }
     }
@@ -105,8 +120,9 @@ void Mixer::drain() {
                 const auto channel = static_cast<size_t>(command.ambient);
                 if (channel >= ambientSlots_.size()) break;
                 const int slot = ambientSlots_[channel];
-                // Stop: a null clip or a gain of zero retires the channel.
-                if (command.clip < 0 || command.gain <= 0.0f) {
+                // Stop: a null clip always retires the channel. Ordinary
+                // ambients also stop at zero; music keeps its transport alive.
+                if (command.clip < 0 || (command.gain <= 0.0f && !command.keepAliveAtZero)) {
                     if (slot >= 0) {
                         voices_[static_cast<size_t>(slot)].active = false;
                         ambientSlots_[channel] = -1;
@@ -130,6 +146,7 @@ void Mixer::drain() {
                         v.pitch = command.pitch;
                         v.position = command.position;
                         v.positional = command.positional;
+                        v.gainGlideSeconds = command.gainGlideSeconds;
                         break;
                     }
                     // A different recording, so the channel is being reused
@@ -177,6 +194,7 @@ void Mixer::start(const Command& command) {
     v.cursor = 0.0;
     v.pitch = command.pitch > 0.0f ? command.pitch : 1.0f;
     v.gain = command.gain;
+    v.gainGlideSeconds = command.gainGlideSeconds;
     v.position = command.position;
     v.positional = command.positional;
     v.active = true;

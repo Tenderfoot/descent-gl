@@ -3,7 +3,7 @@
 A recreation of Descent's core gameplay: 6DOF flight through a mine, robots,
 reactor, escape. C++20 and OpenGL 4.6 core, lit the way F.E.A.R. and Doom 3
 were — no ambient term, full blacks, hard stencil-volume shadows. Positional
-sound effects, no music.
+sound effects and an adaptive stereo combat score.
 
 The repository name says `vk` for historical reasons; the renderer is OpenGL.
 See `docs/ARCHITECTURE.md` for why.

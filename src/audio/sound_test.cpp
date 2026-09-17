@@ -76,7 +76,7 @@ void setListener(Mixer& mixer, const glm::vec3& position, const glm::vec3& right
 
 } // namespace
 
-int runSoundTest(const std::string& soundDir) {
+int runSoundTest(const std::string& soundDir, const std::string& musicDir) {
     bool ok = true;
     const auto fail = [&ok](const std::string& why) {
         log::error("{}", why);
@@ -85,13 +85,25 @@ int runSoundTest(const std::string& soundDir) {
 
     // --- the bank --------------------------------------------------------
     Audio audio;
-    audio.init(soundDir, /*openDevice=*/false);
+    audio.init(soundDir, /*openDevice=*/false, /*commDir=*/"", musicDir);
     const Bank& bank = audio.bank();
 
-    size_t totalSamples = 0;
+    for (int clipIndex : bank.musicClip) {
+        if (clipIndex < 0 || static_cast<size_t>(clipIndex) >= bank.clips.size()) {
+            fail("an adaptive music track did not load");
+            continue;
+        }
+        if (bank.clips[static_cast<size_t>(clipIndex)].channels != 2) {
+            fail("an adaptive music track was not retained as stereo");
+        }
+    }
+
+    size_t totalFrames = 0;
+    size_t residentSamples = 0;
     float longest = 0.0f;
     for (const Clip& clip : bank.clips) {
-        totalSamples += clip.samples.size();
+        totalFrames += clip.frames();
+        residentSamples += clip.samples.size();
         longest = std::max(longest, clip.seconds());
         for (float v : clip.samples) {
             if (!std::isfinite(v) || std::abs(v) > 1.0f) {
@@ -106,8 +118,8 @@ int runSoundTest(const std::string& soundDir) {
     }
     log::info("sound test: {} clips, {:.2f} s total, longest {:.2f} s, {} KiB resident",
               bank.clips.size(),
-              static_cast<double>(totalSamples) / static_cast<double>(kSampleRate), longest,
-              (totalSamples * sizeof(float)) / 1024);
+               static_cast<double>(totalFrames) / static_cast<double>(kSampleRate), longest,
+               (residentSamples * sizeof(float)) / 1024);
 
     int silentCues = 0;
     for (size_t i = 0; i < bank.cueClip.size(); ++i) {
@@ -140,6 +152,24 @@ int runSoundTest(const std::string& soundDir) {
     if (explosionClip < 0 || laserClip < 0) {
         log::info("sound test: FAIL (the clips the checks below need are missing)");
         return 1;
+    }
+
+    // Both music transports must keep advancing even while one is genuinely
+    // silent. Zero gain stopping an ambient is correct for the engine, but it
+    // would make every combat transition restart a song from its beginning.
+    audio.setMusicState(0.0f, 0.45f, false);
+    renderBlocks(audio.mixer(), 1);
+    const int musicStarted = audio.mixer().activeVoices();
+    audio.setMusicState(1.0f, 0.45f, true);
+    renderBlocks(audio.mixer(), 2);
+    const int musicCrossfaded = audio.mixer().activeVoices();
+    audio.stopMusic();
+    renderBlocks(audio.mixer(), 1);
+    const int musicStopped = audio.mixer().activeVoices();
+    log::info("  adaptive music: {} voices at lull, {} through combat/duck, {} after stop",
+              musicStarted, musicCrossfaded, musicStopped);
+    if (musicStarted != 2 || musicCrossfaded != 2 || musicStopped != 0) {
+        fail("adaptive music did not keep two transports alive through a zero-gain crossfade");
     }
 
     Mixer mixer;

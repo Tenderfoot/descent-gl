@@ -23,8 +23,7 @@ inline constexpr int kMaxVoices = 32;
 
 // Continuous sounds that are not one-shots: they start, follow something, and
 // stop. Kept as a fixed set of named channels rather than as loop handles,
-// because a handle would need an owner and a lifetime and there are two of
-// these.
+// because these channels have fixed roles and lifetimes.
 enum class Ambient : uint8_t {
     Engine,     // the ship's own drive, gained by throttle
     Alarm,      // the countdown klaxon
@@ -33,6 +32,8 @@ enum class Ambient : uint8_t {
     // caller names the recording. What it wants from this list is the one thing
     // every entry gets: a burst of gunfire cannot steal it mid-sentence.
     Comm,
+    MusicLull,
+    MusicCombat,
     Count,
 };
 
@@ -81,6 +82,13 @@ struct Command {
     // this; a channel taken for something that ends on its own does not, and
     // asks for the channel's protection from being stolen without its loop.
     bool loop = true;
+    // Music transports keep advancing at zero gain so a crossfade never
+    // restarts the track that was inaudible. Ordinary ambients retain the
+    // existing zero-means-stop behaviour.
+    bool keepAliveAtZero = false;
+    // Zero uses the short anti-zipper glide. Music supplies an intentional
+    // transition time for combat crossfades and transmission ducking.
+    float gainGlideSeconds = 0.0f;
     Listener listener;
 };
 
@@ -125,6 +133,7 @@ struct Voice {
     bool positional = true;
     bool loop = false;
     int ambient = -1;             // the channel that owns it, or -1 for a one-shot
+    float gainGlideSeconds = 0.0f;
     // Smoothed, because a voice whose panning jumps between blocks zippers
     // audibly. -1 marks "not yet computed", so the first block of a voice
     // starts at its correct gain rather than sliding up from silence.
@@ -179,7 +188,11 @@ private:
     std::array<Voice, kMaxVoices> voices_{};
     // Which slot each ambient channel is using, so a second SetAmbient updates
     // the existing voice instead of layering another copy on top of it.
-    std::array<int, static_cast<size_t>(Ambient::Count)> ambientSlots_{{-1, -1}};
+    std::array<int, static_cast<size_t>(Ambient::Count)> ambientSlots_ = [] {
+        std::array<int, static_cast<size_t>(Ambient::Count)> slots{};
+        slots.fill(-1);
+        return slots;
+    }();
     Ring<Command, kCommandQueueSize> commands_;
     Listener listener_;
     std::atomic<float> masterGain_{0.8f};

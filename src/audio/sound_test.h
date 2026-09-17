@@ -14,6 +14,6 @@ namespace dvk::audio {
 // bus clips, and whether the render path reaches the heap.
 //
 // Returns a process exit code: 0 if every check passed.
-int runSoundTest(const std::string& soundDir);
+int runSoundTest(const std::string& soundDir, const std::string& musicDir = "");
 
 } // namespace dvk::audio

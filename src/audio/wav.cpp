@@ -142,8 +142,21 @@ Clip loadWav(const std::string& path) {
         return clip;
     }
     const size_t frames = dataSize / frameBytes;
-    clip.samples.resize(frames);
+    // Music is stereo. Positional effects are mono, and unusual multichannel
+    // sources keep the old safe behaviour of being averaged to one channel.
+    clip.channels = channels == 2 ? 2 : 1;
+    clip.samples.resize(frames * static_cast<size_t>(clip.channels));
     for (size_t f = 0; f < frames; ++f) {
+        if (clip.channels == 2) {
+            for (int c = 0; c < 2; ++c) {
+                clip.samples[f * 2 + static_cast<size_t>(c)] =
+                    sampleAt(data + (f * frameBytes) +
+                                         static_cast<size_t>(c) *
+                                             static_cast<size_t>(bytesPerSample),
+                             bits, isFloat);
+            }
+            continue;
+        }
         // Downmix by averaging. A sum would clip a stereo file that was already
         // near full scale on both sides.
         float sum = 0.0f;
@@ -161,19 +174,24 @@ void resample(Clip& clip, int rate) {
     if (!clip.valid() || rate <= 0 || clip.sampleRate == rate) return;
 
     const double ratio = static_cast<double>(clip.sampleRate) / static_cast<double>(rate);
-    const auto outFrames =
-        static_cast<size_t>(static_cast<double>(clip.samples.size()) / ratio);
+    const auto inFrames = clip.frames();
+    const auto outFrames = static_cast<size_t>(static_cast<double>(inFrames) / ratio);
     if (outFrames == 0) {
         clip.samples.clear();
         return;
     }
-    std::vector<float> out(outFrames);
+    std::vector<float> out(outFrames * static_cast<size_t>(clip.channels));
     for (size_t i = 0; i < outFrames; ++i) {
         const double src = static_cast<double>(i) * ratio;
         const auto i0 = static_cast<size_t>(src);
-        const size_t i1 = std::min(i0 + 1, clip.samples.size() - 1);
+        const size_t i1 = std::min(i0 + 1, inFrames - 1);
         const auto t = static_cast<float>(src - static_cast<double>(i0));
-        out[i] = clip.samples[i0] * (1.0f - t) + clip.samples[i1] * t;
+        for (int c = 0; c < clip.channels; ++c) {
+            const size_t outIndex = i * static_cast<size_t>(clip.channels) + static_cast<size_t>(c);
+            const size_t a = i0 * static_cast<size_t>(clip.channels) + static_cast<size_t>(c);
+            const size_t b = i1 * static_cast<size_t>(clip.channels) + static_cast<size_t>(c);
+            out[outIndex] = clip.samples[a] * (1.0f - t) + clip.samples[b] * t;
+        }
     }
     clip.samples.swap(out);
     clip.sampleRate = rate;

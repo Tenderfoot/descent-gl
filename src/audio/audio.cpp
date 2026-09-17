@@ -6,6 +6,7 @@
 #include "core/log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/mat3x3.hpp>
 
@@ -54,6 +55,13 @@ constexpr std::array<const char*, static_cast<size_t>(Ambient::Count)> kAmbientF
     "engine.wav",   // Engine
     "alarm.wav",    // Alarm
     "",             // Comm - supplied per transmission, see Bank::loadComm
+    "",             // MusicLull - supplied by Bank::loadMusic
+    "",             // MusicCombat - supplied by Bank::loadMusic
+}};
+
+constexpr std::array<const char*, 2> kMusicFiles{{
+    "Sub-Bass Drones.wav",
+    "Mechanical Devastation.wav",
 }};
 
 } // namespace
@@ -96,10 +104,31 @@ void Bank::loadComm(const std::string& root) {
     log::info("sound: {} transmission voice track(s) from '{}'", commNames.size(), root);
 }
 
+void Bank::loadMusic(const std::string& root) {
+    musicClip.fill(-1);
+    int loaded = 0;
+    for (size_t i = 0; i < kMusicFiles.size(); ++i) {
+        const std::filesystem::path path = std::filesystem::path(root) / kMusicFiles[i];
+        Clip clip = loadWav(path.string());
+        if (!clip.valid()) {
+            ++missing;
+            continue;
+        }
+        resample(clip, kSampleRate);
+        clips.push_back(std::move(clip));
+        musicClip[i] = static_cast<int>(clips.size() - 1);
+        const Ambient channel = i == 0 ? Ambient::MusicLull : Ambient::MusicCombat;
+        ambientClip[static_cast<size_t>(channel)] = musicClip[i];
+        ++loaded;
+    }
+    log::info("sound: {} adaptive music track(s) from '{}'", loaded, root);
+}
+
 void Bank::load(const std::string& dir) {
     clips.clear();
     cueClip.fill(-1);
     ambientClip.fill(-1);
+    musicClip.fill(-1);
     missing = 0;
 
     // Decode each distinct filename once, then point every cue that named it at
@@ -135,12 +164,14 @@ Audio::~Audio() {
     shutdown();
 }
 
-bool Audio::init(const std::string& soundDir, bool openDevice, const std::string& commDir) {
+bool Audio::init(const std::string& soundDir, bool openDevice, const std::string& commDir,
+                 const std::string& musicDir) {
     bank_.load(soundDir);
     // Before setClips, and before anything can be playing: a voice holds a
     // pointer into bank_.clips, and appending to that vector after one exists
     // would leave it pointing at freed memory.
     if (!commDir.empty()) bank_.loadComm(commDir);
+    if (!musicDir.empty()) bank_.loadMusic(musicDir);
     mixer_.setClips(&bank_.clips);
 
     int silent = 0;
@@ -282,6 +313,70 @@ void Audio::playComm(int clip, float gain) {
 
 void Audio::stopComm() {
     playComm(-1, 0.0f);
+}
+
+void Audio::setMusicState(float combat, float volume, bool commDucked) {
+    constexpr float kDuckGain = 0.22f;
+    constexpr float kDuckAttack = 0.12f;
+    constexpr float kDuckRelease = 0.70f;
+    constexpr float kCombatAttack = 0.80f;
+    constexpr float kCombatRelease = 4.50f;
+    constexpr float kVolumeGlide = 0.25f;
+
+    combat = std::clamp(combat, 0.0f, 1.0f);
+    volume = std::clamp(volume, 0.0f, 1.0f);
+
+    float glide = 0.0f;
+    if (musicRunning_) {
+        if (commDucked != musicDucked_) {
+            glide = commDucked ? kDuckAttack : kDuckRelease;
+        } else if (combat != musicCombat_) {
+            glide = combat > musicCombat_ ? kCombatAttack : kCombatRelease;
+        } else if (volume != musicVolume_) {
+            glide = kVolumeGlide;
+        }
+    }
+
+    const float angle = combat * 0.5f * 3.14159265358979323846f;
+    const float duck = commDucked ? kDuckGain : 1.0f;
+    const std::array<float, 2> gains{{
+        volume * duck * std::cos(angle),
+        volume * duck * std::sin(angle),
+    }};
+    constexpr std::array<Ambient, 2> channels{{Ambient::MusicLull, Ambient::MusicCombat}};
+
+    for (size_t i = 0; i < channels.size(); ++i) {
+        Command command;
+        command.kind = Command::Kind::SetAmbient;
+        command.ambient = static_cast<uint8_t>(channels[i]);
+        command.clip = bank_.musicClip[i];
+        command.gain = gains[i];
+        command.positional = false;
+        command.loop = true;
+        command.keepAliveAtZero = true;
+        command.gainGlideSeconds = glide;
+        mixer_.push(command);
+    }
+
+    musicRunning_ = true;
+    musicDucked_ = commDucked;
+    musicCombat_ = combat;
+    musicVolume_ = volume;
+}
+
+void Audio::stopMusic() {
+    if (!musicRunning_) return;
+    for (Ambient channel : {Ambient::MusicLull, Ambient::MusicCombat}) {
+        Command command;
+        command.kind = Command::Kind::SetAmbient;
+        command.ambient = static_cast<uint8_t>(channel);
+        command.clip = -1;
+        command.gain = 0.0f;
+        mixer_.push(command);
+    }
+    musicRunning_ = false;
+    musicDucked_ = false;
+    musicCombat_ = 0.0f;
 }
 
 void Audio::setMuted(bool muted) {
