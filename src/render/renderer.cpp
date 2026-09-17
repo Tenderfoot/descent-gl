@@ -118,6 +118,21 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         kPickupSpriteSize, loadPickupSprites(kPickupSpriteSize), "pickups",
         TextureArray::Wrap::ClampToEdge);
     {
+        // The main menu's topper. One layer rather than a 2D texture because a
+        // texture array is the only texture object this project has, and one
+        // layer of it is a picture.
+        const LoadedImage logo = loadMenuLogo("assets/images/logo.png");
+        menuLogoAspect_ = static_cast<float>(logo.width) / static_cast<float>(logo.height);
+        menuLogo_ = std::make_unique<TextureArray>(
+            logo.width, logo.height, std::vector<std::vector<uint8_t>>{logo.rgba}, "menu logo",
+            TextureArray::Wrap::ClampToEdge);
+        // Bound once here for the same reason the comm array is: hud.frag is
+        // shared with the world-space door signs, and that program must never
+        // observe an incomplete texture on the unit.
+        menuLogo_->bind(4);
+    }
+
+    {
         commClips_ = loadCommClips(kCommRoot);
         GLint maxLayers = 0;
         glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
@@ -925,9 +940,25 @@ void Renderer::buildMenu(const MenuView& menu) {
               glm::vec4(0.025f, 0.045f, 0.06f, 0.96f));
     hud_.rect(panelLeft, panelTop, panelWidth, std::max(2.0f, scale * 0.8f), accent);
 
-    const float titleScale = scale * 2.4f;
-    const float titleWidth = hud_.textWidth(menu.title, titleScale);
-    hud_.text(menu.title, (width - titleWidth) * 0.5f, height * 0.20f, titleScale, white);
+    // The main menu is topped with the wordmark; every other screen keeps its
+    // title text, because "paused" is a label rather than a brand.
+    if (menu.screen == MenuScreen::Main && menuLogo_) {
+        // Sized by the screen and by the panel it sits over, whichever is
+        // tighter: height is what governs at a wide aspect ratio and width at a
+        // narrow one, and a wordmark wider than the panel under it reads as a
+        // mistake. The aspect comes from the trimmed art, so re-exporting the
+        // logo at another size or with other padding changes nothing here.
+        const float logoWidth = std::min(panelWidth * 0.88f, height * 0.10f * menuLogoAspect_);
+        const float logoHeight = logoWidth / menuLogoAspect_;
+        // Centred where the title text's own centre was, so the subtitle and
+        // everything below it keep their places.
+        hud_.logo((width - logoWidth) * 0.5f, height * 0.225f - logoHeight * 0.5f, logoWidth,
+                  logoHeight, glm::vec4(1.0f));
+    } else {
+        const float titleScale = scale * 2.4f;
+        const float titleWidth = hud_.textWidth(menu.title, titleScale);
+        hud_.text(menu.title, (width - titleWidth) * 0.5f, height * 0.20f, titleScale, white);
+    }
     // A level's own blurb is the subtitle of the level list, and a blurb is
     // written to be read, not to fit a panel. Cut it to what fits - at a word
     // boundary, with an ellipsis - rather than letting it run off both edges.
@@ -1038,6 +1069,7 @@ void Renderer::hudPass() {
     // ImGui is: it is axis-aligned and gains nothing from multisampling.
     hudShader_->bind();
     if (commFrames_) commFrames_->bind(3);
+    if (menuLogo_) menuLogo_->bind(4);
     hudShader_->setVec2("uScreen", glm::vec2(static_cast<float>(target_.width()),
                                              static_cast<float>(target_.height())));
     glDisable(GL_DEPTH_TEST);

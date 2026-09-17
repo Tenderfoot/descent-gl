@@ -33,6 +33,10 @@ public:
     // One layer from the optional HUD image texture array. Layer selection is
     // encoded into UVs so the existing compact vertex format stays unchanged.
     void image(float x, float y, float w, float h, int layer, const glm::vec4& color);
+    // The menu logo, which is one picture rather than a layer of the image
+    // array: it has its own shape, and the array's layers are all the size of a
+    // comm frame. Same trick for selecting it - a UV band no other quad uses.
+    void logo(float x, float y, float w, float h, const glm::vec4& color);
     void text(std::string_view text, float x, float y, float scale, const glm::vec4& color);
     float textWidth(std::string_view text, float scale) const;
 
