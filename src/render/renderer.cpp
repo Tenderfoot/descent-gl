@@ -1731,32 +1731,37 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
 void Renderer::buildAutomapLines(const AutomapData& map, const Level& level) {
     mapLines_.clear();
 
-    // Colours chosen so the map reads at a glance: the room you are in is warm
-    // and everything else is cold, which is the one question a player opens the
-    // map to answer.
+    // Colours chosen so the map reads at a glance: the room you are in is warm,
+    // the rooms you have flown through are cold but solid, and the rest of the
+    // mine is dimmer still. Which is the one question a player opens the map to
+    // answer - where am I, and where have I already been.
     constexpr glm::vec3 kWall(0.30f, 0.45f, 0.62f);
     constexpr glm::vec3 kHere(0.95f, 0.70f, 0.25f);
     constexpr glm::vec3 kFrontier(0.16f, 0.26f, 0.38f);
+    constexpr glm::vec3 kUnknown(0.12f, 0.17f, 0.24f);
 
     const int n = std::min(map.segmentCount, level.segmentCount());
     for (int si = 0; si < n; ++si) {
-        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        if (si >= AutomapData::kMaxSegments) continue;
         const Segment& seg = level.segments[static_cast<size_t>(si)];
         const bool here = si == map.shipSegment;
+        const bool been = map.visited[static_cast<size_t>(si)];
 
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
 
-            // A wall is drawn as its outline; a portal is drawn as nothing at
-            // all, so a corridor reads as a gap rather than a line to bump into.
-            // The exception is a portal into somewhere unvisited: a faint
-            // outline there marks the way on without giving away what is beyond.
-            glm::vec3 color = kWall;
+            // A wall is drawn as its outline, bright where the ship has been and
+            // dim where it has not. A portal is drawn as nothing at all, so a
+            // corridor reads as a gap rather than a line to bump into. The
+            // exception is a portal that crosses from explored to unexplored: a
+            // faint outline there is the frontier, and marks where the map stops
+            // being a record and starts being a plan.
+            glm::vec3 color = been ? kWall : kUnknown;
             if (sd.isPortal()) {
                 const int nb = sd.neighbour;
-                const bool known = nb >= 0 && nb < AutomapData::kMaxSegments &&
-                                   map.visited[static_cast<size_t>(nb)];
-                if (known) continue;
+                const bool nbBeen = nb >= 0 && nb < AutomapData::kMaxSegments &&
+                                    map.visited[static_cast<size_t>(nb)];
+                if (nbBeen == been) continue;
                 color = kFrontier;
             } else if (here) {
                 color = kHere;
@@ -1807,14 +1812,14 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
     buildMenu(menu);
     hud_.upload();
 
-    // Frame the visited part of the mine rather than the whole level, so the
-    // map stays legible early on instead of showing one lit room in the corner
-    // of an empty box.
+    // Frame the whole mine, because the whole mine is what is drawn: the map is
+    // a floor plan the player has from the start, and framing it on the part
+    // already flown would make it lurch every time a new room is entered.
     glm::vec3 lo(std::numeric_limits<float>::max());
     glm::vec3 hi(std::numeric_limits<float>::lowest());
     const int n = std::min(map.segmentCount, level.segmentCount());
     for (int si = 0; si < n; ++si) {
-        if (si >= AutomapData::kMaxSegments || !map.visited[static_cast<size_t>(si)]) continue;
+        if (si >= AutomapData::kMaxSegments) continue;
         const Segment& seg = level.segments[static_cast<size_t>(si)];
         for (int v = 0; v < 8; ++v) {
             const glm::vec3& p = level.vertices[static_cast<size_t>(seg.verts[static_cast<size_t>(v)])];
@@ -1822,21 +1827,28 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
             hi = glm::max(hi, p);
         }
     }
-    if (lo.x > hi.x) {   // nothing visited yet, which should not happen
+    if (lo.x > hi.x) {   // no segments at all, which should not happen
         lo = hi = map.shipPosition;
     }
-
-    const glm::vec3 focus = (lo + hi) * 0.5f;
-    const float radius = std::max(glm::length(hi - lo) * 0.5f, 4.0f);
-    const float distance = radius * 1.7f / std::max(map.zoom, 0.2f);
-
-    const float cp = std::cos(map.pitch);
-    const glm::vec3 eye = focus + glm::vec3(std::cos(map.yaw) * cp, std::sin(map.pitch),
-                                            std::sin(map.yaw) * cp) * distance;
 
     const float aspect = target_.height() > 0
                              ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
                              : 1.0f;
+
+    const glm::vec3 focus = (lo + hi) * 0.5f;
+    const float radius = std::max(glm::length(hi - lo) * 0.5f, 4.0f);
+    // Far enough back that the level's bounding sphere sits inside the frustum,
+    // which is the vertical half-angle on a wide window and the horizontal one
+    // on a tall one, plus a little air. A hand-tuned constant was good enough
+    // while the map only ever showed the handful of rooms already flown; a whole
+    // mine framed that way loses its far corners off the edges of the screen.
+    const float halfV = kAutomapFovY * 0.5f;
+    const float half = std::min(halfV, std::atan(std::tan(halfV) * aspect));
+    const float distance = radius / std::sin(half) * 1.05f / std::max(map.zoom, 0.2f);
+
+    const glm::vec3 eye = focus + glm::vec3(std::cos(map.yaw) * std::cos(map.pitch),
+                                            std::sin(map.pitch),
+                                            std::sin(map.yaw) * std::cos(map.pitch)) * distance;
 
     CameraBlock cam;
     cam.view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));

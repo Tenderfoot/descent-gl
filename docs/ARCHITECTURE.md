@@ -1747,18 +1747,28 @@ overwrite each other.
 
 ### What it draws, and what it refuses to
 
-A wall side is drawn as its outline. A portal to a **visited** segment is drawn
-as nothing at all, so a corridor reads as a gap rather than as a line to bump
-into. A portal to an **unvisited** one gets a faint outline: a frontier marker
-that says there is a way on without saying what is through it.
+The whole mine is drawn from the first frame — the map is the floor plan the
+ship launched with, not a memory of where it has been. What the player *has*
+done is carried by colour instead: a segment the ship has been inside is drawn
+bright, one it has not is drawn dim, and the two read apart at a glance without
+either disappearing.
 
-`GameState` records the knowledge, and the rules are deliberately mean:
+A wall side is drawn as its outline, in the colour of the segment it belongs to.
+A portal between two segments in the **same** state — both flown, or both not —
+is drawn as nothing at all, so a corridor reads as a gap rather than as a line to
+bump into. A portal that **crosses** between the two gets a faint outline
+brighter than the unexplored walls around it: that is the frontier, and it is
+where the map stops being a record and starts being a plan.
+
+`GameState` still records the knowledge, and for everything that is not the
+layout itself the rules stay deliberately mean:
 
 - **`visited`** is segments the ship has actually been inside — not segments it
-  has *seen* down a corridor, which would hand the player the layout of a room
-  they glanced into.
+  has *seen* down a corridor. It no longer gates what is drawn, only how, which
+  is the one thing it is honest about: it is a record of where the ship went.
 - **`seen`** marks a pickup whose segment has been visited, so a key noticed and
-  left behind can be flown back to.
+  left behind can be flown back to. Keys are still not given away by the map:
+  knowing the shape of a room is not knowing what is in it.
 - **`reactorSeen`** needs a real line of sight, tested with the same `raycast`
   the robots use and against the doors as they stand that step, so a reactor
   behind a shut door is not revealed through it. It runs only until it succeeds
@@ -1770,13 +1780,22 @@ write and for the renderer to read.
 
 ### Framing
 
-The orbit camera frames the **visited** bounding box rather than the level's, so
-the map stays legible early on instead of showing one lit room in the corner of
-an empty box. It grows as the player explores.
+The orbit camera frames the level's bounding box, which is also what is drawn.
+It does not move as the player explores: a frame that grew room by room would
+lurch and rescale every time a portal was crossed, and the whole point of
+showing the mine from the start is that its shape is a fixed thing to read
+against.
 
-`--reveal` draws every segment and every marker as though found. It is a
-rendering check for the map itself — the same family as `--wireframe-volumes`
-and `--stencil-view` — and it touches only what the renderer is handed, never
+The distance is solved rather than tuned — `radius / sin(half-angle)`, the
+half-angle being the vertical one on a wide window and the horizontal one on a
+tall one, times a little air. The constant it replaces was fitted to the few
+rooms the map used to show and leaves a whole mine's far corners a couple of per
+cent outside the frustum, which reads as the map being cropped.
+
+`--reveal` now only changes the shading and the markers: it draws every segment
+as though flown and every key and the reactor as though found. It is a rendering
+check for the map itself — the same family as `--wireframe-volumes` and
+`--stencil-view` — and it touches only what the renderer is handed, never
 `GameState`.
 
 ---
