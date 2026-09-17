@@ -10,6 +10,7 @@
 // in-game light editor's Save button is pressed.
 
 import { BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES, SIDE_COUNT } from './format.js';
+import { rewireDoors } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
 
 const vec3 = (j) => {
@@ -177,6 +178,12 @@ export function parseLevel(json, path = '<memory>') {
     };
 
     rebuildDerived(level);
+    // A side's `door` is derived, not authored: loadLevel reads whatever the
+    // file said and then overwrites it from the doors array, on both ends of
+    // the portal. The shipped levels carry no `door` on any side at all, so
+    // without this step the editor believed a portal with a door on it was
+    // empty - and offered to add a second one.
+    rewireDoors(level);
     resolveSegments(level);
     return level;
 }
@@ -214,7 +221,13 @@ export function serializeLevel(level) {
             const side = {};
             if (sd.neighbour >= 0) {
                 side.portal = sd.neighbour;
-                if (sd.door >= 0) side.door = sd.door;
+                // saveLevel writes `door` here; this does not. It is derived -
+                // the loader rewires every side from the doors array whatever
+                // the file says - and writing it would put a second, silent
+                // copy of the door graph in the file for the two to disagree
+                // about. The shipped levels do not carry it, so omitting it is
+                // also what keeps open-and-save byte-identical now that the
+                // editor resolves doors at load.
             } else {
                 side.texture = sd.texture;
             }

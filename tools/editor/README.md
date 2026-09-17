@@ -67,6 +67,15 @@ obvious, which is why the game's automap uses it.
 
 Three selection modes — **1** segment, **2** side, **3** vertex.
 
+A portal is clickable in side and entity mode, which is the only way one can
+be: a portal has no wall triangles of its own, so the translucent quad drawn
+for it is the whole of it, and a click resolves against that quad. It selects
+the end it was clicked from — fly into a room (double-click) and click its
+doorway, and the selection is that room's side of it. In segment mode a click
+still passes through the opening to the room beyond, because that is how
+double-click flies from room to room. Unticking **Portals** under Show hands
+those clicks back to whatever is behind them.
+
 | Tool | |
 | --- | --- |
 | **Extrude** | Grows a new segment out of a wall. The wall's four vertices become four of the new segment's, *by index*, so the portal is exact by construction. Depth defaults to the depth of the segment it grew from. |
@@ -113,7 +122,9 @@ complains. Everything that moves something re-resolves it, against the same
 
 A door can only go on a portal, and the key colours offered are only the ones
 the level actually has a key for: a red door in a mine with no red key is a
-mine that cannot be finished.
+mine that cannot be finished. So: place the key first, then click the portal in
+mode **4** and pick a colour. A portal that already carries a door offers to
+delete it instead — a portal cannot have two.
 
 Undo and redo are Ctrl+Z and Ctrl+Shift+Z, by snapshot through the writer and
 reader — so an undone level is byte-identical to one loaded from the file.
@@ -159,6 +170,7 @@ one keystroke away.
 | `tests/conformance.mjs` | the editor's validator against the game's |
 | `tests/ops.mjs` | the structural edits, checked for shape and not just legality |
 | `tests/entities.mjs` | entity placement, and the segment-resolution rule |
+| `tests/portals.mjs` | what a click on a portal resolves to |
 | `tests/create.mjs` | the starter level, and that it can be grown |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
@@ -169,6 +181,7 @@ node tools/editor/tests/conformance.mjs   # the validator, against the game's
 node tools/editor/tests/ops.mjs           # the structural edits
 node tools/editor/tests/entities.mjs      # placement and segment resolution
 node tools/editor/tests/create.mjs        # the starter level
+node tools/editor/tests/portals.mjs       # what a click on a portal resolves to
 ```
 
 Both need a Linux debug build (`cmake --preset linux && cmake --build --preset
@@ -249,17 +262,23 @@ All three are warnings, all marked *editor only* in the panel:
   lamp that hangs clear but leaves the room at the extremes of its arc loads
   and then lights through rock.
 
-## Two differences from `saveLevel()`
+## Three differences from `saveLevel()`
 
 The writer matches `saveLevel()` in `src/game/level.cpp` field for field, with
-two deliberate exceptions — both of which make its output a better file than
-the C++ writer's, and neither of which changes what loads:
+three deliberate exceptions — all of which make its output a better file than
+the C++ writer's, and none of which changes what loads:
 
 * **`comment` is preserved.** `saveLevel` drops it, so the prose at the top of
   `mine01.json` disappears the first time anyone presses Save in the in-game
   light editor.
 * **A light's `segment` is written.** `saveLevel` omits it and lets the loader
   search for it again.
+* **A side's `door` is not written.** `saveLevel` writes it; it is derived.
+  `loadLevel` rewires every side from the `doors` array whatever the file says,
+  so writing it puts a second copy of the door graph in the file for the two to
+  disagree about. The shipped levels carry it on no side at all, which is also
+  why the editor has to do that rewiring at load: without it a portal with a
+  door on it read as empty, and the editor offered to add a second one.
 
 It also keeps each object's key order and omits fields that are at their
 default, because the shipped files do. The result is that opening a level and

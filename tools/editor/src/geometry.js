@@ -130,6 +130,72 @@ export function rebuildDerived(level) {
     return level;
 }
 
+// --- portals ----------------------------------------------------------------
+
+// The reciprocal of a portal: which side of the neighbour looks back at `si`,
+// or -1 if the graph is one-sided, which validate.js reports as an error.
+export function oppositeSide(level, si, side) {
+    const neighbour = level.segments[si]?.sides[side]?.neighbour ?? -1;
+    const other = level.segments[neighbour];
+    if (!other) return -1;
+    for (let os = 0; os < SIDE_COUNT; ++os) {
+        if (other.sides[os].neighbour === si) return os;
+    }
+    return -1;
+}
+
+// Every portal once, from the lower-numbered segment, carrying both of its
+// ends.
+//
+// A portal has no wall triangles - rebuildDerived skips any side with a
+// neighbour, because the game does - so this is the only description of one
+// there is. It is what the viewport draws the translucent quad from and what a
+// click on that quad resolves against.
+//
+// Both ends are carried because a portal is a side of two segments, and which
+// of them a click means depends on where it was made from; see portalFacing().
+export function portalFaces(level) {
+    const out = [];
+    for (let si = 0; si < level.segments.length; ++si) {
+        for (let side = 0; side < SIDE_COUNT; ++side) {
+            const sd = level.segments[si].sides[side];
+            if (sd.neighbour < 0 || sd.neighbour < si) continue;
+            out.push({
+                segment: si,
+                side,
+                neighbour: sd.neighbour,
+                neighbourSide: oppositeSide(level, si, side),
+                door: sd.door,
+                corners: sideCorners(level, si, side),
+            });
+        }
+    }
+    return out;
+}
+
+// Which end of a portal a look direction means: the one it is being seen from.
+//
+// The corners are wound counter-clockwise seen from inside the owning segment,
+// so their face normal points into it - the same convention as sd.normal - and
+// a direction running against that normal is one arriving from inside. Falling
+// back to the owning end on a one-sided portal keeps a click on a broken level
+// selecting something rather than nothing.
+//
+// A door does not care which end it is placed from, because rewireDoors() wires
+// both. A selection does: clicking a portal should name the room it was clicked
+// from, not whichever of the two happens to be numbered lower.
+export function portalFacing(face, direction) {
+    // Both triangles, summed, the way rebuildDerived builds sd.normal: a side
+    // is not guaranteed planar, and one triangle of a warped quad can point
+    // somewhere the side as a whole does not.
+    const c = face.corners;
+    const inward = add(faceNormal(c[0], c[1], c[2]), faceNormal(c[0], c[2], c[3]));
+    if (dot(inward, direction) < 0 || face.neighbourSide < 0) {
+        return { segment: face.segment, side: face.side };
+    }
+    return { segment: face.neighbour, side: face.neighbourSide };
+}
+
 // insideSegment() in src/game/level.cpp. Requires rebuildDerived first.
 export function insideSegment(level, si, p, slack = 0.01) {
     for (const sd of level.segments[si].sides) {
