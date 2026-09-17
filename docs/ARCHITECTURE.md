@@ -2082,7 +2082,8 @@ Two things the harness learned the hard way, both worth preserving:
 
 ## Sound
 
-M9. `src/audio`. Positional sound effects, no music.
+M9. `src/audio`. Positional sound effects, transmission voices and adaptive
+music share one lock-free mixer.
 
 ### The rule
 
@@ -2169,10 +2170,11 @@ square edges.
 
 ### Ambient channels
 
-Two, named rather than handles: `Engine` and `Alarm`. Both are gained and
-pitched by the game rather than started and stopped by it; re-setting a channel
-updates the running voice rather than restarting it, or the engine would stutter
-every time the throttle moved.
+Named rather than handles: `Engine`, `Alarm`, `Comm`, `MusicLull` and
+`MusicCombat`. They are protected from voice stealing, and re-setting a channel
+updates the running voice rather than restarting it. That keeps the engine from
+stuttering with every throttle change and lets both music transports keep their
+place through a crossfade.
 
 The drive is driven by the ship's **speed**, not by the throttle key — a ship
 coasting with the throttle released still sounds like it is moving, which is
@@ -2193,6 +2195,33 @@ Loops must be seamless. `engine.wav` and `alarm.wav` are built with every
 partial at an integer number of cycles over the loop length and the tail
 crossfaded over the head (`seamless()` in `tools/make-sounds.py`); without that,
 a one-second loop clicks once a second.
+
+### Adaptive music
+
+`Sub-Bass Drones.wav` and `Mechanical Devastation.wav` start together when a
+level starts and remain sample-aligned through play and pause. Zero gain does
+not stop these two channels: transport and audibility are separate for music,
+so bringing the combat track back cannot restart it at its introduction. Music
+stops in the main menu and run summary.
+
+The game layer takes the maximum awareness of every living, enabled robot as a
+0..1 combat value. Awareness snaps to one when a robot acquires the player and
+decays for about three seconds after contact breaks, so the AI's existing memory
+is also the soundtrack's hysteresis. Player damage and the reactor countdown
+force combat to one. The mixer turns that value into an equal-power crossfade:
+the lull uses `cos(k*pi/2)` and combat uses `sin(k*pi/2)`, with a fast rise and a
+slower return.
+
+A scripted transmission multiplies both music gains by 0.22 with a short attack
+and a longer release. It does not touch master gain, effects or the transmission
+voice. The fixed `--comm` screenshot panel is deliberately excluded because it
+is not a live transmission and plays no voice.
+
+The WAV loader retains stereo for two-channel sources and keeps mono for
+positional effects. Non-positional stereo voices go straight to left and right;
+if a stereo clip is ever played positionally it is downmixed before panning.
+Both long tracks are decoded into memory at startup, trading memory for the same
+allocation-free callback and simple seek-free looping as every other clip.
 
 ### Where the WAVs come from
 

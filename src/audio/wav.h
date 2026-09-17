@@ -5,21 +5,22 @@
 
 namespace dvk::audio {
 
-// A decoded sound: mono 32-bit float, at whatever rate the file carried.
-//
-// Mono because every sound in this game is a point in a mine and gets its
-// stereo image from where that point is relative to the ship. A stereo source
-// has no position to pan, so a stereo file is downmixed on load rather than
-// being quietly half-played.
+// A decoded sound: mono or stereo 32-bit float, interleaved when stereo, at
+// whatever rate the file carried. Positional sounds are authored mono; stereo
+// is retained for non-positional material such as music.
 struct Clip {
     std::vector<float> samples;
     int sampleRate = 0;
+    int channels = 1;
     std::string name;
 
-    bool valid() const { return !samples.empty() && sampleRate > 0; }
+    bool valid() const {
+        return !samples.empty() && sampleRate > 0 && (channels == 1 || channels == 2) &&
+               samples.size() % static_cast<size_t>(channels) == 0;
+    }
+    size_t frames() const { return samples.size() / static_cast<size_t>(channels); }
     float seconds() const {
-        return sampleRate > 0 ? static_cast<float>(samples.size()) / static_cast<float>(sampleRate)
-                              : 0.0f;
+        return sampleRate > 0 ? static_cast<float>(frames()) / static_cast<float>(sampleRate) : 0.0f;
     }
 };
 

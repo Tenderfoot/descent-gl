@@ -77,6 +77,7 @@ constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
 constexpr const char* kCommRoot = "assets/comm";
+constexpr const char* kMusicDir = "assets/music";
 
 // Scripted window events for --resize-test. Covers the two cases that break
 // silently: a framebuffer size change while drawing, and iconify/restore,
@@ -158,7 +159,7 @@ int main(int argc, char** argv) {
     // subsystem a screenshot cannot show, so this is how a claim about it is
     // made checkable.
     if (opts.soundTest) {
-        return dvk::audio::runSoundTest(kSoundDir);
+        return dvk::audio::runSoundTest(kSoundDir, kMusicDir);
     }
 
     // Every shipped asset, every run, before a window exists. A broken asset
@@ -382,7 +383,7 @@ int main(int argc, char** argv) {
         // assets/comm too: a transmission's voice track lives beside its
         // pictures rather than in assets/sounds, because which transmissions
         // exist is level content.
-        audio.init(kSoundDir, /*openDevice=*/true, kCommRoot);
+        audio.init(kSoundDir, /*openDevice=*/true, kCommRoot, kMusicDir);
     }
     audio.setMasterGain(settings.masterVolume);
     audio.setMuted(settings.muted);
@@ -950,6 +951,34 @@ int main(int argc, char** argv) {
             }
         }
 
+        const dvk::CommFrame commFrame = commPlayer.at(now);
+
+        // Adaptive music is presentation state, derived from the simulation
+        // rather than fed back into it. Awareness already carries the useful
+        // hysteresis: it snaps to one on contact and takes about three seconds
+        // to decay after the player breaks line of sight.
+        float combatMusic = 0.0f;
+        for (int i = 0; i < cur.robots.count; ++i) {
+            const dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(i)];
+            if (!robot.alive || robot.mode == dvk::sim::RobotMode::Disabled) continue;
+            combatMusic = std::max(combatMusic, robot.awareness);
+        }
+        if (cur.combat.player.hurtTimer > 0.0f ||
+            cur.game.phase == dvk::sim::GamePhase::Countdown) {
+            combatMusic = 1.0f;
+        }
+
+        const bool musicActive = session.mode() == dvk::AppMode::Playing ||
+                                 session.mode() == dvk::AppMode::Paused;
+        if (musicActive) {
+            // --comm is a fixed screenshot panel with no voice, not an actual
+            // transmission. Scripted comms duck both running music transports.
+            const bool commDucked = activeCommMessage >= 0 && commFrame.visible;
+            audio.setMusicState(combatMusic, settings.musicVolume, commDucked);
+        } else {
+            audio.stopMusic();
+        }
+
         if (runFinished) {
             const char* recordNote = "";
             if (recordsProgress) {
@@ -1034,7 +1063,6 @@ int main(int argc, char** argv) {
                 hud.targetFade = std::min(1.0f, cur.combat.player.targetHudTime / 0.5f);
             }
         }
-        const dvk::CommFrame commFrame = commPlayer.at(now);
         hud.commActive = commFrame.visible;
         hud.commFrame = commFrame.frame;
         hud.commAlpha = commFrame.alpha;

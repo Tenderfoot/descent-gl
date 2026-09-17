@@ -78,7 +78,7 @@ struct MenuButtonView {
 // list scrolls a window of that size around the selection.
 inline constexpr int kMaxLevelRows = 8;
 // The settings screen is currently the longest fixed menu.
-inline constexpr int kMaxMenuButtons = 11;
+inline constexpr int kMaxMenuButtons = 12;
 
 struct MenuView {
     MenuScreen screen = MenuScreen::Hidden;

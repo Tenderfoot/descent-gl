@@ -33,6 +33,7 @@ struct Bank {
     std::vector<Clip> clips;
     std::array<int, static_cast<size_t>(sim::Cue::Count)> cueClip{};
     std::array<int, static_cast<size_t>(Ambient::Count)> ambientClip{};
+    std::array<int, 2> musicClip{{-1, -1}};   // lull, combat
     int missing = 0;
 
     // A transmission's voice track, keyed by the comm clip it belongs to. Named
@@ -50,6 +51,10 @@ struct Bank {
     // Call after load(): it adds to the same bank, so a voice track costs the
     // mixer nothing it does not already do.
     void loadComm(const std::string& root);
+
+    // Loads the two long-form stereo tracks from assets/music. They join the
+    // same immutable bank as effects and comms before the mixer sees it.
+    void loadMusic(const std::string& root);
 
     // Loads from `dir` (assets/sounds). Missing or malformed files are warned
     // about and left as a silent cue; sound is never a reason the game will not
@@ -81,9 +86,10 @@ public:
     // no device at all.
     //
     // `commDir` is assets/comm, scanned for transmission voice tracks; empty
-    // skips that and every transmission plays silently.
+    // skips that and every transmission plays silently. `musicDir` contains
+    // the fixed lull and combat tracks; empty disables adaptive music.
     bool init(const std::string& soundDir, bool openDevice = true,
-              const std::string& commDir = "");
+              const std::string& commDir = "", const std::string& musicDir = "");
     void shutdown();
 
     bool deviceOpen() const { return deviceOpen_; }
@@ -119,6 +125,12 @@ public:
     void playComm(int clip, float gain = 1.0f);
     void stopComm();
 
+    // Both music transports run together. `combat` is 0 for the lull and 1
+    // for combat; intermediate values use an equal-power crossfade. A comm
+    // ducks the shared music bus without changing effects or the voice itself.
+    void setMusicState(float combat, float volume, bool commDucked);
+    void stopMusic();
+
     void setMasterGain(float gain);
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }
 
@@ -150,6 +162,10 @@ private:
     bool deviceOpen_ = false;
     bool muted_ = false;
     float unmutedGain_ = 0.8f;
+    bool musicRunning_ = false;
+    bool musicDucked_ = false;
+    float musicCombat_ = 0.0f;
+    float musicVolume_ = 0.45f;
     uint32_t rng_ = 0x9e3779b9u;
     std::array<uint32_t, static_cast<size_t>(sim::Cue::Count)> played_{};
     uint32_t dropped_ = 0;

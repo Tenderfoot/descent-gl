@@ -11,6 +11,7 @@ inline constexpr float kMaxVerticalFov = 120.0f;
 
 struct PlayerSettings {
     float masterVolume = 0.8f;
+    float musicVolume = 0.45f;
     float mouseSensitivity = 1.0f;
     float firstPersonFov = 70.0f;
     float thirdPersonFov = 70.0f;

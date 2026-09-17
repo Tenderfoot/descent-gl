@@ -34,8 +34,9 @@ constexpr std::array<ButtonDefinition, 2> kSummaryButtons{{
     {MenuAction::MainMenu, "main menu"},
 }};
 
-constexpr std::array<ButtonDefinition, 11> kSettingsButtons{{
+constexpr std::array<ButtonDefinition, 12> kSettingsButtons{{
     {MenuAction::None, "master volume"},
+    {MenuAction::None, "music volume"},
     {MenuAction::None, "mouse sensitivity"},
     {MenuAction::None, "1st person fov"},
     {MenuAction::None, "3rd person fov"},
@@ -159,7 +160,7 @@ void PlayerMenu::showControls() {
 
 void PlayerMenu::closeControls() {
     screen_ = MenuScreen::Settings;
-    selection_ = 6;
+    selection_ = 9;
     capturingBinding_ = false;
 }
 
@@ -202,23 +203,28 @@ void PlayerMenu::adjustSetting(int index, int direction) {
                            0.0f, 1.0f);
             break;
         case 1:
+            editedSettings_.musicVolume =
+                std::clamp(editedSettings_.musicVolume + static_cast<float>(direction) * 0.05f,
+                           0.0f, 1.0f);
+            break;
+        case 2:
             editedSettings_.mouseSensitivity =
                 std::clamp(editedSettings_.mouseSensitivity + static_cast<float>(direction) * 0.1f,
                            0.2f, 3.0f);
             break;
-        case 2:
+        case 3:
             editedSettings_.firstPersonFov =
                 std::clamp(editedSettings_.firstPersonFov + static_cast<float>(direction) * 5.0f,
                            kMinVerticalFov, kMaxVerticalFov);
             break;
-        case 3:
+        case 4:
             editedSettings_.thirdPersonFov =
                 std::clamp(editedSettings_.thirdPersonFov + static_cast<float>(direction) * 5.0f,
                            kMinVerticalFov, kMaxVerticalFov);
             break;
-        case 4: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
-        case 5: editedSettings_.fullscreen = !editedSettings_.fullscreen; break;
-        case 6: {
+        case 5: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
+        case 6: editedSettings_.fullscreen = !editedSettings_.fullscreen; break;
+        case 7: {
             int closest = 0;
             int closestDistance = 1 << 30;
             for (int i = 0; i < static_cast<int>(kWindowSizes.size()); ++i) {
@@ -236,7 +242,7 @@ void PlayerMenu::adjustSetting(int index, int direction) {
             editedSettings_.windowHeight = kWindowSizes[static_cast<size_t>(closest)].second;
             break;
         }
-        case 7: editedSettings_.vsync = !editedSettings_.vsync; break;
+        case 8: editedSettings_.vsync = !editedSettings_.vsync; break;
         default: break;
     }
 }
@@ -274,7 +280,7 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     if (input.previous) cursor = (cursor + count - 1) % count;
     if (input.next) cursor = (cursor + 1) % count;
 
-    if (screen_ == MenuScreen::Settings && selection_ < 8) {
+    if (screen_ == MenuScreen::Settings && selection_ < 9) {
         if (input.decrease) adjustSetting(selection_, -1);
         if (input.increase) adjustSetting(selection_, 1);
     }
@@ -295,7 +301,7 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
                 }
                 return MenuAction::None;
             }
-            if (screen_ == MenuScreen::Settings && i < 8) {
+            if (screen_ == MenuScreen::Settings && i < 9) {
                 adjustSetting(i, 1);
                 return MenuAction::None;
             }
@@ -318,7 +324,7 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
             }
             return MenuAction::None;
         }
-        if (screen_ == MenuScreen::Settings && selection_ < 8) {
+        if (screen_ == MenuScreen::Settings && selection_ < 9) {
             adjustSetting(selection_, 1);
             return MenuAction::None;
         }
@@ -529,30 +535,34 @@ MenuView PlayerMenu::view(int width, int height) const {
                               static_cast<int>(std::round(editedSettings_.masterVolume * 100.0f)));
                 break;
             case 1:
+                std::snprintf(button.value.data(), button.value.size(), "%d%%",
+                              static_cast<int>(std::round(editedSettings_.musicVolume * 100.0f)));
+                break;
+            case 2:
                 std::snprintf(button.value.data(), button.value.size(), "%.1fx",
                               editedSettings_.mouseSensitivity);
                 break;
-            case 2:
+            case 3:
                 std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
                               editedSettings_.firstPersonFov);
                 break;
-            case 3:
+            case 4:
                 std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
                               editedSettings_.thirdPersonFov);
                 break;
-            case 4:
+            case 5:
                 std::snprintf(button.value.data(), button.value.size(), "%s",
                               editedSettings_.invertMouseY ? "on" : "off");
                 break;
-            case 5:
+            case 6:
                 std::snprintf(button.value.data(), button.value.size(), "%s",
                               editedSettings_.fullscreen ? "on" : "off");
                 break;
-            case 6:
+            case 7:
                 std::snprintf(button.value.data(), button.value.size(), "%d x %d",
                               editedSettings_.windowWidth, editedSettings_.windowHeight);
                 break;
-            case 7:
+            case 8:
                 std::snprintf(button.value.data(), button.value.size(), "%s",
                               editedSettings_.vsync ? "on" : "off");
                 break;
