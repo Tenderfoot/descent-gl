@@ -13,7 +13,7 @@ import * as THREE from 'three';
 
 import { SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
 import { lampPosition } from './entities.js';
-import { lightSegments, sideCorners } from './geometry.js';
+import { lightSegments, portalFaces, portalFacing, sideCorners } from './geometry.js';
 
 // Flat, distinguishable, and nothing like the game's palette on purpose: this
 // is a diagram of a mine, and reading it as a screenshot would be a mistake.
@@ -215,34 +215,44 @@ export class LevelView {
 
     // Each portal once, from the lower-numbered segment, so the two sides do
     // not z-fight. A portal carrying a door is drawn in the door colour.
+    //
+    // The quads are pickable, and are the only way a portal can be: a portal
+    // has no wall triangles, so a ray aimed at one used to pass straight
+    // through the opening and hit the far wall of the next room. Each mesh
+    // carries the same per-triangle record buildWalls() builds, so a hit
+    // resolves to a side without searching.
     buildPortals(level) {
-        const portal = [];
-        const door = [];
+        const buckets = {
+            portals: { positions: [], faces: [] },
+            doors: { positions: [], faces: [] },
+        };
 
-        for (let si = 0; si < level.segments.length; ++si) {
-            for (let side = 0; side < SIDE_COUNT; ++side) {
-                const sd = level.segments[si].sides[side];
-                if (sd.neighbour < 0 || sd.neighbour < si) continue;
-                const c = sideCorners(level, si, side);
-                const target = sd.door >= 0 ? door : portal;
-                for (const [a, b, d] of [[0, 1, 2], [0, 2, 3]]) {
-                    for (const k of [a, b, d]) target.push(c[k][0], c[k][1], c[k][2]);
+        for (const face of portalFaces(level)) {
+            const bucket = face.door >= 0 ? buckets.doors : buckets.portals;
+            for (const [a, b, d] of [[0, 1, 2], [0, 2, 3]]) {
+                for (const k of [a, b, d]) {
+                    bucket.positions.push(face.corners[k][0], face.corners[k][1], face.corners[k][2]);
                 }
+                bucket.faces.push(face);
             }
         }
 
-        for (const [name, data, color, opacity] of [
-            ['portals', portal, PORTAL_COLOR, 0.16],
-            ['doors', door, DOOR_COLOR, 0.45],
+        for (const [name, color, opacity] of [
+            ['portals', PORTAL_COLOR, 0.16],
+            ['doors', DOOR_COLOR, 0.45],
         ]) {
-            if (data.length === 0) continue;
+            const bucket = buckets[name];
+            if (bucket.positions.length === 0) continue;
             const geometry = this.track(new THREE.BufferGeometry());
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(data, 3));
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
             geometry.computeVertexNormals();
             const material = this.track(new THREE.MeshBasicMaterial({
                 color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
             }));
-            this.groups[name].add(new THREE.Mesh(geometry, material));
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.name = name;
+            mesh.userData.faces = bucket.faces;
+            this.groups[name].add(mesh);
         }
     }
 
@@ -503,14 +513,37 @@ export class LevelView {
         return light ? lightSegments(this.level, light) : [];
     }
 
-    // Which wall a click landed on: raycast the wall meshes and read the
+    // Which side a click landed on: raycast the meshes and read the
     // per-triangle record built with them. Returns { segment, side } or null.
-    pickFace(raycaster) {
-        for (const hit of raycaster.intersectObjects(this.groups.walls.children, false)) {
-            const faces = hit.object.userData.faces;
-            if (faces && hit.faceIndex !== undefined && faces[hit.faceIndex]) {
-                return { ...faces[hit.faceIndex] };
+    //
+    // Portals are included only where a face is what the click is for - side
+    // and entity mode - because in segment mode a click through a doorway
+    // means the room beyond it, which is how double-click flies from room to
+    // room. A hidden group is not pickable: unticking Portals in Show is how
+    // an author reaches a wall that a portal quad is in front of.
+    pickFace(raycaster, { portals = false } = {}) {
+        const meshes = [...this.groups.walls.children];
+        if (portals) {
+            for (const name of ['portals', 'doors']) {
+                if (this.groups[name].visible) meshes.push(...this.groups[name].children);
             }
+        }
+
+        // intersectObjects sorts by distance across every mesh, so the first
+        // hit carrying a record is the nearest side along the ray.
+        for (const hit of raycaster.intersectObjects(meshes, false)) {
+            const faces = hit.object.userData.faces;
+            const face = hit.faceIndex !== undefined ? faces?.[hit.faceIndex] : undefined;
+            if (!face) continue;
+            // A portal is a side of two segments; a wall is a side of one.
+            // geometry.js speaks plain arrays and knows nothing about three.js,
+            // so the ray direction is unpacked rather than handed over: a
+            // Vector3 indexed as an array is three undefineds and a NaN, and a
+            // NaN comparison silently picks the wrong end of every portal.
+            const { x, y, z } = raycaster.ray.direction;
+            return face.neighbour === undefined
+                ? { segment: face.segment, side: face.side }
+                : portalFacing(face, [x, y, z]);
         }
         return null;
     }

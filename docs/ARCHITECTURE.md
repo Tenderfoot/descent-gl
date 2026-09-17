@@ -213,7 +213,40 @@ order, omits fields sitting at their default, and formats numbers the way the
 files do — floats with a `.0`, indices bare. It also fixes two things
 `saveLevel` gets wrong: it **preserves `comment`**, which `saveLevel` drops (so
 the prose atop `mine01.json` survives a save), and it **writes a light's
-`segment`** rather than making the loader search for it again.
+`segment`** rather than making the loader search for it again. It also **omits
+a side's `door`**, which `saveLevel` writes: that field is derived, `loadLevel`
+rewires every side from the `doors` array whatever the file holds, and a second
+copy of the door graph in the file is only something for the two to disagree
+about.
+
+### Picking a portal
+
+A portal is not a surface. `splitSides()` emits triangles only for sides with
+no neighbour, so a portal has no geometry in the game and none in the editor
+either — the translucent quad in the viewport is drawn from the side's four
+corners and is the whole of it. That quad is what a click has to resolve
+against, and until it carried a per-triangle record the way the wall meshes do,
+a ray aimed at a doorway passed through the opening and selected the far wall
+of the next room. Every portal tool was therefore unreachable by clicking: a
+door goes on a portal, and so does Split portal.
+
+`portalFaces()` in `geometry.js` is the description that was missing, and it
+carries **both** ends of each portal, because a portal is a side of two
+segments and a click has to name one of them. `portalFacing()` picks the end
+the click came from, by the sign of the look direction against the face normal
+— the same convention as `sd.normal`, which points into the segment that owns
+the side. Both are in `geometry.js` rather than `view.js` so that the part that
+can be wrong is testable under node with no browser: `tests/portals.mjs`.
+
+Segment mode still clicks straight through a portal to the room beyond, which
+is what makes double-click fly from room to room, so portals are pickable only
+in the two modes where a *face* is what the click is for.
+
+Resolving doors at load belongs to the same fix. `loadLevel` wires `sides[].door`
+from the `doors` array on both ends of each portal (`level.cpp`), and the
+editor's `parseLevel` did not — a gap with no symptom while portals could not
+be clicked, and a duplicate door the moment they could, because a portal whose
+door the editor could not see is a portal it offers to add a door to.
 
 ### The server, and Verify
 

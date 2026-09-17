@@ -514,7 +514,7 @@ function renderTools() {
             return hint(app.joinFrom
                 ? `Join from segment ${app.joinFrom.segment} ${SIDE_NAMES[app.joinFrom.side]} — ` +
                   'now click the wall to join it to.'
-                : 'Click a wall.');
+                : 'Click a wall or a portal.');
         }
         const { segment, side } = selection;
         const sd = app.level.segments[segment].sides[side];
@@ -1063,7 +1063,10 @@ renderer.domElement.addEventListener('click', (e) => {
     }
 
     if (app.mode === 'side' || app.mode === 'entity') {
-        const face = view.pickFace(raycaster);
+        // Portals count here and nowhere else: a door goes on one, Split
+        // portal acts on one, and neither is reachable if a click passes
+        // through the opening to the wall behind it.
+        const face = view.pickFace(raycaster, { portals: true });
         // In entity mode a wall click is how a door gets placed and how the
         // "place into segment N" target is chosen, so it does both.
         if (face && app.mode === 'entity') app.lastSegment = face.segment;
