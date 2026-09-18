@@ -139,59 +139,79 @@ export function extrudeSide(level, si, side, depth = null) {
 // geometry. What it does is make them the same *indices*: every reference to
 // one segment's four corner vertices is rewritten to the other's, so the two
 // segments genuinely share them and the seam cannot leak.
-export function joinSides(level, aSeg, aSide, bSeg, bSide, tolerance = 0.05) {
-    if (aSeg === bSeg) throw new Error('a segment cannot open into itself');
-    for (const [si, side] of [[aSeg, aSide], [bSeg, bSide]]) {
-        if (level.segments[si].sides[side].neighbour >= 0) {
-            throw new Error(`segment ${si} side ${SIDE_NAMES[side]} is already a portal`);
-        }
-    }
+// src/ops.js
 
-    const a = level.segments[aSeg];
-    const b = level.segments[bSeg];
+export function joinSides(level, s1, side1, s2, side2, tolerance = 1.0) {
+  const seg1 = level.segments[s1];
+  const seg2 = level.segments[s2];
 
-    // Pair each of A's corners with the nearest of B's, then insist the
-    // pairing is a bijection. Nearest-match alone would happily map two of A's
-    // corners onto one of B's for a face that is merely close, and the result
-    // would be a level that validates and is geometrically nonsense.
-    const pairs = new Map();
-    for (const cornerA of SIDE_VERTICES[aSide]) {
-        const pa = level.vertices[a.verts[cornerA]];
-        let best = -1;
-        let bestDistance = Infinity;
-        for (const cornerB of SIDE_VERTICES[bSide]) {
-            const d = distance(pa, level.vertices[b.verts[cornerB]]);
-            if (d < bestDistance) { bestDistance = d; best = cornerB; }
-        }
-        if (bestDistance > tolerance) {
-            throw new Error(
-                `these sides are not in the same place: a corner of segment ${aSeg} ` +
-                `${SIDE_NAMES[aSide]} is ${bestDistance.toFixed(3)} from the nearest corner of ` +
-                `segment ${bSeg} ${SIDE_NAMES[bSide]}`);
-        }
-        pairs.set(cornerA, best);
-    }
-    if (new Set(pairs.values()).size !== 4) {
-        throw new Error('these sides do not line up corner for corner - two of them pair with ' +
-                        'the same vertex, so the join would fold the face');
-    }
+  if (seg1.sides[side1].neighbour >= 0 || seg2.sides[side2].neighbour >= 0) {
+    throw new Error('one or both sides are already portals');
+  }
 
-    // Rewrite B's four vertex indices to A's, everywhere in the level. Doing
-    // it globally rather than on segment B alone is the point: any other
-    // segment already sharing one of B's corners has to follow it.
-    const rewrite = new Map();
-    for (const [cornerA, cornerB] of pairs) {
-        rewrite.set(b.verts[cornerB], a.verts[cornerA]);
-    }
-    for (const seg of level.segments) {
-        seg.verts = seg.verts.map((v) => (rewrite.has(v) ? rewrite.get(v) : v));
-    }
+  // Get corner indices for both sides in winding order
+  const corners1 = SIDE_VERTICES[side1].map((c) => seg1.verts[c]);
+  const corners2 = SIDE_VERTICES[side2].map((c) => seg2.verts[c]);
 
-    a.sides[aSide] = { neighbour: bSeg, door: -1, texture: 0, uv: null };
-    b.sides[bSide] = { neighbour: aSeg, door: -1, texture: 0, uv: null };
+  // Find which rotation/alignment of corners2 minimizes total distance to corners1
+  let bestShift = 0;
+  let bestReverse = false;
+  let minTotalDist = Infinity;
 
-    compactVertices(level);
-    rebuildDerived(level);
+  const getPos2 = (idx) => level.vertices[corners2[idx]];
+
+  for (const reverse of [false, true]) {
+    for (let shift = 0; shift < 4; ++shift) {
+      let totalDist = 0;
+      for (let i = 0; i < 4; ++i) {
+        const j = reverse ? (4 - i + shift) % 4 : (i + shift) % 4;
+        totalDist += distance(level.vertices[corners1[i]], getPos2(j));
+      }
+      if (totalDist < minTotalDist) {
+        minTotalDist = totalDist;
+        bestShift = shift;
+        bestReverse = reverse;
+      }
+    }
+  }
+
+  // Build the corner mapping from seg1 corners to seg2 corners
+  const mappedCorners2 = [0, 1, 2, 3].map((i) => {
+    const j = bestReverse ? (4 - i + bestShift) % 4 : (i + bestShift) % 4;
+    return corners2[j];
+  });
+
+  // Verify each corresponding pair is within the tolerance
+  for (let i = 0; i < 4; ++i) {
+    const v1 = corners1[i];
+    const v2 = mappedCorners2[i];
+    const d = distance(level.vertices[v1], level.vertices[v2]);
+
+    if (d > tolerance) {
+      throw new Error(`these sides are not in the same place: a corner is ${d.toFixed(3)} units away`);
+    }
+  }
+
+  // Rewrite segment 2's vertex slots so they point directly to segment 1's vertex indices
+  for (let i = 0; i < 4; ++i) {
+    const v1 = corners1[i];
+    const v2 = mappedCorners2[i];
+
+    // Find where v2 was used in seg2 and point it at v1 instead
+    for (let slot = 0; slot < 8; ++slot) {
+      if (seg2.verts[slot] === v2) {
+        seg2.verts[slot] = v1;
+      }
+    }
+  }
+
+  // Set the reciprocal portals
+  seg1.sides[side1].neighbour = s2;
+  seg2.sides[side2].neighbour = s1;
+
+  // Clean up unused orphaned vertices and update internal stats
+  compactVertices(level);
+  rebuildDerived(level);
 }
 
 // --- delete ----------------------------------------------------------------
