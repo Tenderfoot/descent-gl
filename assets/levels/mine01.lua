@@ -3,7 +3,7 @@ message {
   clip = "intro",
   speaker = "???",
   text = "...Shit!",
-  seconds = 5.5,
+  seconds = 5.0,
 }
 
 message {

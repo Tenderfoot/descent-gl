@@ -1,6 +1,7 @@
 {
   "name": "MineEntrance",
   "comment": "Created in the level editor. One room; grow the rest with extrude.",
+  "script": "MineEntrance.lua",
   "vertices": [
     [
       0.0,
