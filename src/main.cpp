@@ -507,6 +507,11 @@ int main(int argc, char** argv) {
     // them. Reset whenever the soundtrack stops, so the next level's readout
     // starts at the left rather than wherever the last one had got to.
     float musicMarqueeTime = 0.0f;
+    // The skip key's name for the HUD hint, formatted into a buffer that
+    // outlives the frame rather than into a string built in the draw path.
+    // Refilled every frame because the binding can change under the player in
+    // the settings menu without the level ever being left.
+    char musicNextKeyLabel[32] = {};
     // Allocation instrumentation. The first frames are exempt: pools and
     // vectors reserve on their way to steady state, and counting that warm-up
     // would report a leak that is really a start-up cost.
@@ -751,6 +756,17 @@ int main(int argc, char** argv) {
         if (!bindingCaptureActive && session.mode() == dvk::AppMode::Playing &&
             dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::Automap)) {
             automap.open = !automap.open;
+        }
+        if (!bindingCaptureActive &&
+            dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::NextTrack)) {
+            // Which playlist to move is whichever one the player is hearing,
+            // and mid-crossfade both of them are: there is no one answer, so
+            // the key does nothing until the fade has landed. The same test
+            // the HUD reads, so the hint is absent exactly when the key is.
+            const float mix = audio.musicMix();
+            if (audio.musicPlaying() && (mix <= 0.0f || mix >= 1.0f)) {
+                audio.nextMusicTrack(mix >= 1.0f ? 1 : 0);
+            }
         }
         if (!bindingCaptureActive &&
             dvk::bindingPressed(input, settings.bindings, dvk::PlayerAction::Mute)) {
@@ -1124,10 +1140,14 @@ int main(int argc, char** argv) {
         // the readout is for.
         const dvk::MusicReadout musicHud =
             dvk::musicReadout(audio.musicMix(), audio.musicPlaying(),
-                              audio.musicName(0).c_str(), audio.musicName(1).c_str());
+                              audio.musicTrackName(0).c_str(),
+                              audio.musicTrackName(1).c_str());
+        dvk::formatInputBinding(settings.bindings[dvk::PlayerAction::NextTrack],
+                                musicNextKeyLabel, sizeof(musicNextKeyLabel));
         hud.musicShow = musicHud.show;
         hud.musicTransitioning = musicHud.transitioning;
         hud.musicTrack = musicHud.text;
+        hud.musicNextKey = musicNextKeyLabel;
         hud.musicTime = musicMarqueeTime;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.

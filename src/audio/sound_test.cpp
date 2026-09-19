@@ -88,13 +88,19 @@ int runSoundTest(const std::string& soundDir, const std::string& musicDir) {
     audio.init(soundDir, /*openDevice=*/false, /*commDir=*/"", musicDir);
     const Bank& bank = audio.bank();
 
-    for (int clipIndex : bank.musicClip) {
-        if (clipIndex < 0 || static_cast<size_t>(clipIndex) >= bank.clips.size()) {
-            fail("an adaptive music track did not load");
+    for (int side = 0; side < 2; ++side) {
+        if (bank.music(side).empty()) {
+            fail("a soundtrack playlist loaded no tracks at all");
             continue;
         }
-        if (bank.clips[static_cast<size_t>(clipIndex)].channels != 2) {
-            fail("an adaptive music track was not retained as stereo");
+        for (const MusicTrack& track : bank.music(side)) {
+            if (track.clip < 0 || static_cast<size_t>(track.clip) >= bank.clips.size()) {
+                fail("an adaptive music track did not load");
+                continue;
+            }
+            if (bank.clips[static_cast<size_t>(track.clip)].channels != 2) {
+                fail("an adaptive music track was not retained as stereo");
+            }
         }
     }
 

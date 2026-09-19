@@ -1,9 +1,12 @@
 #include "audio/audio.h"
 
 #include <filesystem>
+#include <fstream>
 
 #include "audio/device.h"
 #include "core/log.h"
+
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -70,10 +73,83 @@ constexpr std::array<const char*, static_cast<size_t>(Ambient::Count)> kAmbientF
     "",             // MusicCombat - supplied by Bank::loadMusic
 }};
 
-constexpr std::array<const char*, 2> kMusicFiles{{
+// What the playlists hold when music.json is missing or unreadable: the two
+// tracks the game shipped with, one a side. A mine with no soundtrack would be
+// a strange way to report a typo in a config file.
+constexpr std::array<const char*, 2> kMusicFallback{{
     "Sub-Bass Drones.wav",
     "Mechanical Devastation.wav",
 }};
+
+// The playlist file, beside the tracks it lists.
+constexpr const char* kMusicPlaylist = "music.json";
+
+// The two keys in it, in the order the crossfade runs between them.
+constexpr std::array<const char*, 2> kMusicSides{{"lull", "combat"}};
+
+// One side of the playlist as it was authored, before any of it is decoded.
+struct PlaylistEntry {
+    std::string file;
+    std::string name;   // empty to take the name from the filename
+};
+
+// Reads one side out of the parsed json. An entry is either a filename or an
+// object with `file` and an optional `name`; anything else in the array is
+// skipped with a warning rather than taken as a reason to abandon the level's
+// music.
+std::vector<PlaylistEntry> readPlaylistSide(const nlohmann::json& source, const char* key) {
+    std::vector<PlaylistEntry> entries;
+    const auto side = source.find(key);
+    if (side == source.end() || !side->is_array()) return entries;
+
+    for (const nlohmann::json& entry : *side) {
+        if (entry.is_string()) {
+            entries.push_back({entry.get<std::string>(), ""});
+            continue;
+        }
+        if (entry.is_object()) {
+            const auto file = entry.find("file");
+            if (file != entry.end() && file->is_string()) {
+                PlaylistEntry parsed;
+                parsed.file = file->get<std::string>();
+                const auto name = entry.find("name");
+                if (name != entry.end() && name->is_string()) parsed.name = name->get<std::string>();
+                entries.push_back(std::move(parsed));
+                continue;
+            }
+        }
+        log::warn("sound: a '{}' playlist entry is neither a filename nor a file object", key);
+    }
+    return entries;
+}
+
+// Both sides of the playlist, from music.json in `root`. Falls back to the
+// shipped pair when the file is absent, will not parse, or names nothing at
+// all, so the only way to end up with no soundtrack is to ask for one.
+std::array<std::vector<PlaylistEntry>, 2> readPlaylist(const std::string& root) {
+    std::array<std::vector<PlaylistEntry>, 2> sides;
+    const std::filesystem::path path = std::filesystem::path(root) / kMusicPlaylist;
+
+    std::ifstream file(path);
+    if (file) {
+        try {
+            const nlohmann::json source = nlohmann::json::parse(file);
+            for (size_t i = 0; i < kMusicSides.size(); ++i) {
+                sides[i] = readPlaylistSide(source, kMusicSides[i]);
+            }
+        } catch (const nlohmann::json::exception& error) {
+            log::warn("sound: '{}' would not parse: {}", path.string(), error.what());
+        }
+    }
+
+    if (sides[0].empty() && sides[1].empty()) {
+        for (size_t i = 0; i < kMusicFallback.size(); ++i) {
+            sides[i].push_back({kMusicFallback[i], ""});
+        }
+        log::info("sound: no playlist at '{}', using the two shipped tracks", path.string());
+    }
+    return sides;
+}
 
 } // namespace
 
@@ -115,36 +191,50 @@ void Bank::loadComm(const std::string& root) {
     log::info("sound: {} transmission voice track(s) from '{}'", commNames.size(), root);
 }
 
+const std::vector<MusicTrack>& Bank::music(int side) const {
+    static const std::vector<MusicTrack> none;
+    return side == 0 || side == 1 ? musicTracks[static_cast<size_t>(side)] : none;
+}
+
 void Bank::loadMusic(const std::string& root) {
-    musicClip.fill(-1);
-    for (std::string& name : musicNames) name.clear();
-    int loaded = 0;
-    for (size_t i = 0; i < kMusicFiles.size(); ++i) {
-        const std::filesystem::path path = std::filesystem::path(root) / kMusicFiles[i];
-        Clip clip = loadWav(path.string());
-        if (!clip.valid()) {
-            ++missing;
-            continue;
+    for (std::vector<MusicTrack>& side : musicTracks) side.clear();
+
+    const std::array<std::vector<PlaylistEntry>, 2> playlist = readPlaylist(root);
+    for (size_t i = 0; i < playlist.size(); ++i) {
+        for (const PlaylistEntry& entry : playlist[i]) {
+            const std::filesystem::path path = std::filesystem::path(root) / entry.file;
+            Clip clip = loadWav(path.string());
+            if (!clip.valid()) {
+                ++missing;
+                continue;
+            }
+            resample(clip, kSampleRate);
+            clips.push_back(std::move(clip));
+            // A track only joins the playlist once its samples are in the
+            // bank, so a name on screen is always a name of something
+            // audible and an index into the list is always playable.
+            MusicTrack track;
+            track.clip = static_cast<int>(clips.size() - 1);
+            track.name = entry.name.empty() ? path.stem().string() : entry.name;
+            musicTracks[i].push_back(std::move(track));
         }
-        resample(clip, kSampleRate);
-        clips.push_back(std::move(clip));
-        musicClip[i] = static_cast<int>(clips.size() - 1);
-        // The name only exists once the track behind it does, so a readout
-        // that has a name is always a readout of something audible.
-        musicNames[i] = path.stem().string();
+        // The channel's resting clip, for the generic ambient path. The
+        // adaptive one names its clip in every command, so this only matters
+        // to a caller that reaches for setAmbient directly.
         const Ambient channel = i == 0 ? Ambient::MusicLull : Ambient::MusicCombat;
-        ambientClip[static_cast<size_t>(channel)] = musicClip[i];
-        ++loaded;
+        ambientClip[static_cast<size_t>(channel)] =
+            musicTracks[i].empty() ? -1 : musicTracks[i].front().clip;
     }
-    log::info("sound: {} adaptive music track(s) from '{}'", loaded, root);
+
+    log::info("sound: {} lull and {} combat track(s) from '{}'", musicTracks[0].size(),
+              musicTracks[1].size(), root);
 }
 
 void Bank::load(const std::string& dir) {
     clips.clear();
     cueClip.fill(-1);
     ambientClip.fill(-1);
-    musicClip.fill(-1);
-    for (std::string& name : musicNames) name.clear();
+    for (std::vector<MusicTrack>& side : musicTracks) side.clear();
     missing = 0;
 
     // Decode each distinct filename once, then point every cue that named it at
@@ -331,6 +421,29 @@ void Audio::stopComm() {
     playComm(-1, 0.0f);
 }
 
+const std::string& Audio::musicTrackName(int side) const {
+    static const std::string none;
+    const std::vector<MusicTrack>& tracks = bank_.music(side);
+    if (tracks.empty()) return none;
+    const size_t index = static_cast<size_t>(musicTrackIndex_[static_cast<size_t>(side)]) %
+                         tracks.size();
+    return tracks[index].name;
+}
+
+bool Audio::nextMusicTrack(int side) {
+    if (side != 0 && side != 1) return false;
+    const size_t which = static_cast<size_t>(side);
+    const std::vector<MusicTrack>& tracks = bank_.music(side);
+    // One track is not a playlist, and a skip already diving is not worth
+    // interrupting: the second press would restart the dip from wherever the
+    // first had got to and the player would hear the music hesitate.
+    if (tracks.size() < 2 || musicPendingTrack_[which] >= 0) return false;
+
+    musicPendingTrack_[which] =
+        static_cast<int>((static_cast<size_t>(musicTrackIndex_[which]) + 1) % tracks.size());
+    return true;
+}
+
 void Audio::setMusicState(float combat, float volume, bool commDucked, float dt) {
     // Two seconds each way. The transition reads as one crossfade rather than
     // as two different gestures, and the soundtrack takes the same time to
@@ -340,6 +453,11 @@ void Audio::setMusicState(float combat, float volume, bool commDucked, float dt)
     constexpr float kDuckGain = 0.22f;
     constexpr float kDuckAttack = 0.12f;
     constexpr float kDuckRelease = 0.70f;
+    // The skip: down fast, because the track being left is the one the player
+    // has asked to stop hearing, and back up more slowly so the new one
+    // arrives rather than appears.
+    constexpr float kSwapOut = 0.15f;
+    constexpr float kSwapIn = 0.30f;
 
     combat = std::clamp(combat, 0.0f, 1.0f);
     volume = std::clamp(volume, 0.0f, 1.0f);
@@ -370,11 +488,31 @@ void Audio::setMusicState(float combat, float volume, bool commDucked, float dt)
     constexpr std::array<Ambient, 2> channels{{Ambient::MusicLull, Ambient::MusicCombat}};
 
     for (size_t i = 0; i < channels.size(); ++i) {
+        // The skip envelope, walked the same way and on the same clock as the
+        // crossfade above. The track index only moves at the bottom, where the
+        // channel is silent, so the mixer's restart-from-the-top is inaudible
+        // rather than a click in the middle of a waveform.
+        if (musicPendingTrack_[i] >= 0) {
+            musicSwapGain_[i] = approach(musicSwapGain_[i], 0.0f, dt / kSwapOut);
+            if (musicSwapGain_[i] <= 0.0f) {
+                musicTrackIndex_[i] = musicPendingTrack_[i];
+                musicPendingTrack_[i] = -1;
+            }
+        } else if (musicSwapGain_[i] < 1.0f) {
+            musicSwapGain_[i] = approach(musicSwapGain_[i], 1.0f, dt / kSwapIn);
+        }
+
+        const std::vector<MusicTrack>& tracks = bank_.music(static_cast<int>(i));
+        const int clip =
+            tracks.empty()
+                ? -1
+                : tracks[static_cast<size_t>(musicTrackIndex_[i]) % tracks.size()].clip;
+
         Command command;
         command.kind = Command::Kind::SetAmbient;
         command.ambient = static_cast<uint8_t>(channels[i]);
-        command.clip = bank_.musicClip[i];
-        command.gain = gains[i];
+        command.clip = clip;
+        command.gain = gains[i] * musicSwapGain_[i];
         command.positional = false;
         command.loop = true;
         command.keepAliveAtZero = true;
@@ -404,6 +542,12 @@ void Audio::stopMusic() {
     musicRunning_ = false;
     musicCombatMix_ = 0.0f;
     musicDuck_ = 1.0f;
+    // A skip that was still diving when the music stopped has nothing left to
+    // dive for, so the envelope is put back rather than resumed into a level
+    // the player is no longer in. Which track each side had reached is kept:
+    // the player chose it, and a level boundary is no reason to undo that.
+    musicSwapGain_.fill(1.0f);
+    musicPendingTrack_.fill(-1);
 }
 
 void Audio::setMuted(bool muted) {

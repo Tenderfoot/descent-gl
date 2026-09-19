@@ -49,6 +49,7 @@ constexpr std::array<ActionDefinition, kPlayerActionCount> kActions{{
     {"cycleSecondary", "cycle missile", key(GLFW_KEY_G)},
     {"chaseCamera", "chase camera", key(GLFW_KEY_F1)},
     {"mute", "mute", key(GLFW_KEY_M)},
+    {"nextTrack", "next track", key(GLFW_KEY_N)},
     {"pause", "pause", key(GLFW_KEY_ESCAPE)},
 }};
 
