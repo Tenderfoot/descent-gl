@@ -133,6 +133,19 @@ struct HudData {
     glm::vec3 aimPoint{0.0f};
     bool hasAimPoint = false;
 
+    // The soundtrack, as a small marquee. The renderer is handed the finished
+    // string and never builds one: `musicTrack` points at storage the audio
+    // bank owns for its lifetime, or at a literal, so a name too long for the
+    // plate costs no allocation in the draw path.
+    //
+    // `musicTime` is the marquee's own clock in seconds, and runs on real time
+    // rather than on the simulation's: the transports keep playing through a
+    // pause, so the scroll does too.
+    bool musicShow = false;
+    bool musicTransitioning = false;
+    const char* musicTrack = "";
+    float musicTime = 0.0f;
+
     // The ship is under the disabled threshold and the player has no control of
     // it. Held rather than fading, because unlike the flinch it is a state and
     // not an event: the edges stay red and pulsing until something changes.

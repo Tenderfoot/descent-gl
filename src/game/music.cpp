@@ -50,6 +50,23 @@ float MusicDirector::update(float awareness, bool forced, float dt) {
     return inCombat || grace > 0.0f ? 1.0f : 0.0f;
 }
 
+MusicReadout musicReadout(float mix, bool playing, const char* lullName,
+                          const char* combatName) {
+    MusicReadout readout;
+    if (!playing) return readout;
+
+    if (mix <= 0.0f) {
+        readout.text = lullName ? lullName : "";
+    } else if (mix >= 1.0f) {
+        readout.text = combatName ? combatName : "";
+    } else {
+        readout.text = "transitioning";
+        readout.transitioning = true;
+    }
+    readout.show = readout.text[0] != '\0';
+    return readout;
+}
+
 int runMusicTest() {
     bool ok = true;
     constexpr float kStep = 1.0f / 120.0f;

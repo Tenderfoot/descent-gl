@@ -117,6 +117,7 @@ void Bank::loadComm(const std::string& root) {
 
 void Bank::loadMusic(const std::string& root) {
     musicClip.fill(-1);
+    for (std::string& name : musicNames) name.clear();
     int loaded = 0;
     for (size_t i = 0; i < kMusicFiles.size(); ++i) {
         const std::filesystem::path path = std::filesystem::path(root) / kMusicFiles[i];
@@ -128,6 +129,9 @@ void Bank::loadMusic(const std::string& root) {
         resample(clip, kSampleRate);
         clips.push_back(std::move(clip));
         musicClip[i] = static_cast<int>(clips.size() - 1);
+        // The name only exists once the track behind it does, so a readout
+        // that has a name is always a readout of something audible.
+        musicNames[i] = path.stem().string();
         const Ambient channel = i == 0 ? Ambient::MusicLull : Ambient::MusicCombat;
         ambientClip[static_cast<size_t>(channel)] = musicClip[i];
         ++loaded;
@@ -140,6 +144,7 @@ void Bank::load(const std::string& dir) {
     cueClip.fill(-1);
     ambientClip.fill(-1);
     musicClip.fill(-1);
+    for (std::string& name : musicNames) name.clear();
     missing = 0;
 
     // Decode each distinct filename once, then point every cue that named it at
