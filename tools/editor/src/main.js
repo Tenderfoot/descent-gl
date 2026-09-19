@@ -19,6 +19,7 @@ import {
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkName, newLevel } from './create.js';
+import { generateMine } from './generate.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
@@ -1437,9 +1438,15 @@ $('new-level').addEventListener('click', guard(async () => {
     const complaint = checkName(name, levels);
     if (complaint) throw new Error(complaint);
 
-    // Write it before loading it, so "New" and "open an existing level" are the
-    // same path from here on and the file exists for Verify to run against.
-    const level = newLevel(name);
+    // Written before it is loaded, so "New" and "open an existing level" are
+    // the same path from here on and the file exists for Verify to run against.
+    await createAndOpen(name, newLevel(name), `created ${name} — one room; grow it with Extrude`);
+}));
+
+// Writes a level to assets/levels/ and opens it, which is the tail every way
+// of making a level shares. New and Generate both go through it so that from
+// the moment a level exists, nothing downstream knows how it was made.
+async function createAndOpen(name, level, note) {
     const response = await fetch(`/api/levels/${encodeURIComponent(name)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1454,7 +1461,59 @@ $('new-level').addEventListener('click', guard(async () => {
     $('level-select').value = name;
     setMode('side');
     selectSegment(0);
-    status(`created ${name} — one room; grow it with Extrude`, 'ok');
+    status(note, 'ok');
+}
+
+const generateDialog = $('generate-dialog');
+
+$('generate-level').addEventListener('click', guard(() => {
+    if (app.level && app.history.isDirty(app.level) &&
+        !window.confirm(`${app.name} has unsaved changes. Discard them?`)) return;
+    generateDialog.showModal();
+}));
+
+$('gen-cancel').addEventListener('click', () => generateDialog.close());
+
+$('generate-form').addEventListener('submit', guard(async (e) => {
+    // The dialog closes itself on submit; stop that until the roll has either
+    // produced a mine or explained why it could not, so a failure is readable
+    // with the settings that caused it still on screen.
+    e.preventDefault();
+
+    const name = $('gen-name').value.trim();
+    const { levels } = await listLevels();
+    const complaint = checkName(name, levels);
+    if (complaint) throw new Error(complaint);
+
+    const go = $('gen-go');
+    go.disabled = true;
+    status(`generating ${name}…`);
+    try {
+        // Synchronous and in the browser: a roll is milliseconds, and the
+        // re-roll loop inside is what makes "it validates" true before the
+        // file exists rather than after.
+        const { level, report } = generateMine(name, {
+            rooms: Number($('gen-rooms').value),
+            loops: Number($('gen-loops').value),
+            keys: Number($('gen-keys').value),
+            robots: Number($('gen-robots').value),
+            rockFraction: Number($('gen-rock').value),
+            roughness: Number($('gen-rough').value),
+            litRock: Number($('gen-lit').value),
+            seed: Number($('gen-seed').value),
+        });
+
+        generateDialog.close();
+        // The seed is reported rather than echoed: when the first roll is
+        // rejected the mine that got written is a later one, and the number
+        // worth keeping is the one that produced THIS mine.
+        const rolls = report.attempts === 1 ? 'first roll' : `${report.attempts} rolls`;
+        await createAndOpen(name, level,
+            `${name}: ${report.rooms} rooms, ${report.loopsClosed} ways round, ` +
+            `${report.doors} locked door(s), ${report.robots} robots — seed ${report.seed} (${rolls})`);
+    } finally {
+        go.disabled = false;
+    }
 }));
 
 $('level-select').addEventListener('change', guard((e) => loadLevel(e.target.value)));

@@ -60,6 +60,37 @@ the room is not simply black. Everything else is grown from it with Extrude.
 It is deliberately not a template with rooms in it. A starter level that
 guesses at a layout is a layout the author has to delete first.
 
+**Generate…** grows a whole mine instead: rooms, the ways round between them,
+lights, robots, a key chain, a reactor and the way out. It exists because the
+shipped content is one complete level and seven fragments, and "another mine to
+fly" should not cost an evening of extruding.
+
+It drives the same `extrudeSide` and `joinSides` the buttons do, so a generated
+mine is built the way a hand-built one is and there is no second definition of
+what a level is. Three things it settles by construction rather than by luck:
+
+- **Ways round are exact.** Rooms are grown on a lattice, and a room placed
+  where it touches one existing room keeps the graph a tree while one placed
+  touching two adds exactly one cycle. So the setting is a count, not a hope.
+- **Every key can be reached before the door it opens.** Locked doors sit on
+  edges of the spanning tree, which split it in two exactly, so "before this
+  door" is a set rather than a guess. Locking a way round would prove nothing —
+  you could go round.
+- **Rock and built are different shapes, not just different tiles.** Built
+  stretches stay on the lattice and take the panel and grate tiles; rock
+  stretches are pushed out of true and take the rock tile. A vertex moves only
+  when every room sharing it is rock, so the boundary between a corridor and a
+  cave stays square on the corridor's side.
+
+Each roll is checked against the editor's own validator and thrown away if it
+objects, so the file that lands has already passed the rules the game's loader
+enforces. **Verify** afterwards runs the game itself, which is the only thing
+that can judge the rest.
+
+The seed a roll reports is the one that produced the mine you are looking at —
+when earlier rolls were rejected it is not the number you typed. Type it back
+in to get the same mine on the first roll.
+
 **Top** (or `T`) is the automap's view — straight down, orthographic, rotation
 locked. It is the view that makes "this corridor doubles back over that room"
 obvious, which is why the game's automap uses it.
@@ -213,6 +244,7 @@ one keystroke away.
 | `src/ops.js` | extrude, join, delete and the rest of the structural edits |
 | `src/entities.js` | lights, robots, pickups, doors, the exit, the start, the moving lights |
 | `src/create.js` | the starter level, and what a level may be called |
+| `src/generate.js` | growing a whole mine, and the re-roll loop that checks it |
 | `src/obj.js` | just enough OBJ to draw the shipped models |
 | `src/history.js` | undo and redo, by snapshot |
 | `src/transform.js` | the group transform, as plain arrays so it needs no three.js |
@@ -225,6 +257,7 @@ one keystroke away.
 | `tests/portals.mjs` | what a click on a portal resolves to |
 | `tests/create.mjs` | the starter level, and that it can be grown |
 | `tests/transform.mjs` | transforming more than one thing at once |
+| `tests/generate.mjs` | the generator's promises: a seed repeats, the counts are exact, the keys come first |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
 ## Verification
@@ -299,6 +332,28 @@ one an author needs:
 
 Only "cannot load" counts against the headline. The full output is one click
 away underneath.
+
+### Three shapes a generated mine must not have
+
+Found by generating mines and running the game over them, and all three pass
+every structural rule while being wrong:
+
+- **Two rooms meeting only along an edge.** Diagonal neighbours with nothing
+  between them are not two rooms with rock between them — their four walls all
+  run into one line, and the surface has four triangles on an edge that may
+  only have two. `deleteSegment` carries the same warning for the same shape.
+- **A ring of rooms around an empty cell.** That is a doughnut, so the wall
+  surface is a torus and `--world-test` rejects it: Euler characteristic 0, not
+  2. A way round made of a *filled* square of four rooms is the same graph
+  cycle with no handle, and passes. `FigureEight` and `MineEntrance` both ring
+  something and both fail this check today.
+- **A room that is a perfect cube.** Its centre sits exactly on the diagonal
+  through four of its edges and both corner diagonals, and the game's raycast
+  uses Möller–Trumbore with no edge slack — deliberately, so a wall never
+  over-reports. A ray down that diagonal can miss every triangle at the corner
+  and report a ray leaving a closed mine. Neither hand-built level contains a
+  perfect cube; a generator emitting nothing else tripped it on the first ray.
+  The generator's lattice pitch is `20 x 17 x 23` for this reason alone.
 
 ### Three checks the game does not make
 
