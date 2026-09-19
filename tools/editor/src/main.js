@@ -18,8 +18,8 @@ import {
     KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
 } from './format.js';
 import { ModelCache } from './obj.js';
-import { checkName, newLevel } from './create.js';
-import { generateMine } from './generate.js';
+import { checkLevelName, checkName, newLevel } from './create.js';
+import { GENERATED_MARK, generateMine } from './generate.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
@@ -1474,6 +1474,35 @@ $('generate-level').addEventListener('click', guard(() => {
 
 $('gen-cancel').addEventListener('click', () => generateDialog.close());
 
+// Is the author content to lose what is already under this name?
+//
+// Asked at all because re-rolling is what Generate... is for: refusing an
+// existing name, which is right for New..., made the second roll of a session
+// impossible. Asked HARDER when the level was not itself a roll, because the
+// name field is one typo away from `mine01` and there is no undo across a
+// file write. Every generated mine carries `GENERATED_MARK` in its comment, so
+// "a previous roll" and "something somebody built" are distinguishable rather
+// than assumed.
+async function confirmReplace(name) {
+    let generated = false;
+    try {
+        const response = await fetch(`/api/levels/${encodeURIComponent(name)}`);
+        if (response.ok) {
+            const existing = await response.json();
+            generated = (existing.comment ?? '').startsWith(GENERATED_MARK);
+        }
+    } catch {
+        // Unreadable is not evidence that it is disposable. Ask the careful
+        // question instead of the casual one.
+    }
+
+    if (generated) return window.confirm(`Replace ${name} with a new roll?`);
+    return window.confirm(
+        `${name} was not made by the generator - it looks hand-built.\n\n` +
+        `Generating will replace the whole level, and nothing here can undo a ` +
+        `file that has been written.\n\nReplace ${name}?`);
+}
+
 $('generate-form').addEventListener('submit', guard(async (e) => {
     // The dialog closes itself on submit; stop that until the roll has either
     // produced a mine or explained why it could not, so a failure is readable
@@ -1481,9 +1510,13 @@ $('generate-form').addEventListener('submit', guard(async (e) => {
     e.preventDefault();
 
     const name = $('gen-name').value.trim();
-    const { levels } = await listLevels();
-    const complaint = checkName(name, levels);
+    const complaint = checkLevelName(name);
     if (complaint) throw new Error(complaint);
+
+    // The name being taken is a question here, not a refusal.
+    const { levels } = await listLevels();
+    const replacing = levels.includes(name);
+    if (replacing && !(await confirmReplace(name))) return;
 
     const go = $('gen-go');
     go.disabled = true;
@@ -1503,14 +1536,26 @@ $('generate-form').addEventListener('submit', guard(async (e) => {
             seed: Number($('gen-seed').value),
         });
 
-        generateDialog.close();
         // The seed is reported rather than echoed: when the first roll is
         // rejected the mine that got written is a later one, and the number
         // worth keeping is the one that produced THIS mine.
+        //
+        // Left in the dialog rather than only in the status line, which the
+        // next message overwrites - roll something good, roll again, and the
+        // number that would bring it back is otherwise gone. Deliberately NOT
+        // written into the seed field: that would make the next roll reproduce
+        // this mine instead of finding a new one.
+        const last = $('gen-last');
+        last.textContent = `last roll: seed ${report.seed} — ${report.rooms} rooms, ` +
+                           `${report.loopsClosed} ways round`;
+        last.hidden = false;
+
+        generateDialog.close();
         const rolls = report.attempts === 1 ? 'first roll' : `${report.attempts} rolls`;
         await createAndOpen(name, level,
-            `${name}: ${report.rooms} rooms, ${report.loopsClosed} ways round, ` +
-            `${report.doors} locked door(s), ${report.robots} robots — seed ${report.seed} (${rolls})`);
+            `${replacing ? 'replaced' : 'generated'} ${name}: ${report.rooms} rooms, ` +
+            `${report.loopsClosed} ways round, ${report.doors} locked door(s), ` +
+            `${report.robots} robots — seed ${report.seed} (${rolls})`);
     } finally {
         go.disabled = false;
     }
