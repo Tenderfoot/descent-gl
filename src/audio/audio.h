@@ -34,6 +34,12 @@ struct Bank {
     std::array<int, static_cast<size_t>(sim::Cue::Count)> cueClip{};
     std::array<int, static_cast<size_t>(Ambient::Count)> ambientClip{};
     std::array<int, 2> musicClip{{-1, -1}};   // lull, combat
+    // What those two tracks are called, in the same order, for the HUD to
+    // show. The filename with its extension taken off: the files are the
+    // authoring, so naming them anywhere else would be a second place to keep
+    // in step. Empty for a track that did not load, which is how a caller
+    // tells the difference between silence and a nameless track.
+    std::array<std::string, 2> musicNames{};
     int missing = 0;
 
     // A transmission's voice track, keyed by the comm clip it belongs to. Named
@@ -136,6 +142,27 @@ public:
     // the voice itself.
     void setMusicState(float combat, float volume, bool commDucked, float dt);
     void stopMusic();
+
+    // Where the crossfade actually is, rather than where the game last asked
+    // it to go: 0 is the lull alone, 1 is combat alone, and anything between
+    // is both tracks audible at once. The walk towards the target is clamped
+    // rather than exponential, so the ends are reached exactly and a caller
+    // can compare against them without an epsilon.
+    float musicMix() const { return musicCombatMix_; }
+    // Whether there is a soundtrack running at all. False before the first
+    // setMusicState, after stopMusic, and when neither track loaded - which
+    // includes a build with no assets/music, where the transports would
+    // otherwise be running on nothing.
+    bool musicPlaying() const {
+        return musicRunning_ && (bank_.musicClip[0] >= 0 || bank_.musicClip[1] >= 0);
+    }
+    // The lull track's name, then the combat one's. Empty for a track that did
+    // not load. Stable for the lifetime of the bank, so a per-frame caller can
+    // hold the pointer rather than copying the string.
+    const std::string& musicName(int index) const {
+        static const std::string none;
+        return index == 0 || index == 1 ? bank_.musicNames[static_cast<size_t>(index)] : none;
+    }
 
     void setMasterGain(float gain);
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }

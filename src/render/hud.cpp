@@ -2,7 +2,9 @@
 
 #include "render/font.h"
 
+#include <algorithm>
 #include <glm/vec2.hpp>
+#include <limits>
 
 namespace dvk::gl {
 
@@ -89,12 +91,29 @@ void Hud::logo(float x, float y, float w, float h, const glm::vec4& color) {
     vertices_.insert(vertices_.end(), {a, b, c, a, c, d});
 }
 
-void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color) {
+void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color,
+                float clipLeft, float clipRight) {
     float u0 = 0.0f, v0 = 0.0f, u1 = 0.0f, v1 = 0.0f;
     if (!font::glyphUv(c, u0, v0, u1, v1)) return;
 
-    const float w = static_cast<float>(font::kGlyphW) * scale;
+    float w = static_cast<float>(font::kGlyphW) * scale;
     const float h = static_cast<float>(font::kGlyphH) * scale;
+
+    // Trim against the window, taking the same fraction off the UVs as off the
+    // quad so the letter is cut rather than squashed. An empty remainder means
+    // the glyph is entirely outside and costs no vertices at all.
+    if (clipLeft > x) {
+        const float cut = std::min(clipLeft - x, w);
+        u0 += (u1 - u0) * (cut / w);
+        x += cut;
+        w -= cut;
+    }
+    if (clipRight < x + w) {
+        const float cut = std::min(x + w - clipRight, w);
+        u1 -= (u1 - u0) * (cut / w);
+        w -= cut;
+    }
+    if (w <= 0.0f) return;
 
     // y grows downward here, which is the same direction v does in the atlas,
     // so the glyph's top row lands on the quad's top edge with no flip.
@@ -111,10 +130,25 @@ void Hud::glyph(char c, float x, float y, float scale, const glm::vec4& color) {
 }
 
 void Hud::text(std::string_view text, float x, float y, float scale, const glm::vec4& color) {
+    // No window, so nothing is ever cut: the whole float range stands in for
+    // one, and the trimming above is skipped on every glyph.
+    textClipped(text, x, y, scale, color, -std::numeric_limits<float>::max(),
+                std::numeric_limits<float>::max());
+}
+
+void Hud::textClipped(std::string_view text, float x, float y, float scale,
+                      const glm::vec4& color, float clipLeft, float clipRight) {
+    if (clipRight <= clipLeft) return;
+    const float advance = static_cast<float>(font::kAdvance) * scale;
     float cursor = x;
     for (char c : text) {
-        glyph(font::upper(c), cursor, y, scale, color);
-        cursor += static_cast<float>(font::kAdvance) * scale;
+        // A run scrolled well past the window is the common case for a
+        // marquee, and it should not walk every glyph to find that out.
+        if (cursor >= clipRight) break;
+        if (cursor + advance > clipLeft) {
+            glyph(font::upper(c), cursor, y, scale, color, clipLeft, clipRight);
+        }
+        cursor += advance;
     }
 }
 

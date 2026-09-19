@@ -38,6 +38,13 @@ public:
     // comm frame. Same trick for selecting it - a UV band no other quad uses.
     void logo(float x, float y, float w, float h, const glm::vec4& color);
     void text(std::string_view text, float x, float y, float scale, const glm::vec4& color);
+    // The same, with everything outside [clipLeft, clipRight) cut away. A
+    // glyph straddling an edge is trimmed rather than dropped, so a string
+    // scrolling through a window slides instead of stepping a character at a
+    // time. Everything the HUD draws shares one draw call, so this is done to
+    // the quads rather than with a scissor.
+    void textClipped(std::string_view text, float x, float y, float scale,
+                     const glm::vec4& color, float clipLeft, float clipRight);
     float textWidth(std::string_view text, float scale) const;
 
     void upload();
@@ -52,7 +59,8 @@ private:
         glm::vec4 color;
     };
 
-    void glyph(char c, float x, float y, float scale, const glm::vec4& color);
+    void glyph(char c, float x, float y, float scale, const glm::vec4& color,
+               float clipLeft, float clipRight);
 
     std::vector<Vertex> vertices_;
     GLuint vao_ = 0, vbo_ = 0, font_ = 0;

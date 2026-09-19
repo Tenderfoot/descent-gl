@@ -502,6 +502,11 @@ int main(int argc, char** argv) {
     // fight being over is a thing that has to last: see where it is updated
     // below.
     dvk::MusicDirector musicDirector;
+    // The HUD marquee's own clock. Real time rather than simulation time: the
+    // transports keep playing through a pause, so the scroll keeps moving with
+    // them. Reset whenever the soundtrack stops, so the next level's readout
+    // starts at the left rather than wherever the last one had got to.
+    float musicMarqueeTime = 0.0f;
     // Allocation instrumentation. The first frames are exempt: pools and
     // vectors reserve on their way to steady state, and counting that warm-up
     // would report a leak that is really a start-up cost.
@@ -1010,8 +1015,10 @@ int main(int argc, char** argv) {
             // transmission. Scripted comms duck both running music transports.
             const bool commDucked = activeCommMessage >= 0 && commFrame.visible;
             audio.setMusicState(combatTarget, settings.musicVolume, commDucked, musicDelta);
+            musicMarqueeTime += static_cast<float>(elapsed);
         } else {
             audio.stopMusic();
+            musicMarqueeTime = 0.0f;
             // The next level starts its own fight. Carrying a grace across the
             // gap would open it mid-crossfade out of a mine nobody is in.
             musicDirector = dvk::MusicDirector{};
@@ -1111,6 +1118,17 @@ int main(int argc, char** argv) {
             hud.commSpeaker = message->speaker.c_str();
             hud.commText = message->text.c_str();
         }
+        // Read off the crossfade rather than off the director's target: for the
+        // two seconds between them the target has already changed and both
+        // tracks are still audible, which is exactly what the middle state of
+        // the readout is for.
+        const dvk::MusicReadout musicHud =
+            dvk::musicReadout(audio.musicMix(), audio.musicPlaying(),
+                              audio.musicName(0).c_str(), audio.musicName(1).c_str());
+        hud.musicShow = musicHud.show;
+        hud.musicTransitioning = musicHud.transitioning;
+        hud.musicTrack = musicHud.text;
+        hud.musicTime = musicMarqueeTime;
         hud.damageFlash = cur.combat.player.hurtTimer / dvk::sim::kHurtFlashTime;
         // Only the scene draws a firing line; the automap has its own camera.
         hud.aimPoint = rs.shipPos + shipForward * aimDistance;

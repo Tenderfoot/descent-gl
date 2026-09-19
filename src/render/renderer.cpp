@@ -864,6 +864,56 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         hud_.text(flares, w - left - fw, h - 8.0f * s - 27.0f * s, s * 0.7f, dim);
     }
 
+    // The soundtrack, bottom centre, between the two corners the bars and the
+    // loadout already hold. A marquee because the plate has to be small - this
+    // is the least important thing on the HUD and must not compete with the
+    // gauges - and a track's name will not always fit in something that small.
+    if (hud.musicShow) {
+        const float plateW = std::min(w * 0.30f, 74.0f * s);
+        const float plateH = 10.0f * s;
+        const float x = cx - plateW * 0.5f;
+        const float y = h - 8.0f * s - plateH;
+        const float pad = 3.0f * s;
+        const float textScale = s * 0.7f;
+        const glm::vec4 accent(0.35f, 0.92f, 1.0f, 0.85f);
+        // The crossfade is a state and not a title, so it is coloured like the
+        // frame rather than like a name: the player can read which of the two
+        // they are looking at without reading the word.
+        const glm::vec4 ink = hud.musicTransitioning
+                                  ? accent
+                                  : glm::vec4(0.88f, 0.93f, 1.0f, 0.92f);
+
+        hud_.rect(x, y, plateW, plateH, glm::vec4(0.015f, 0.025f, 0.04f, 0.72f));
+        hud_.rect(x, y, plateW, std::max(1.0f, 0.8f * s),
+                  glm::vec4(accent.r, accent.g, accent.b, 0.55f));
+
+        const std::string_view track(hud.musicTrack ? hud.musicTrack : "");
+        const float windowLeft = x + pad;
+        const float windowRight = x + plateW - pad;
+        const float windowW = windowRight - windowLeft;
+        const float trackW = hud_.textWidth(track, textScale);
+        const float textY = y + plateH * 0.5f - static_cast<float>(font::kGlyphH) * textScale * 0.5f;
+
+        if (trackW <= windowW) {
+            // It fits, so it holds still. A name scrolling for no reason reads
+            // as an animation rather than as a readout.
+            hud_.textClipped(track, windowLeft + (windowW - trackW) * 0.5f, textY, textScale,
+                             ink, windowLeft, windowRight);
+        } else {
+            // One period is the name plus the gap that separates its tail from
+            // its head, and it is drawn twice a period apart so the wrap is a
+            // continuous slide rather than a jump back to the left.
+            const float gap = 8.0f * static_cast<float>(font::kAdvance) * textScale;
+            const float period = trackW + gap;
+            const float speed = 14.0f * s;
+            const float offset = std::fmod(std::max(hud.musicTime, 0.0f) * speed, period);
+            hud_.textClipped(track, windowLeft - offset, textY, textScale, ink, windowLeft,
+                             windowRight);
+            hud_.textClipped(track, windowLeft - offset + period, textY, textScale, ink,
+                             windowLeft, windowRight);
+        }
+    }
+
     // Keys, top right: lit when held, a dark outline when not, so their
     // absence is as readable as their presence.
     {
