@@ -2381,10 +2381,10 @@ of full combat music. The hold is frozen while the game is paused, a pause not
 being five seconds of not fighting.
 
 `Audio::setMusicState` takes that value as a target rather than a level and
-holds the envelope that walks towards it: about 1.5 seconds into combat and
-about 4 seconds back out, so the two tracks cross rather than swap. The
-envelope is linear and is stepped by the frame delta the caller passes, which
-is zero while paused. Its position feeds an equal-power pair - the lull at
+holds the envelope that walks towards it: two seconds into combat and two
+seconds back out, so the two tracks cross rather than swap. The envelope is
+linear and is stepped by the frame delta the caller passes, which is zero
+while paused. Its position feeds an equal-power pair - the lull at
 `cos(k*pi/2)` and combat at `sin(k*pi/2)` - so the two are at about 0.71 each
 halfway through and the crossfade has no hole in the middle. A level that opens
 in combat opens in combat: the first call after the music starts snaps rather
@@ -2393,7 +2393,7 @@ than fading in from a lull the player was never in.
 The envelope is deliberately not the mixer's own gain glide. That glide is a
 one-pole, which only ever approaches its target, and the voice's glide is
 overwritten by every following command - and this state is re-sent every frame,
-so a four second music fade used to become the anti-zipper default one frame in
+so a multi-second music fade used to become the anti-zipper default one frame in
 and read as an instant switch. The mixer is now asked only to keep a frame's
 step from clicking.
 
