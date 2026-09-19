@@ -19,8 +19,8 @@ using sim::Cue;
 //
 // Linear rather than the exponential glide the mixer uses for its own
 // smoothing: a fade with a stated length should be finished when that length
-// is up, and a one-pole only ever gets close to its target. Four seconds of
-// "nearly silent" is still four seconds of the wrong track.
+// is up, and a one-pole only ever gets close to its target. Two seconds of
+// "nearly silent" is still two seconds of the wrong track.
 float approach(float value, float target, float step) {
     if (value < target) return std::min(target, value + step);
     return std::max(target, value - step);
@@ -327,12 +327,11 @@ void Audio::stopComm() {
 }
 
 void Audio::setMusicState(float combat, float volume, bool commDucked, float dt) {
-    // Rising into combat is quicker than falling out of it. The mine noticing
-    // the player is an event; the player having survived it is not, and
-    // hurrying that half of the transition is what makes a soundtrack sound
-    // like it is switching tracks rather than easing off.
-    constexpr float kCombatFadeIn = 1.50f;
-    constexpr float kCombatFadeOut = 4.00f;
+    // Two seconds each way. The transition reads as one crossfade rather than
+    // as two different gestures, and the soundtrack takes the same time to
+    // notice a fight as it does to let one go.
+    constexpr float kCombatFadeIn = 2.00f;
+    constexpr float kCombatFadeOut = 2.00f;
     constexpr float kDuckGain = 0.22f;
     constexpr float kDuckAttack = 0.12f;
     constexpr float kDuckRelease = 0.70f;
@@ -378,7 +377,7 @@ void Audio::setMusicState(float combat, float volume, bool commDucked, float dt)
         // keep a frame's step from clicking. Asking it for a long glide as
         // well would be two smoothers fighting over the same gain - and its
         // own is overwritten every frame by the next command anyway, which is
-        // what used to collapse a four second fade into the anti-zipper
+        // what used to collapse a multi-second fade into the anti-zipper
         // default one frame in.
         command.gainGlideSeconds = 0.0f;
         mixer_.push(command);

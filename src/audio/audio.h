@@ -128,12 +128,12 @@ public:
     // Both music transports run together. `combat` is the state the music is
     // heading for: 0 for the lull and 1 for combat, with intermediate values
     // crossfaded at equal power. It is a target rather than a level, because
-    // this holds the envelope that walks towards it - entering combat over
-    // about a second and a half, leaving it over about four, so neither track
-    // arrives or departs on a single frame. `dt` advances that envelope; pass
-    // zero to freeze it, which is what a paused game does. A comm ducks the
-    // shared music bus on its own envelope, over the top of the crossfade and
-    // without touching effects or the voice itself.
+    // this holds the envelope that walks towards it - two seconds into combat
+    // and two seconds back out, so neither track arrives or departs on a
+    // single frame. `dt` advances that envelope; pass zero to freeze it, which
+    // is what a paused game does. A comm ducks the shared music bus on its own
+    // envelope, over the top of the crossfade and without touching effects or
+    // the voice itself.
     void setMusicState(float combat, float volume, bool commDucked, float dt);
     void stopMusic();
 

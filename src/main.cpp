@@ -14,6 +14,7 @@
 #include "game/collision_test.h"
 #include "game/light_test.h"
 #include "game/loop_test.h"
+#include "game/music.h"
 #include "game/progress.h"
 #include "game/robots_test.h"
 #include "game/comm_player.h"
@@ -119,6 +120,7 @@ int main(int argc, char** argv) {
 
     if (opts.settingsTest) return dvk::runSettingsTest();
     if (opts.progressTest) return dvk::runProgressTest();
+    if (opts.musicTest) return dvk::runMusicTest();
     if (opts.commTest) {
         const int clip = dvk::gl::runCommTest(kCommRoot);
         const int player = dvk::runCommPlayerTest();
@@ -491,11 +493,10 @@ int main(int argc, char** argv) {
     // How far down the firing line the reticle is drawn. Held across frames
     // because it is chased rather than set: see where it is updated below.
     float aimDistance = dvk::kDefaultAimDistance;
-    // The combat soundtrack's cooldown, and the level it is holding at. Held
-    // across frames because the fight being over is a thing that has to last:
-    // see where they are updated below.
-    float combatHold = 0.0f;
-    float heldCombatMusic = 0.0f;
+    // Whether the soundtrack is in combat. Held across frames because the
+    // fight being over is a thing that has to last: see where it is updated
+    // below.
+    dvk::MusicDirector musicDirector;
     // Allocation instrumentation. The first frames are exempt: pools and
     // vectors reserve on their way to steady state, and counting that warm-up
     // would report a leak that is really a start-up cost.
@@ -961,44 +962,23 @@ int main(int argc, char** argv) {
         // Adaptive music is presentation state, derived from the simulation
         // rather than fed back into it. Awareness already carries the useful
         // hysteresis: it snaps to one on contact and takes about three seconds
-        // to decay after the player breaks line of sight.
-        float combatMusic = 0.0f;
+        // to decay after the player breaks line of sight, which is exactly as
+        // long as the soundtrack should go on believing there is a fight.
+        float combatAwareness = 0.0f;
         for (int i = 0; i < cur.robots.count; ++i) {
             const dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(i)];
             if (!robot.alive || robot.mode == dvk::sim::RobotMode::Disabled) continue;
-            combatMusic = std::max(combatMusic, robot.awareness);
+            combatAwareness = std::max(combatAwareness, robot.awareness);
         }
-        if (cur.combat.player.hurtTimer > 0.0f ||
-            cur.game.phase == dvk::sim::GamePhase::Countdown) {
-            combatMusic = 1.0f;
-        }
+        const bool forcedCombat = cur.combat.player.hurtTimer > 0.0f ||
+                                  cur.game.phase == dvk::sim::GamePhase::Countdown;
 
-        // Awareness dies with the robot holding it, so on its own the last
-        // kill drops the soundtrack on the frame the explosion starts. The
-        // fight is over when it has been over for a while: any combat above
-        // the entry threshold refreshes a five second hold, and the crossfade
-        // back to the lull only starts once that has run out undisturbed. A
-        // robot waking up inside the window resets it without a transition
-        // ever having begun.
-        //
-        // The hold sits at the level combat actually reached rather than at
-        // one, so a robot that half noticed the player does not buy five
-        // seconds of full combat music. The countdown keeps refreshing it by
-        // forcing combat above, which is how the music stays up to the exit.
-        constexpr float kCombatEnter = 0.5f;
-        constexpr float kCombatHoldSeconds = 5.0f;
-        // Frozen while paused: a pause is not five seconds of not fighting,
-        // and this is the same delta the envelopes inside setMusicState run
-        // on, so the crossfade stops with it.
+        // Frozen while paused: a pause is not the fight being over, and this is
+        // the same delta the envelopes inside setMusicState run on, so the
+        // crossfade stops with it.
         const float musicDelta =
             session.mode() == dvk::AppMode::Playing ? static_cast<float>(elapsed) : 0.0f;
-        if (combatMusic >= kCombatEnter) {
-            combatHold = kCombatHoldSeconds;
-            heldCombatMusic = combatMusic;
-        } else {
-            combatHold = std::max(0.0f, combatHold - musicDelta);
-            if (combatHold <= 0.0f) heldCombatMusic = 0.0f;
-        }
+        const float combatTarget = musicDirector.update(combatAwareness, forcedCombat, musicDelta);
 
         const bool musicActive = session.mode() == dvk::AppMode::Playing ||
                                  session.mode() == dvk::AppMode::Paused;
@@ -1006,9 +986,12 @@ int main(int argc, char** argv) {
             // --comm is a fixed screenshot panel with no voice, not an actual
             // transmission. Scripted comms duck both running music transports.
             const bool commDucked = activeCommMessage >= 0 && commFrame.visible;
-            audio.setMusicState(heldCombatMusic, settings.musicVolume, commDucked, musicDelta);
+            audio.setMusicState(combatTarget, settings.musicVolume, commDucked, musicDelta);
         } else {
             audio.stopMusic();
+            // The next level starts its own fight. Carrying a grace across the
+            // gap would open it mid-crossfade out of a mine nobody is in.
+            musicDirector = dvk::MusicDirector{};
         }
 
         if (runFinished) {

@@ -126,6 +126,7 @@ struct Options {
     bool settingsMenu = false;
     bool controlsMenu = false;
     bool progressTest = false;
+    bool musicTest = false;
     std::string progressPath;
     std::string settingsPath;
     int width = 1600;
