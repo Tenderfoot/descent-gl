@@ -71,10 +71,14 @@ public:
     void drain(sim::GameState& game);
 
     const sim::TriggerSet& triggers() const { return triggers_; }
+    const sim::TimerSet& timers() const { return timers_; }
     const std::vector<ScriptMessage>& messages() const { return messages_; }
     const ScriptLoadout& loadout() const { return loadout_; }
     const ScriptMessage* message(int index) const;
     int takeMessage();
+    // The shields a callback asked for this frame, or negative if none did.
+    // Read once and cleared, exactly like takeMessage().
+    float takeShields();
     bool loaded() const { return state_ != nullptr; }
     int callbackErrors() const { return callbackErrors_; }
 
@@ -89,7 +93,9 @@ private:
     static int declareMessage(lua_State* state);
     static int declareLoadout(lua_State* state);
     static int declareTrigger(lua_State* state);
+    static int declareTimer(lua_State* state);
     static int startComm(lua_State* state);
+    static int setShields(lua_State* state);
 
     static ScriptHost* self(lua_State* state);
     int findMessage(const char* id) const;
@@ -100,10 +106,13 @@ private:
     const Level* level_ = nullptr;
     bool draining_ = false;
     int requestedMessage_ = -1;
+    float requestedShields_ = -1.0f;
     ScriptLoadout loadout_;
     bool loadoutDeclared_ = false;
     sim::TriggerSet triggers_;
+    sim::TimerSet timers_;
     std::array<int, sim::kMaxTriggers> callbacks_{};
+    std::array<int, sim::kMaxTimers> timerCallbacks_{};
     std::vector<ScriptMessage> messages_;
     int callbackErrors_ = 0;
 };

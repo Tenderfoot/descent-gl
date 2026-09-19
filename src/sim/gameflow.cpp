@@ -82,12 +82,15 @@ void initGame(const Level& level, const RobotState& robots, GameState& out) {
 
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events, const TriggerSet* triggers) {
+              EventQueue* events, const TriggerSet* triggers, const TimerSet* timers) {
     if (state.phase == GamePhase::Won || state.phase == GamePhase::Lost) return;
 
     state.elapsed += dt;
 
     stepTriggers(state.triggers, player, triggers);
+    // After the clock has been advanced, so a timer authored at zero fires on
+    // the level's first step rather than one step late.
+    stepTimers(state.timers, state.elapsed, timers);
 
     // --- what the player has found ---------------------------------------
     //

@@ -102,6 +102,9 @@ struct GameState {
 
     DoorField doorField;
     TriggerState triggers;
+    // The level's scripted clock. Here rather than in the script host so that
+    // a restart rewinds it with everything else and the intro plays again.
+    TimerState timers;
 };
 
 struct GameConfig {
@@ -119,7 +122,8 @@ void initGame(const Level& level, const RobotState& robots, GameState& out);
 // queue and may be null. See sim/events.h.
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events = nullptr, const TriggerSet* triggers = nullptr);
+              EventQueue* events = nullptr, const TriggerSet* triggers = nullptr,
+              const TimerSet* timers = nullptr);
 
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.

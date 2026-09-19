@@ -65,6 +65,7 @@ void expose(lua_State* state, ScriptHost* host, const char* name, lua_CFunction 
 
 ScriptHost::ScriptHost() {
     callbacks_.fill(LUA_NOREF);
+    timerCallbacks_.fill(LUA_NOREF);
 }
 
 ScriptHost::~ScriptHost() {
@@ -98,6 +99,7 @@ ScriptHost* ScriptHost::self(lua_State* state) {
 void ScriptHost::clear() {
     draining_ = false;
     requestedMessage_ = -1;
+    requestedShields_ = -1.0f;
     level_ = nullptr;
     if (state_) lua_close(state_);
     state_ = nullptr;
@@ -105,7 +107,9 @@ void ScriptHost::clear() {
     loadout_ = ScriptLoadout{};
     loadoutDeclared_ = false;
     triggers_ = sim::TriggerSet{};
+    timers_ = sim::TimerSet{};
     callbacks_.fill(LUA_NOREF);
+    timerCallbacks_.fill(LUA_NOREF);
     messages_.clear();
     callbackErrors_ = 0;
 }
@@ -140,7 +144,9 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "loadout", &ScriptHost::declareLoadout);
     expose(state_, this, "message", &ScriptHost::declareMessage);
     expose(state_, this, "trigger", &ScriptHost::declareTrigger);
+    expose(state_, this, "timer", &ScriptHost::declareTimer);
     expose(state_, this, "comm", &ScriptHost::startComm);
+    expose(state_, this, "set_shields", &ScriptHost::setShields);
 
     if (luaL_loadfile(state_, level.scriptPath.c_str()) != LUA_OK) {
         const char* error = lua_tostring(state_, -1);
@@ -156,8 +162,8 @@ void ScriptHost::load(const Level& level) {
                    error ? error : "unknown error");
     }
 
-    log::info("Lua script '{}': {} trigger(s), {} message(s)", level.scriptPath,
-              triggers_.count, messages_.size());
+    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} message(s)", level.scriptPath,
+              triggers_.count, timers_.count, messages_.size());
 }
 
 int ScriptHost::declareMessage(lua_State* state) {
@@ -288,6 +294,58 @@ int ScriptHost::declareTrigger(lua_State* state) {
     return 0;
 }
 
+int ScriptHost::declareTimer(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->timers_.count >= sim::kMaxTimers) {
+        return luaL_error(state, "level exceeds the limit of %d timers", sim::kMaxTimers);
+    }
+
+    sim::TimerEvent timer;
+    lua_getfield(state, 1, "at");
+    timer.at = static_cast<float>(luaL_checknumber(state, -1));
+    lua_pop(state, 1);
+    // The floor is not fussiness. A timer at zero would be due on the level's
+    // very first step, before the player has seen a frame, and a period of
+    // zero would make a repeating timer due again on every step forever.
+    if (!std::isfinite(timer.at) || timer.at < 0.05f || timer.at > 3600.0f) {
+        return luaL_error(state, "timer at must be finite and between 0.05 and 3600 seconds");
+    }
+
+    lua_getfield(state, 1, "once");
+    if (!lua_isnil(state, -1)) timer.once = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+
+    lua_getfield(state, 1, "on_fire");
+    if (!lua_isfunction(state, -1)) return luaL_error(state, "timer on_fire must be a function");
+    const int callback = luaL_ref(state, LUA_REGISTRYINDEX);
+
+    const int index = host->timers_.count++;
+    host->timers_.items[static_cast<size_t>(index)] = timer;
+    host->timerCallbacks_[static_cast<size_t>(index)] = callback;
+    return 0;
+}
+
+// Hands the ship back, or takes it away. The one thing a script can change
+// about the player mid-level, and the reason the intro can start the ship
+// disabled and repair it on a cue.
+//
+// Latched rather than written, for the same reason comm() is: Lua runs
+// outside the fixed step and must not reach into simulation state. Whoever
+// drains the callbacks reads this and applies it. See takeShields().
+int ScriptHost::setShields(lua_State* state) {
+    ScriptHost* host = self(state);
+    const double value = luaL_checknumber(state, 1);
+    if (!host->draining_) return luaL_error(state, "set_shields() is only valid inside a callback");
+    if (!std::isfinite(value) || value < 0.0 ||
+        value > static_cast<double>(sim::kPlayerMaxShields)) {
+        return luaL_error(state, "set_shields expects a value between zero and full shields");
+    }
+
+    host->requestedShields_ = static_cast<float>(value);
+    return 0;
+}
+
 int ScriptHost::startComm(lua_State* state) {
     ScriptHost* host = self(state);
     const char* id = luaL_checkstring(state, 1);
@@ -324,6 +382,7 @@ bool ScriptHost::call(int functionRef, const char* context) {
 void ScriptHost::drain(sim::GameState& game) {
     if (!state_) {
         game.triggers.clearPending();
+        game.timers.clearPending();
         return;
     }
 
@@ -338,8 +397,22 @@ void ScriptHost::drain(sim::GameState& game) {
             callback = LUA_NOREF;
         }
     }
+
+    // Timers after volumes, so that within one frame a place the player has
+    // just flown into is heard from before a moment that merely came round.
+    const int timerCount = game.timers.pendingCount;
+    for (int i = 0; i < timerCount; ++i) {
+        const int timer = game.timers.pending[static_cast<size_t>(i)];
+        int& callback = timerCallbacks_[static_cast<size_t>(timer)];
+        if (callback == LUA_NOREF) continue;
+        if (!call(callback, "timer callback")) {
+            luaL_unref(state_, LUA_REGISTRYINDEX, callback);
+            callback = LUA_NOREF;
+        }
+    }
     draining_ = false;
     game.triggers.clearPending();
+    game.timers.clearPending();
 }
 
 const ScriptMessage* ScriptHost::message(int index) const {
@@ -351,6 +424,12 @@ int ScriptHost::takeMessage() {
     const int message = requestedMessage_;
     requestedMessage_ = -1;
     return message;
+}
+
+float ScriptHost::takeShields() {
+    const float shields = requestedShields_;
+    requestedShields_ = -1.0f;
+    return shields;
 }
 
 static int runOneScriptTest(const std::string& levelPath) {

@@ -975,7 +975,7 @@ int main(int argc, char** argv) {
                                                 &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
-                               &script.triggers());
+                               &script.triggers(), &script.timers());
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -1003,6 +1003,15 @@ int main(int argc, char** argv) {
         // this rendered frame has already latched its trigger ids into POD
         // state; callbacks may allocate without compromising sim determinism.
         script.drain(cur.game);
+        // A callback asking for the ship back. Applied to the live state only:
+        // this is something that happened during the run, not a condition the
+        // run begins from, and writing it to initial() would carry it across a
+        // restart and skip the opening it belongs to. The disabled flag is
+        // recomputed from shields at the top of every step, so the ship flies
+        // again on the next one with nothing else to do.
+        if (const float shields = script.takeShields(); shields >= 0.0f) {
+            cur.combat.player.shields = shields;
+        }
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 activeCommMessage = requested;
