@@ -13,6 +13,7 @@ import {
     PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM,
 } from './format.js';
 import { findSegment, sideCorners } from './geometry.js';
+import { fromLevelQuat, multiplyQuat, toLevelQuat, transformDirection } from './transform.js';
 
 // The lists an entity kind lives in, so the UI can be written once.
 export const ENTITY_LISTS = {
@@ -224,6 +225,83 @@ export function moveEntity(level, kind, index, position) {
     if (!entity) throw new Error(`no ${kind} ${index}`);
     entity.position = position.slice();
     entity.segment = findSegment(level, position, entity.segment);
+}
+
+// Whatever facing a kind carries, and where it lives.
+//
+// A kind that is not in here has none: a pickup, a floating ball and the exit
+// trigger are spheres as far as the level is concerned, and a group rotation
+// only carries them around the pivot.
+const FACING = {
+    light: { field: 'direction', quaternion: false },
+    lamp: { field: 'swingAxis', quaternion: false },
+    object: { field: 'orientation', quaternion: true },
+};
+
+// Turns an entity's own facing by a group rotation.
+//
+// Separate from moveEntity because the two are separate questions - a
+// translation moves a thing without turning it - and because most kinds have no
+// answer to this one. A cluster of scenery rotated ninety degrees and still
+// facing the way it was placed reads as a bug, which is why this exists at all.
+//
+// `rotation` is a quaternion in [x, y, z, w] order, as transform.js uses.
+//
+// `base` is the facing to rotate FROM, and a drag has to supply it. The
+// rotation a gizmo reports is absolute - the whole turn so far, not this
+// frame's part of it - so composing it onto the entity's current facing once
+// per frame would apply the same turn sixty times a second and spin the thing
+// off into the rock. Given a base, this is idempotent: calling it repeatedly
+// with the same rotation lands in the same place every time.
+export function turnEntity(level, kind, index, rotation, base = null) {
+    if (kind === 'start') {
+        level.start.orientation =
+            toLevelQuat(multiplyQuat(rotation, fromLevelQuat(base ?? level.start.orientation)));
+        return;
+    }
+
+    const facing = FACING[kind];
+    if (!facing) return;
+    const entity = entityList(level, kind)[index];
+    if (!entity) throw new Error(`no ${kind} ${index}`);
+
+    // A point light has a `direction` field that nothing reads. Turning it
+    // would put a direction in the file for a light that has no cone, and the
+    // writer omits defaulted fields precisely so that the file says only what
+    // is true of the level.
+    if (kind === 'light' && entity.type !== 'spot') return;
+
+    const from = base ?? entity[facing.field];
+    if (facing.quaternion) {
+        entity[facing.field] = toLevelQuat(multiplyQuat(rotation, fromLevelQuat(from)));
+        return;
+    }
+    entity[facing.field] = transformDirection({ rotation }, from);
+}
+
+// The facing an entity currently carries, or null for a kind that has none.
+// Recorded at the start of a drag and handed back to turnEntity as its `base`.
+export function entityFacing(level, kind, index) {
+    if (kind === 'start') return level.start.orientation.slice();
+    const facing = FACING[kind];
+    if (!facing) return null;
+    if (kind === 'light' && entityList(level, kind)[index]?.type !== 'spot') return null;
+    const value = entityList(level, kind)[index]?.[facing.field];
+    return value ? value.slice() : null;
+}
+
+// Several entities at once, from a group transform.
+//
+// Each move goes through moveEntity, so every entity's cached `segment` is
+// re-resolved one by one. That is deliberately not optimised into a single pass:
+// findSegment takes the previous segment as a hint, and a group being dragged
+// across a portal is exactly the case where the hint is right for some members
+// and wrong for others.
+export function moveEntities(level, moves) {
+    for (const { kind, index, position, rotation, facing } of moves) {
+        moveEntity(level, kind, index, position);
+        if (rotation) turnEntity(level, kind, index, rotation, facing ?? null);
+    }
 }
 
 export function removeEntity(level, kind, index) {
