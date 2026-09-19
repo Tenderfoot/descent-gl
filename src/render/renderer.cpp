@@ -13,6 +13,7 @@
 #include "render/procedural.h"
 #include "render/sprites.h"
 
+#include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -1867,7 +1868,7 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
                              ? static_cast<float>(target_.width()) / static_cast<float>(target_.height())
                              : 1.0f;
 
-    const glm::vec3 focus = (lo + hi) * 0.5f;
+    const glm::vec3 centre = (lo + hi) * 0.5f;
     const float radius = std::max(glm::length(hi - lo) * 0.5f, 4.0f);
     // Far enough back that the level's bounding sphere sits inside the frustum,
     // which is the vertical half-angle on a wide window and the horizontal one
@@ -1876,7 +1877,23 @@ void Renderer::drawAutomap(const AutomapData& map, const Level& level, const Hud
     // mine framed that way loses its far corners off the edges of the screen.
     const float halfV = kAutomapFovY * 0.5f;
     const float half = std::min(halfV, std::atan(std::tan(halfV) * aspect));
-    const float distance = radius / std::sin(half) * 1.05f / std::max(map.zoom, 0.2f);
+    const float fitDistance = radius / std::sin(half) * 1.05f;
+
+    const float zoom = std::clamp(map.zoom, AutomapData::kMinZoom, AutomapData::kMaxZoom);
+    // Zooming in is zooming in on the ship, not on the middle of the mine.
+    // Past 1 the orbit's centre walks from the level's centre over to the ship
+    // and is there by kShipFocusZoom, so the far end of the wheel is a close
+    // orbit around the player rather than a magnified view of whatever the
+    // bounding box happened to put in the middle.
+    //
+    // At rest - zoom 1, which is where the map opens and where it stays unless
+    // the wheel is touched - this is the framing it has always had, and it
+    // still does not move as the mine is explored.
+    const float t = glm::smoothstep(1.0f, AutomapData::kShipFocusZoom, zoom);
+    const glm::vec3 focus = glm::mix(centre, map.shipPosition, t);
+    // Floored well clear of the ship cross, which is 1.6 units across: without
+    // it the top of the wheel ends up inside the marker it is closing on.
+    const float distance = std::max(fitDistance / zoom, 6.0f);
 
     const glm::vec3 eye = focus + glm::vec3(std::cos(map.yaw) * std::cos(map.pitch),
                                             std::sin(map.pitch),

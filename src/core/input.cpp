@@ -62,6 +62,12 @@ glm::vec2 Input::consumeMouseDelta() {
     return d;
 }
 
+float Input::consumeScroll() {
+    const float s = scroll_;
+    scroll_ = 0.0f;
+    return s;
+}
+
 void Input::setMouseCaptured(GLFWwindow* w, bool captured) {
     captured_ = captured;
     glfwSetInputMode(w, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -78,6 +84,10 @@ void Input::onKey(int key, int action) {
     if (key < 0 || key >= kMaxKeys) return;
     if (action == GLFW_PRESS) cur_[static_cast<size_t>(key)] = true;
     else if (action == GLFW_RELEASE) cur_[static_cast<size_t>(key)] = false;
+}
+
+void Input::onScroll(double y) {
+    scroll_ += static_cast<float>(y);
 }
 
 void Input::onCursor(double x, double y) {

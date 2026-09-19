@@ -400,6 +400,10 @@ int main(int argc, char** argv) {
     bool showDebugUi = !opts.noUi && opts.debugUi;
     dvk::gl::AutomapData automap;
     automap.open = opts.automap;
+    // Where the wheel has asked the map to be. `automap.zoom` chases it rather
+    // than snapping, so a click of the wheel reads as a move in and not as a
+    // cut.
+    float automapZoomTarget = automap.zoom;
 
     dvk::PortalWalk walk;
     dvk::LightFlood flood;
@@ -468,6 +472,7 @@ int main(int argc, char** argv) {
         const bool wasOpen = automap.open;
         automap = dvk::gl::AutomapData{};
         automap.open = wasOpen;
+        automapZoomTarget = automap.zoom;
         // The level's lights were flooded at load with no doors; -1 makes the
         // loop below rebuild them against this level's door state.
         lightDoorSignature = -1;
@@ -777,6 +782,11 @@ int main(int argc, char** argv) {
 
         dvk::alloc::Scope simAllocs;
         glm::vec2 mouseDelta{0.0f};
+        // Drained every frame whether or not the map is open, and used only
+        // when it is: ticks collected while flying would otherwise arrive as
+        // one lurch the moment Tab is pressed. The debug panels get first
+        // refusal, so the wheel over an open panel scrolls the panel.
+        const float wheel = input.consumeScroll();
         // With the map open the mouse orbits it instead of steering. The
         // simulation is untouched either way: the ship keeps flying, robots keep
         // hunting, and the countdown keeps running - opening the map is not a
@@ -789,6 +799,19 @@ int main(int argc, char** argv) {
             mouseDelta = input.consumeMouseDelta();
             automap.yaw += mouseDelta.x * 0.005f;
             automap.pitch = std::clamp(automap.pitch - mouseDelta.y * 0.005f, -1.45f, 1.45f);
+
+            if (wheel != 0.0f && !ImGui::GetIO().WantCaptureMouse) {
+                // Multiplied rather than added, because the camera's distance
+                // is divided by the zoom: a constant factor per click is what
+                // makes every click look like the same step, near or far.
+                automapZoomTarget = std::clamp(
+                    automapZoomTarget * std::pow(1.15f, wheel),
+                    dvk::gl::AutomapData::kMinZoom, dvk::gl::AutomapData::kMaxZoom);
+            }
+            // Chased, not set, on the frame clock rather than the step clock,
+            // because this is camera state and the map is drawn every frame.
+            const float follow = 1.0f - std::exp(-12.0f * static_cast<float>(elapsed));
+            automap.zoom += (automapZoomTarget - automap.zoom) * follow;
         }
         bool consumedMouse = false;
         bool runFinished = false;

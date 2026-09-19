@@ -151,6 +151,17 @@ struct AutomapData {
     static constexpr int kMaxSegments = 128;
     static constexpr int kMaxMarkers = 16;
 
+    // The wheel's range. 1 is the whole mine framed, below it pulls back a
+    // little further, and above it closes on the ship. Declared here rather
+    // than in the game layer so whoever drives the wheel clamps against the
+    // same numbers the camera below is solved for.
+    static constexpr float kMinZoom = 0.6f;
+    static constexpr float kMaxZoom = 12.0f;
+    // Where the orbit has finished walking from the mine's centre to the ship.
+    // Well before kMaxZoom, so the close end of the wheel is all approach and
+    // not a drift sideways.
+    static constexpr float kShipFocusZoom = 2.5f;
+
     struct Marker {
         glm::vec3 position{0.0f};
         glm::vec3 color{1.0f};
@@ -161,6 +172,11 @@ struct AutomapData {
     bool open = false;
     float yaw = 0.6f;
     float pitch = 0.5f;
+    // 1 frames the whole mine from its centre, which is where the map opens.
+    // Winding it up pulls the camera in and walks what it orbits over to the
+    // ship, so zooming in is zooming in on where the player is rather than on
+    // the middle of the level. Clamped to [kMinZoom, kMaxZoom] by whoever sets
+    // it; the camera assumes that range.
     float zoom = 1.0f;
 
     int segmentCount = 0;
