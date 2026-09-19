@@ -52,18 +52,25 @@ float MusicDirector::update(float awareness, bool forced, float dt) {
 
 MusicReadout musicReadout(float mix, bool playing, const char* lullName,
                           const char* combatName) {
+    const char* lull = lullName ? lullName : "";
+    const char* combat = combatName ? combatName : "";
+
     MusicReadout readout;
     if (!playing) return readout;
 
     if (mix <= 0.0f) {
-        readout.text = lullName ? lullName : "";
+        readout.text = lull;
+        readout.show = readout.text[0] != '\0';
     } else if (mix >= 1.0f) {
-        readout.text = combatName ? combatName : "";
+        readout.text = combat;
+        readout.show = readout.text[0] != '\0';
     } else {
-        readout.text = "transitioning";
+        // Between the two. The plate stays up with an empty marquee, so the
+        // crossfade is something the HUD is visibly in the middle of rather
+        // than a gap where a readout used to be.
         readout.transitioning = true;
+        readout.show = lull[0] != '\0' || combat[0] != '\0';
     }
-    readout.show = readout.text[0] != '\0';
     return readout;
 }
 

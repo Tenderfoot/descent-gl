@@ -48,6 +48,11 @@ enum class PlayerAction {
     CycleSecondary,
     ChaseCamera,
     Mute,
+    // Skips the playing soundtrack on to the next track in its playlist. One
+    // key for both sides: which playlist it moves is whichever one the player
+    // is currently hearing, and mid-crossfade there is no answer to that, so
+    // the key does nothing until the fade lands.
+    NextTrack,
     Pause,
     Count,
 };

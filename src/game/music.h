@@ -36,26 +36,27 @@ struct MusicDirector {
 // the two seconds between them: the target snaps, and what the player hears
 // takes a while to follow.
 struct MusicReadout {
-    // The track's name, or "transitioning" while both are audible. Borrowed
-    // from the caller, so it lives exactly as long as what was passed in.
+    // The playing track's name, borrowed from the caller, so it lives exactly
+    // as long as what was passed in. Empty mid-crossfade: both tracks are
+    // audible then and naming either one would be half wrong, which is what
+    // the caption says instead.
     const char* text = "";
-    // The readout is the crossfade rather than a track. Worth knowing because
-    // it is not a title and should not be coloured like one.
+    // The readout is the crossfade rather than a track. The caption says so,
+    // the marquee stands empty, and skipping is refused for as long as it
+    // lasts - there is no one track for "next" to mean.
     bool transitioning = false;
     // There is something to draw. False with no soundtrack running, and false
-    // when the track that is playing has no name - a blank plate says less
-    // than no plate.
+    // when the one playing has no name - a blank plate says less than no
+    // plate.
     bool show = false;
 };
 
 // `mix` is Audio::musicMix() and `playing` is Audio::musicPlaying(). The names
-// are the two tracks in the order the mix runs between them, and either may be
-// empty for a track that did not load.
+// are the two sides' playing tracks in the order the mix runs between them,
+// and either may be empty for a side with no tracks.
 //
-// Mid-crossfade both tracks are genuinely audible at equal power, so naming
-// either one would be a lie for as long as it lasted; that is the whole reason
-// for the middle state. The ends are compared exactly because the crossfade
-// walks in clamped steps and lands on them, rather than approaching forever.
+// The ends are compared exactly because the crossfade walks in clamped steps
+// and lands on them, rather than approaching forever.
 MusicReadout musicReadout(float mix, bool playing, const char* lullName,
                           const char* combatName);
 

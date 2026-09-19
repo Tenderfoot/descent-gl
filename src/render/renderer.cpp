@@ -868,49 +868,72 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // loadout already hold. A marquee because the plate has to be small - this
     // is the least important thing on the HUD and must not compete with the
     // gauges - and a track's name will not always fit in something that small.
+    //
+    // Two rows: a caption with the skip key opposite it, and the name itself
+    // under them. The caption is what makes the name a soundtrack rather than
+    // an unexplained line of text at the bottom of the screen.
     if (hud.musicShow) {
         const float plateW = std::min(w * 0.30f, 74.0f * s);
-        const float plateH = 10.0f * s;
+        const float plateH = 17.0f * s;
         const float x = cx - plateW * 0.5f;
         const float y = h - 8.0f * s - plateH;
         const float pad = 3.0f * s;
+        const float captionScale = s * 0.5f;
         const float textScale = s * 0.7f;
         const glm::vec4 accent(0.35f, 0.92f, 1.0f, 0.85f);
-        // The crossfade is a state and not a title, so it is coloured like the
-        // frame rather than like a name: the player can read which of the two
-        // they are looking at without reading the word.
-        const glm::vec4 ink = hud.musicTransitioning
-                                  ? accent
-                                  : glm::vec4(0.88f, 0.93f, 1.0f, 0.92f);
+        const glm::vec4 caption(0.62f, 0.72f, 0.82f, 0.85f);
+        const glm::vec4 ink(0.88f, 0.93f, 1.0f, 0.92f);
 
         hud_.rect(x, y, plateW, plateH, glm::vec4(0.015f, 0.025f, 0.04f, 0.72f));
         hud_.rect(x, y, plateW, std::max(1.0f, 0.8f * s),
                   glm::vec4(accent.r, accent.g, accent.b, 0.55f));
 
-        const std::string_view track(hud.musicTrack ? hud.musicTrack : "");
         const float windowLeft = x + pad;
         const float windowRight = x + plateW - pad;
-        const float windowW = windowRight - windowLeft;
-        const float trackW = hud_.textWidth(track, textScale);
-        const float textY = y + plateH * 0.5f - static_cast<float>(font::kGlyphH) * textScale * 0.5f;
 
-        if (trackW <= windowW) {
-            // It fits, so it holds still. A name scrolling for no reason reads
-            // as an animation rather than as a readout.
-            hud_.textClipped(track, windowLeft + (windowW - trackW) * 0.5f, textY, textScale,
-                             ink, windowLeft, windowRight);
-        } else {
-            // One period is the name plus the gap that separates its tail from
-            // its head, and it is drawn twice a period apart so the wrap is a
-            // continuous slide rather than a jump back to the left.
+        // The caption carries the state, because the marquee cannot: mid
+        // crossfade there is no one track to name, so the word stands where
+        // the label would be and the row below it is left empty.
+        const char* label = hud.musicTransitioning ? "transitioning" : "now playing";
+        hud_.textClipped(label, windowLeft, y + 3.0f * s, captionScale,
+                         hud.musicTransitioning ? accent : caption, windowLeft, windowRight);
+
+        // The key that skips, opposite the caption. Only worth saying while
+        // there is a track playing to skip - mid-crossfade the key does
+        // nothing, and a hint for a key that does nothing is worse than none.
+        const std::string_view nextKey(hud.musicNextKey ? hud.musicNextKey : "");
+        if (!nextKey.empty() && !hud.musicTransitioning) {
+            const float keyW = hud_.textWidth(nextKey, captionScale);
+            const float nextW = hud_.textWidth("next ", captionScale);
+            const float keyX = windowRight - keyW;
+            hud_.textClipped("next ", keyX - nextW, y + 3.0f * s, captionScale, caption,
+                             windowLeft, windowRight);
+            hud_.textClipped(nextKey, keyX, y + 3.0f * s, captionScale, accent, windowLeft,
+                             windowRight);
+        }
+
+        // The name, always scrolling. A short title that held still and a long
+        // one that moved would read as two different widgets; one that always
+        // moves reads as a marquee, which is what it is.
+        const std::string_view track(hud.musicTrack ? hud.musicTrack : "");
+        if (!track.empty()) {
+            const float textY = y + 9.0f * s;
             const float gap = 8.0f * static_cast<float>(font::kAdvance) * textScale;
-            const float period = trackW + gap;
+            // One period is the name plus the gap that separates its tail from
+            // its head. A title shorter than the window needs more than one
+            // copy on screen to keep the run unbroken, so copies are drawn
+            // until they have covered it; the ceiling is for a pathologically
+            // short title and is never reached by a real one.
+            const float period = hud_.textWidth(track, textScale) + gap;
             const float speed = 14.0f * s;
             const float offset = std::fmod(std::max(hud.musicTime, 0.0f) * speed, period);
-            hud_.textClipped(track, windowLeft - offset, textY, textScale, ink, windowLeft,
-                             windowRight);
-            hud_.textClipped(track, windowLeft - offset + period, textY, textScale, ink,
-                             windowLeft, windowRight);
+            constexpr int kMaxCopies = 8;
+            for (int copy = 0; copy < kMaxCopies; ++copy) {
+                const float runX = windowLeft - offset + static_cast<float>(copy) * period;
+                if (runX >= windowRight) break;
+                hud_.textClipped(track, runX, textY, textScale, ink, windowLeft, windowRight);
+                if (runX + period >= windowRight) break;
+            }
         }
     }
 

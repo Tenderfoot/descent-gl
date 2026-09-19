@@ -26,6 +26,15 @@ struct CueDef {
     float pitchJitter = 0.0f;
 };
 
+// One entry of a soundtrack playlist: the decoded clip, and what the HUD calls
+// it. The name is the filename with its extension taken off unless the playlist
+// gave one, because the files are the authoring and a second place to keep in
+// step is a second place to get it wrong.
+struct MusicTrack {
+    int clip = -1;
+    std::string name;
+};
+
 // Every clip on disk, plus which one each cue and each ambient channel uses.
 // Files are decoded once and shared: several cues deliberately name the same
 // file, and the reactor going up should not cost a second copy of the explosion.
@@ -33,14 +42,16 @@ struct Bank {
     std::vector<Clip> clips;
     std::array<int, static_cast<size_t>(sim::Cue::Count)> cueClip{};
     std::array<int, static_cast<size_t>(Ambient::Count)> ambientClip{};
-    std::array<int, 2> musicClip{{-1, -1}};   // lull, combat
-    // What those two tracks are called, in the same order, for the HUD to
-    // show. The filename with its extension taken off: the files are the
-    // authoring, so naming them anywhere else would be a second place to keep
-    // in step. Empty for a track that did not load, which is how a caller
-    // tells the difference between silence and a nameless track.
-    std::array<std::string, 2> musicNames{};
+    // The two soundtrack playlists, lull first and combat second, in the order
+    // assets/music/music.json listed them. Only tracks that actually decoded
+    // are here, so a playlist entry naming a file that is not there shortens
+    // the list rather than leaving a hole in it.
+    std::array<std::vector<MusicTrack>, 2> musicTracks{};
     int missing = 0;
+
+    // The playlist for one side, or an empty one for an index that is neither
+    // 0 nor 1. Saves every caller the same bounds check.
+    const std::vector<MusicTrack>& music(int side) const;
 
     // A transmission's voice track, keyed by the comm clip it belongs to. Named
     // rather than enumerated because which transmissions exist is content: a
@@ -58,8 +69,15 @@ struct Bank {
     // mixer nothing it does not already do.
     void loadComm(const std::string& root);
 
-    // Loads the two long-form stereo tracks from assets/music. They join the
-    // same immutable bank as effects and comms before the mixer sees it.
+    // Loads the long-form stereo tracks from assets/music. They join the same
+    // immutable bank as effects and comms before the mixer sees it.
+    //
+    // Which files, and in what order, comes from music.json in that same
+    // directory - see the parser - so a track can be added by dropping a wav
+    // beside the executable's assets and naming it there, with no rebuild.
+    // Every listed track is decoded here rather than on demand: the mixer
+    // holds raw pointers into `clips`, and growing that vector while a voice
+    // is playing out of it would leave the voice pointing at freed samples.
     void loadMusic(const std::string& root);
 
     // Loads from `dir` (assets/sounds). Missing or malformed files are warned
@@ -150,19 +168,32 @@ public:
     // can compare against them without an epsilon.
     float musicMix() const { return musicCombatMix_; }
     // Whether there is a soundtrack running at all. False before the first
-    // setMusicState, after stopMusic, and when neither track loaded - which
+    // setMusicState, after stopMusic, and when no track loaded - which
     // includes a build with no assets/music, where the transports would
     // otherwise be running on nothing.
     bool musicPlaying() const {
-        return musicRunning_ && (bank_.musicClip[0] >= 0 || bank_.musicClip[1] >= 0);
+        return musicRunning_ && (!bank_.music(0).empty() || !bank_.music(1).empty());
     }
-    // The lull track's name, then the combat one's. Empty for a track that did
-    // not load. Stable for the lifetime of the bank, so a per-frame caller can
-    // hold the pointer rather than copying the string.
-    const std::string& musicName(int index) const {
-        static const std::string none;
-        return index == 0 || index == 1 ? bank_.musicNames[static_cast<size_t>(index)] : none;
+    // What the playing track on one side is called, empty when that side has
+    // no tracks. Side 0 is the lull and side 1 is combat. Stable for as long
+    // as the bank is, so a per-frame caller can hold the pointer rather than
+    // copying the string.
+    const std::string& musicTrackName(int side) const;
+    // How many tracks that side's playlist holds. One or none means there is
+    // nothing for nextMusicTrack to do.
+    int musicTrackCount(int side) const {
+        return static_cast<int>(bank_.music(side).size());
     }
+
+    // Move one side's playlist on to its next track, wrapping at the end.
+    // Returns false and changes nothing when that side has fewer than two
+    // tracks, or when a swap it asked for is still in progress.
+    //
+    // The cut is not made here. The mixer starts a new clip from its
+    // beginning, which mid-waveform is an audible click, so the channel is
+    // taken down to silence first and brought back afterwards; the track only
+    // changes at the bottom of that dip. See setMusicState, which walks it.
+    bool nextMusicTrack(int side);
 
     void setMasterGain(float gain);
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }
@@ -202,6 +233,13 @@ private:
     // duration rather than a step.
     float musicCombatMix_ = 0.0f;
     float musicDuck_ = 1.0f;
+    // Which track each side is playing, and the skip in flight on it. The
+    // gain is an extra multiplier on that side alone - the crossfade and the
+    // comm duck both apply to the pair - and `pending` is the track it is
+    // diving towards, or -1 when nothing is being skipped to.
+    std::array<int, 2> musicTrackIndex_{{0, 0}};
+    std::array<float, 2> musicSwapGain_{{1.0f, 1.0f}};
+    std::array<int, 2> musicPendingTrack_{{-1, -1}};
     uint32_t rng_ = 0x9e3779b9u;
     std::array<uint32_t, static_cast<size_t>(sim::Cue::Count)> played_{};
     uint32_t dropped_ = 0;

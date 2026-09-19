@@ -134,16 +134,20 @@ struct HudData {
     bool hasAimPoint = false;
 
     // The soundtrack, as a small marquee. The renderer is handed the finished
-    // string and never builds one: `musicTrack` points at storage the audio
-    // bank owns for its lifetime, or at a literal, so a name too long for the
-    // plate costs no allocation in the draw path.
+    // strings and never builds one: `musicTrack` points at storage the audio
+    // bank owns for its lifetime, and `musicNextKey` at a buffer the game
+    // layer refills in place, so neither costs an allocation in the draw path.
     //
     // `musicTime` is the marquee's own clock in seconds, and runs on real time
     // rather than on the simulation's: the transports keep playing through a
     // pause, so the scroll does too.
     bool musicShow = false;
+    // Both tracks are audible, so the caption says so and the marquee stands
+    // empty. `musicTrack` is empty in this state by construction.
     bool musicTransitioning = false;
     const char* musicTrack = "";
+    // What the skip is bound to, for the hint on the plate. Empty hides it.
+    const char* musicNextKey = "";
     float musicTime = 0.0f;
 
     // The ship is under the disabled threshold and the player has no control of
