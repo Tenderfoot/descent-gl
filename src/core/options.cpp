@@ -85,6 +85,8 @@ Options Options::parse(int argc, char** argv) {
             o.controlsMenu = true;
         } else if (a == "--progress-test") {
             o.progressTest = true;
+        } else if (a == "--music-test") {
+            o.musicTest = true;
         } else if (a == "--progress" && hasNext) {
             o.progressPath = argv[++i];
         } else if (a == "--settings" && hasNext) {

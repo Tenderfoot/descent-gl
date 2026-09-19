@@ -104,6 +104,7 @@ milestone rather than describing what the code should do:
 | `--settings PATH` | Read and write player settings at a specific path instead of the platform user configuration directory. |
 | `--controls-menu` | Open the keyboard and mouse binding screen for visual verification. |
 | `--progress-test` | Exercise run records, best times, malformed data and atomic persistence without a window. |
+| `--music-test` | Drive the adaptive soundtrack's combat decision: that the target is only ever the lull or combat and never a mix of the two, that losing the robots holds combat for the three seconds awareness takes to fade, that a fight ended on a kill gets a two second grace instead, and that neither the frame rate nor a pause changes any of it. Needs no window, no GL and no sound card. |
 | `--progress PATH` | Read and write run history at a specific path instead of the platform user configuration directory. |
 
 Every run also ends with the last frame's GPU cost per pass and a report of how

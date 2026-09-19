@@ -2364,27 +2364,38 @@ not stop these two channels: transport and audibility are separate for music,
 so bringing the combat track back cannot restart it at its introduction. Music
 stops in the main menu and run summary.
 
-The game layer takes the maximum awareness of every living, enabled robot as a
-0..1 combat value. Awareness snaps to one when a robot acquires the player and
-decays for about three seconds after contact breaks, so the AI's existing memory
-is also the soundtrack's hysteresis. Player damage and the reactor countdown
-force combat to one.
+`MusicDirector` (`src/game/music.h`) decides whether there is a fight, and the
+answer is all or nothing: the target it returns is 1 or 0 and never anything
+between. A partial target would hold both tracks audible against each other for
+as long as it lasted, and the two are meant to cross, not to play together - so
+the only time either is heard over the other is the two seconds of the crossfade
+itself.
+
+There is a fight if any living, enabled robot has non-zero awareness. Awareness
+snaps to one when a robot acquires the player and decays over three seconds
+after contact breaks, so the AI's existing memory is also the soundtrack's
+hysteresis, and breaking line of sight buys exactly the three seconds the robots
+go on hunting for. Player damage and the reactor countdown mean combat whatever
+the robots are doing.
 
 Awareness dies with the robot holding it, though, and hysteresis that lives on
-the robots cannot survive the last one of them. So the game layer holds the
-combat value for five seconds after combat stops: anything at or above 0.5
-refreshes the hold, and only five uninterrupted seconds start the return to the
-lull. A robot waking up inside that window resets the hold without a transition
-ever having begun. The hold sits at the level combat actually reached rather
-than at one, so a robot that half noticed the player does not buy five seconds
-of full combat music. The hold is frozen while the game is paused, a pause not
-being five seconds of not fighting.
+the robots cannot survive the last one of them: kill it, or knock it below the
+disabled threshold, and the maximum falls to zero on the frame the explosion
+starts. So a fight that ends that way gets a two second grace before the
+crossfade begins. A fight that faded out gets none, because it already had its
+three seconds. The two are told apart by how far awareness fell in the frame:
+decay is bounded by a third per second, so a drop too large for this frame's
+delta to account for did not decay at all. That bound is the frame delta's
+worth rather than a fixed number, which is what keeps a quarter-second software
+rendering frame - most of one step of the decay - from reading as a kill. A
+robot waking up inside the grace returns to combat and spends it. The grace is
+frozen while the game is paused, a pause not being two seconds of the fight
+being over.
 
-`Audio::setMusicState` takes that value as a target rather than a level and
-holds the envelope that walks towards it: two seconds into combat and two
-seconds back out, so the two tracks cross rather than swap. The envelope is
-linear and is stepped by the frame delta the caller passes, which is zero
-while paused. Its position feeds an equal-power pair - the lull at
+`Audio::setMusicState` takes that target rather than a level and holds the
+envelope that walks towards it: two seconds into combat and two seconds back
+out, so the two tracks cross rather than swap. The envelope is linear and is
+stepped by the frame delta the caller passes, which is zero while paused. Its position feeds an equal-power pair - the lull at
 `cos(k*pi/2)` and combat at `sin(k*pi/2)` - so the two are at about 0.71 each
 halfway through and the crossfade has no hole in the middle. A level that opens
 in combat opens in combat: the first call after the music starts snaps rather
