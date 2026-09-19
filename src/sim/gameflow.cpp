@@ -126,7 +126,13 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
 
         // A locked door does not even acknowledge you without the key. Robots
         // carry no keys, so a locked door stays locked to them too.
-        const bool mayOpen = hasKey(state, door.key);
+        //
+        // An emergency hatch answers to the reactor rather than to anything
+        // carried, and `exitOpen` is already the moment the reactor went up.
+        // Robots cannot open one either, which is the point: the way out is
+        // shut until the player has earned it.
+        const bool mayOpen =
+            hasKey(state, door.key) && (!door.requiresReactor || state.exitOpen);
 
         ds.lockedTimer = std::max(0.0f, ds.lockedTimer - dt);
         // Refused. Only for the player: a robot bumping into a door it cannot

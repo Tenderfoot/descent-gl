@@ -126,6 +126,11 @@ struct RenderState {
     // the door would do if the player flew at it.
     std::array<bool, 3> keys{};
 
+    // The reactor is gone. Here for the same reason `keys` is: an emergency
+    // hatch reads it the way a keyed door reads a key, and its signage has to
+    // say whether the hatch in front of the player is going to open.
+    bool exitOpen = false;
+
     // Floating lights and swinging lamps, as the unlit pass draws them. The
     // lights themselves go into the dynamic light list; these are the visible
     // fixtures.
@@ -263,6 +268,7 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
     for (size_t i = 0; i < r.keys.size() && i < b.game.keys.size(); ++i) {
         r.keys[i] = b.game.keys[i];
     }
+    r.exitOpen = b.game.exitOpen;
 
     for (int i = 0; i < b.props.floatingCount; ++i) {
         const sim::FloatingLight& ball = b.props.floating[static_cast<size_t>(i)];

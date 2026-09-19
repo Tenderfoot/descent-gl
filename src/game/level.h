@@ -129,12 +129,26 @@ struct WallTriangle {
 };
 
 // A door fills one portal. Opens when a body comes close, closes again after a
-// delay, and refuses to open at all without the right key.
+// delay, and refuses to open at all while either of its locks holds: without
+// the right key, or, for an emergency hatch, while the reactor is still up.
 struct Door {
     int segment = 0;
     int side = 0;
     int neighbour = 0;
     KeyColor key = KeyColor::None;
+    // An emergency hatch: sealed until the reactor is gone, however many keys
+    // the player is carrying.
+    //
+    // A separate field and not a fourth KeyColor. KeyColor indexes the three
+    // keys the player can be holding, in GameState, in RenderState and in the
+    // signage; a fourth enumerator would run off the end of all three and
+    // would be lying about what it is besides. The two locks are orthogonal
+    // and a door may carry both, in which case it wants the key AND the
+    // reactor.
+    //
+    // A hatch in a level with no reactor never opens, which is the honest
+    // answer: there is nothing that could ever unseal it.
+    bool requiresReactor = false;
     float openDistance = 11.0f;
     float openTime = 0.9f;      // seconds to travel from shut to open
     float closeDelay = 2.5f;    // seconds held open after nothing is near

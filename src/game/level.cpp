@@ -438,6 +438,7 @@ Level loadLevel(const std::string& path) {
                 for (int k = 0; k < 3; ++k) {
                     if (key == kKeyNames[static_cast<size_t>(k)]) door.key = static_cast<KeyColor>(k);
                 }
+                door.requiresReactor = dj.value("hatch", false);
                 door.openDistance = dj.value("openDistance", door.openDistance);
                 door.openTime = dj.value("openTime", door.openTime);
                 door.closeDelay = dj.value("closeDelay", door.closeDelay);
@@ -712,6 +713,7 @@ bool saveLevel(const std::string& path, const Level& level) {
         nlohmann::json dj;
         dj["segment"] = door.segment;
         dj["side"] = door.side;
+        if (door.requiresReactor) dj["hatch"] = true;
         dj["key"] = door.key == KeyColor::None
                         ? std::string("none")
                         : std::string(kKeyNames[static_cast<size_t>(door.key)]);
