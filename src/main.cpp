@@ -405,8 +405,12 @@ int main(int argc, char** argv) {
     // still hear all three.
     dvk::sim::EventQueue soundEvents;
 
-    dvk::CameraMode camera =
-        opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
+    // Chase is the view the game opens in. --chase asked for exactly this
+    // back when first person was the default, so it is now a no-op rather
+    // than a removal: a command line or a habit that still passes it keeps
+    // working and simply gets what it would have got anyway. F1 is how you
+    // get to first person, and still is.
+    dvk::CameraMode camera = dvk::CameraMode::Chase;
 
     // F3 brings the debug panels back. Off by default, because from M7 the HUD
     // is what the player reads and the panels are for tuning.

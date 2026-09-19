@@ -25,8 +25,9 @@ namespace dvk {
 //                       as --wireframe-volumes and --stencil-view: it changes
 //                       nothing in the simulation and the game still only
 //                       records the rooms actually flown through.
-//   --chase             start in the chase camera (F1 at runtime), so a
-//                       screenshot can show the ship without a keypress
+//   --chase             accepted and does nothing: the chase camera is now the
+//                       view the game opens in, so this asks for what already
+//                       happens. F1 switches to first person at runtime.
 //   --flight-test       run the flight model headlessly and report the
 //                       response times the tuning is supposed to hit, then
 //                       exit. Needs no window and no GL.
@@ -93,7 +94,7 @@ struct Options {
     std::string screenshot;
     std::string level;
     bool resizeTest = false;
-    bool chase = false;
+    bool chase = false;    // parsed, no longer read: see --chase above
     bool automap = false;
     bool reveal = false;
     bool validateAssets = false;

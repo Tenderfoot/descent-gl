@@ -299,7 +299,12 @@ public:
     const std::vector<LightStats>& lightStats() const { return lightStats_; }
 
     // Debug toggles, driven from ImGui.
-    bool drawLightGizmos = true;
+    //
+    // The light markers are off at the start for the same reason the panels
+    // that toggle them are: a cube floating inside every lamp in the mine is
+    // a tuning aid, and with the panels hidden by default there was no way to
+    // turn one off without first knowing F3 existed.
+    bool drawLightGizmos = false;
     bool shadowsEnabled = true;
     bool drawVolumeWireframe = false;
     bool showStencil = false;
