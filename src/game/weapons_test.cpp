@@ -466,8 +466,7 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         for (size_t i = 0; i < rig.level.objectProxies.size(); ++i) {
             if (!rig.state.objects.alive[i]) continue;
             const sim::PlacedProxy& proxy = rig.level.objectProxies[i];
-            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
-            if (proxy.halfExtents.y > 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
+            if (sim::proxyIsColumn(proxy)) {
                 tall = static_cast<int>(i);
                 break;
             }

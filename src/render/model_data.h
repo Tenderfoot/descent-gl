@@ -61,4 +61,28 @@ ModelData cubeModel();
 // with no positions, leaving the outputs untouched.
 bool modelBounds(const ModelData& model, glm::vec3& lo, glm::vec3& hi);
 
+// What `modelTaperedCylinder` found, when it found one.
+struct TaperedCylinderFit {
+    float lowRadius = 0.0f;    // circumradius of the bottom ring
+    float highRadius = 0.0f;   // circumradius of the top ring
+    float halfHeight = 0.0f;
+    glm::vec3 centre{0.0f};    // the axis, midway up, in the model's own space
+    int rings = 0;             // how many rings of vertices it is stacked from
+    int sides = 0;             // the fewest in any one of them
+    float roundness = 0.0f;    // inradius / circumradius of the coarsest ring
+    float profileError = 0.0f; // worst departure from the straight taper, in units
+};
+
+// Whether the model is a conical frustum about its own Y axis: a stack of
+// regular rings whose radius runs straight from one cap to the other. Tapered
+// columns are, and their bounding boxes are mostly air at the corners.
+//
+// Deliberately strict, because the cost of a false positive is a collider that
+// does not contain its own mesh and lets shots through the parts it missed.
+// Everything it is unsure of it rejects, and the caller falls back to bounds.
+// Of the shipped models only `pillar.obj` and `drone.obj` pass: `reactor.obj`
+// and `brute.obj` have rings whose radius goes back up again, `gunner.obj` and
+// `ship.obj` are not solids of revolution at all.
+bool modelTaperedCylinder(const ModelData& model, TaperedCylinderFit& fit);
+
 } // namespace dvk::gl

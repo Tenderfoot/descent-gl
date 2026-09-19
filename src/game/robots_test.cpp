@@ -845,8 +845,7 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
         for (size_t oi = 0; oi < rig.level.objectProxies.size(); ++oi) {
             if (!rig.combat.objects.alive[oi]) continue;
             const sim::PlacedProxy& proxy = rig.level.objectProxies[oi];
-            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
-            if (proxy.halfExtents.y > 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
+            if (sim::proxyIsColumn(proxy)) {
                 column = static_cast<int>(oi);
                 break;
             }

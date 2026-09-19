@@ -1161,13 +1161,14 @@ u/s, leaving headroom for knockback — they cover 0.667 units in a step against
 continuous collision forever to cover a case the tuning cannot reach; it fails
 loudly the day someone raises `maxSpeed`.
 
-#### The box is still a box
+#### The box is no longer a box
 
-A body resting against `mine01`'s pillars settles up to **0.92 units** past the
-column's own widest radius, measured by `--collision-test`. The proxy is the
-model's bounding box and the column is a tapered octagon, so the box holds 79%
-more volume than the column does. A tapered-cylinder proxy kind is the fix and
-is not in this change.
+A body resting against `mine01`'s pillars used to settle up to **0.92 units**
+past the column's own widest radius, because the proxy was the model's bounding
+box and the column is a tapered octagon — 79% more volume in the collider than
+in the thing being collided with. Columns now get a tapered-cylinder proxy and
+the same measurement reads **0.09 units**, against the column's radius at the
+height the body actually came to rest at. See *Proxy volumes* below.
 
 ### `--collision-test`, and four wrong oracles
 
@@ -1315,6 +1316,83 @@ octagon's facets at the speed a ship crosses a room, and per-triangle queries
 in the sim step are where a projectile system finds its bugs. The box is one
 clamp where the triangle test needs seven barycentric regions, and it has no
 edge or vertex case to get wrong.
+
+#### Three kinds, because a box around a column is mostly air
+
+A bounding box is the right shape for a crate and the wrong one for a column.
+`pillar.obj` is a tapered octagon, 2.2 units of radius at the base and 1.7 at
+the top, and the box drawn round it stands 3.11 units out at its corners and
+never narrows. A body could come to rest **1.4 units clear of anything
+visible**, and because `placeProxy` folds the entity's scale into the half
+extents, scaling a pillar in the editor multiplied that gap by the scale: at 3x
+it is 4.2 units, more than two ship radii of open air. That is the divergence
+between collision and model that this kind exists to close.
+
+So `ProxyVolume::Kind` has a third member, `TaperedCylinder`: a conical frustum
+about the model's own Y axis, carrying a radius at each cap alongside the half
+extents every kind already has. `halfExtents` keeps its meaning for all three —
+the box that contains the solid — so `boundingRadius`, the broad-phase reject in
+`occluded`, and anything that only wants to know how big a thing is are
+unchanged. For a frustum that radius is the rim of the wider cap rather than a
+box corner, which is exact.
+
+The radius is the ring's **circum**radius, not its apothem. An octagon inscribed
+in its own circumscribing circle leaves 7.6% of the radius between the two at
+the flats — 0.17 units on `pillar.obj` — and that is the residual this kind
+does not remove. It is deliberately in that direction: the collider contains the
+mesh everywhere, so a shot always stops at something the player can see. An
+apothem-fitted cylinder would be tighter on the flats and let bolts through the
+column's own corners, which is the failure the proxy work existed to fix in the
+first place.
+
+Three primitives in `sim/geometry.h` do the work, beside the box's own:
+
+- **`closestPointOnTaperedCylinder`** reduces to two dimensions — a frustum is a
+  solid of revolution, so the problem is the nearest point on a trapezoid in the
+  (radius, height) half plane, swung back around the axis. Its three faces are
+  tested outright; a clamp would only be correct if the side were axis aligned,
+  and on a taper it is not.
+- **`rayTaperedCylinderDistance`** clips to the caps with the box's own slab
+  test and solves one quadratic for the side. Which stretch of the ray that
+  quadratic calls *inside* depends on its leading coefficient — between the
+  roots normally, but **outside** them for a ray running up the taper within the
+  cone's own half angle, and the whole span when there are no roots. Rather than
+  a branch per case the span is cut at the roots and the sign is evaluated at
+  each piece's midpoint, which answers all three identically. The frustum is
+  convex and bounded, so exactly one stretch survives.
+- **`taperedRadiusAt`** is the profile itself, and is what the tests measure
+  against so that a taper is not mistaken for a gap.
+
+`proxySphereContact` grows a matching penetration case. A body whose centre is
+inside leaves through the nearest face, as it does for a box, but *nearest* is
+measured along the slanted side's own normal rather than straight out from the
+axis — on a taper those differ, and the perpendicular distance is the one that
+says which face is really closest.
+
+Inflating for a projectile's own thickness is the one place the frustum needs
+arithmetic a box does not. Growing the caps by the bolt's radius is right;
+growing the radii by it is not, because the side moves out along **its** normal,
+which measured radially is `sqrt(4h² + Δr²) / 2h` times as far. On `pillar.obj`
+that factor is 1.0004 and on a steep cone it is not, so it is computed rather
+than assumed.
+
+#### Which models get one, and why the test is strict
+
+`gl::modelTaperedCylinder` decides, at load, from the model's own vertices: it
+buckets them into rings by height, requires every ring to be regular (one radius
+within 1%, at least six vertices, no angular gap over 61°) about a shared axis,
+and requires the radius to run **straight** from one cap to the other within 2%.
+Anything it is unsure of it rejects and the caller falls back to bounds.
+
+Strict on purpose, because a false positive is a collider that does not contain
+its own mesh — the exact bug the proxy work was for, reintroduced. Six sides is
+the floor because a square's corners stand 41% proud of its flats, and
+circumscribing one would be far worse than boxing it; this is also what keeps a
+crate a box. Of the shipped models exactly two pass: `pillar.obj` (2 rings of 8,
+92% round) and `drone.obj` (2 rings of 6, 87% round, and never read — a robot's
+body carries its authored `def.radius`). `reactor.obj` and `brute.obj` are
+rejected because their radius goes back up again partway; `gunner.obj` and
+`ship.obj` are not solids of revolution at all.
 
 The seam is deliberate, and it is the reason this took a new file rather than
 an include:

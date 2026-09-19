@@ -132,3 +132,62 @@ is a finding rather than noise. The sim-step line is clean; this one is not, and
 has been identically non-zero on `main` across every branch measured against it.
 
 Untraced. It has never been attributed to a specific call site.
+
+---
+
+## A scaled object's collision stops at its own segment's walls
+
+**Where:** `sim::separateFromObjects` in `src/sim/collision.cpp`, and the
+`obj.segment = findSegment(level, obj.position, ...)` at the end of
+`src/game/level.cpp`.
+
+Object collision is gated to one segment: a body only ever tests the objects
+whose `segment` matches its own. That is deliberate and the comment says why —
+an author puts a column in the middle of a room, and widening the test to
+neighbours would let a pillar standing against a wall shove a body in the room
+on the other side of it.
+
+Scaling breaks the assumption it rests on. An object's segment comes from
+`findSegment` on its **origin point** and never sees its extents, so an entity
+scaled up in the editor until it spills through a portal, the floor or the
+ceiling is drawn on the far side, casts stencil shadows on the far side, and has
+no collision there at all. `mine01`'s rooms are about 22 x 29.5 x 22 and a
+pillar is 4.4 x 18, so it takes roughly 2x vertically, or less than that placed
+near a wall, to reach it.
+
+This is independent of the collider's shape. The tapered-cylinder kind closed
+the gap between a column's collision and its model *within* a segment; it does
+nothing for the part of a large object that has left one.
+
+**What it costs:** a body can fly through the overhanging part of a heavily
+scaled object. Nothing in a shipped level is scaled at all, so no shipped level
+reaches it.
+
+**In the meantime:** keep a scaled object inside its own segment. The load-time
+proxy line reports each type's dimensions, and `--collision-test` reports the
+standoff against the column's own surface, but neither warns about spill.
+
+**To fix:** test the neighbours of a body's segment when the object's
+`boundingRadius()` actually reaches past its own segment's bounds, rather than
+widening the rule for every object; and assign an object's segment from its
+extents rather than from its origin. Both are level-representation changes, not
+proxy ones.
+
+---
+
+## The editor draws no collision proxy
+
+**Where:** `tools/editor/src/view.js`.
+
+The editor draws each object as its true mesh scaled by `object.scale`, which is
+exactly what the game draws. It does not draw the proxy the simulation will
+build from that model, so an author placing or scaling an entity has no way to
+see what it will actually collide as.
+
+**What it costs:** a mismatch between collision and model is invisible until
+someone flies into it. The bounding-box-on-a-column case shipped for several
+milestones for this reason — at scale 1 the gap hid inside the ship's own
+radius, and only scaling an entity made it obvious.
+
+**To fix:** draw the proxy as a wireframe on the selected object, derived the
+same way `gl::modelTaperedCylinder` derives it, so the two cannot drift.

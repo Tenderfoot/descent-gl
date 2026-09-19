@@ -2355,3 +2355,133 @@ decision — a re-encode of committed art — rather than an engineering one.
 Nothing triggers a decoded clip in a running game, the panel's display duration
 is declared in four places that do not agree, and a voice can outlive its panel.
 All three are written up in `docs/KNOWN_ISSUES.md`, which this milestone adds.
+
+## A column collides as a column
+
+Reported from play: pillar entities scaled up in the editor stopped the ship
+well clear of anything visible. The proxy was the model's axis-aligned bounding
+box, `pillar.obj` is a tapered octagon, and `placeProxy` multiplies the half
+extents by the entity's scale — so the gap between the collider and the mesh was
+scaled along with everything else. At 1x it was already known and written up as
+0.92 units past the column's widest radius; at 3x it is 2.8, and measured
+against the mesh rather than the widest radius it reaches 4.2, which is more
+than two ship radii of open air beside a column the player can plainly see.
+
+`ProxyVolume::Kind` gains `TaperedCylinder`: a conical frustum about the model's
+own Y axis, with the closest-point, sphere-contact and ray queries to match in
+`sim/geometry.h`, and a strict load-time fit in `gl::modelTaperedCylinder` that
+decides which models get one. The full argument — why the circumradius and not
+the apothem, why the ray test evaluates a sign at a midpoint instead of
+branching on the leading coefficient, why the fit rejects anything with fewer
+than six sides — is in `docs/ARCHITECTURE.md` under *Proxy volumes*.
+
+One kind, so every consumer moved at once: what stops a ship, what stops a shot,
+what a robot cannot see through and what the CPU light query treats as solid are
+still the same volume, which was the point of proxies to begin with.
+
+### What the numbers did
+
+| Measurement | `main` | here |
+| --- | --- | --- |
+| Standoff past the column's own radius, `--collision-test` | 0.92u | **0.09u** |
+| Standoff per unit of entity scale, over 1x to 7.5x | 0.921u | **0.011u** |
+| Proxy volume against the column's | +79% | +8% |
+| Column hit at bottom / middle / top, `--weapons-test` | 8.3 / 6.5 / 8.3u | 8.5 / 6.7 / 8.8u |
+
+The weapons figures move because the cylinder is narrower than the box, so a
+bolt flies a little further before it strikes; all three still hit, which is the
+case that milestone exists for. The worst scaled standoff is now at **1x, not
+7.5x** — it no longer grows with scale, which is the whole finding.
+
+### The new checks, and that they fail without the fix
+
+`--collision-test` gains `column scaling`: it flies a ship-sized body at the
+level's column from 24 horizontal directions at five heights, at scales 1, 2, 4
+and 7.5, and asserts the standoff **per unit of scale** does not grow. It flies
+the body in rather than starting it inside and pushing it out, and the
+difference matters — a body buried in a box leaves through the nearest *face*
+whatever direction it came from, so pushing out never visits a corner, and the
+corner is where the air was. The first draft did it the wrong way round and
+passed against the box it was written to catch.
+
+Both that assertion and the existing standoff check are written against whatever
+shape the loader chose, not gated on the kind being a cylinder. A box around a
+*square* column is a perfect fit and passes; a box around a round one fails.
+Gating on the kind would let a regression to bounds skip the check instead of
+tripping it.
+
+Verified by forcing `modelTaperedCylinder` to return false and re-running:
+
+```
+[ERROR] FAILED: a body rests within a quarter unit of the column's own surface
+[ERROR] FAILED: a scaled column stands a body off at its own scaled surface
+column scaling: 480 contacts over scales 1 to 7.5, worst standoff 0.921u per
+unit of scale (at 1.0x)
+```
+
+`--light-test` gains `frustum oracle`, the counterpart to the box's slab-vs-
+triangles check. The independent method is the definition itself, walked: step
+along the ray, ask whether the point is inside the column, bisect the first
+crossing. No quadratic, no roots, no line of arithmetic shared with the thing it
+checks — and unlike a tessellated oracle it tests the true surface, so a
+disagreement is a bug rather than a facet. **5670 rays, 0 disagreements, worst
+distance gap 0.0002u.**
+
+The box oracle still runs, on the reactor and the robot proxies, at 630 rays and
+0 disagreements. The pillar leaving that set is why its ray count halved.
+
+Both oracles only ever start a ray 40 units out from a shipped shape, so the
+cases they cannot reach were covered by a throwaway harness against the same
+brute-force definitions, off-tree because the project has no unit-test rig and a
+stray `.cpp` is not one:
+
+- **2.4M rays** over six frustums — the pillar, a plain cylinder, a steep taper,
+  an inverted one, a near-cone and a squat disc — of which **744k started inside
+  the solid** and **600k ran exactly parallel to the caps**. 0 mismatches, worst
+  distance gap 0.0023u, which is the marcher's own step.
+- **64k contact samples** at scales 0.5 to 7.5 under an arbitrary rotation and
+  translation, **4869 of them starting buried**. `closestPointOnProxy` matched a
+  densely sampled surface everywhere, the contact verdict always agreed with
+  that distance, the push-out never failed to escape, and the resting overshoot
+  was 0.0002u per unit of scale.
+
+The inside-origin case is the one worth calling out: `occluded` can ask a ray
+from a point within an occluder, and the contract is that it answers 0.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `cmake --build --preset linux-debug` / `linux-release` | ✅ both clean, no warnings |
+| Twelve headless tests | ✅ exit 0, no `[ERROR]`/`[FATAL]` |
+| `--collision-test` | ✅ including the two new assertions |
+| `--light-test` | ✅ frustum oracle 5670 rays / 0 disagreements; box oracle 630 / 0 |
+| `--weapons-test` | ✅ column solid at bottom, middle and top |
+| `--robots-test` | ✅ `pillar cover` unchanged: awareness 0.00 behind the column, 1.00 on a clear line |
+| Headless run, `--frames 120 --segment 13` | ✅ exits cleanly, no GL errors |
+| `--resize-test` | ✅ completed, 72.9 steps/s against 69.1 on `main` (one run each, software rendering, bounded by the loop's frame clamp) |
+| Sim-step / draw-path allocations | ⚠️ `SOME on 1 of 90` / `SOME on 17 of 90` — `main` reports `1 of 90` / `27 of 90` on the same run; pre-existing, and this change adds nothing per frame |
+| `--loop-test` | ❌ `settings open from the pause menu` and two more — **fails identically on `main`**, unrelated to this change, not fixed here |
+
+Windows/MSVC was not built — no dev machine in this container.
+
+### Not done
+
+**The 8% that is left.** The collider is the ring's circumscribing circle, so an
+octagon's flats still sit 0.17 units inside it at scale 1. Removing that means a
+convex prism kind carrying the ring's vertices, which is a real shape and a real
+cost in the sim step; the remaining error is a fifth of a ship radius and in the
+safe direction.
+
+**Object collision is still gated to one segment.** `separateFromObjects` skips
+any object whose segment differs from the body's, on the reasoning that a level
+author puts a column in the middle of a room. Scaling breaks that assumption
+independently of shape: a pillar scaled until it spills through a portal is
+drawn and casts shadows on the far side while having no collision there at all,
+and its segment comes from `findSegment` on its origin point, which never sees
+its extents. Untouched here because it is a level-representation question rather
+than a shape one, and now written up in `docs/KNOWN_ISSUES.md`.
+
+**The editor still draws no proxy.** `tools/editor` renders the true mesh scaled
+by `object.scale` and nothing else, so an author cannot see the collider they
+are placing. That is how this shipped unnoticed at 1x.
