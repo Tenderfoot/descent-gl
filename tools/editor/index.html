@@ -28,6 +28,7 @@
       <div class="row">
         <select id="level-select" title="Levels in assets/levels/"></select>
         <button id="new-level" title="Create a new level in assets/levels/">New…</button>
+        <button id="generate-level" title="Grow a whole mine at once, then open it here">Generate…</button>
         <button id="reload" title="Discard changes and re-read the file">Reload</button>
       </div>
       <div class="row">
@@ -78,6 +79,48 @@
       <details id="verify-raw"><summary>full output</summary><pre id="verify-output"></pre></details>
     </section>
   </aside>
+
+  <dialog id="generate-dialog">
+    <form method="dialog" id="generate-form">
+      <h2>Generate a mine</h2>
+      <p class="note">Rooms are grown on a lattice and every way round is welded, so the shape is
+        a mine rather than a corridor. Each roll is checked against the same rules the game's
+        loader enforces and thrown away if it objects; Verify afterwards runs the game itself.</p>
+
+      <label>name
+        <input id="gen-name" type="text" value="Generated" spellcheck="false">
+      </label>
+      <label title="How many rooms. Around 24 is mine01's size.">rooms
+        <input id="gen-rooms" type="number" min="4" max="80" step="1" value="24">
+      </label>
+      <label title="Ways round. Every one is a loop you can fly rather than a dead end you have to fly back out of - the single biggest difference between mine01 and a corridor.">ways round
+        <input id="gen-loops" type="number" min="0" max="20" step="1" value="3">
+      </label>
+      <label title="Keys, and the doors they open. Each is placed where it can be reached before the door it unlocks, so the mine is finishable by construction.">keys
+        <input id="gen-keys" type="number" min="0" max="3" step="1" value="1">
+      </label>
+      <label title="Robots, weighted towards the deep end.">robots
+        <input id="gen-robots" type="number" min="0" max="40" step="1" value="8">
+      </label>
+      <label title="How much of the mine is raw rock rather than built structure. Rock stretches are pushed out of true and take the rock tile; built stretches stay on the lattice and take panel and grate.">rock
+        <input id="gen-rock" type="range" min="0" max="1" step="0.05" value="0.6">
+      </label>
+      <label title="How far a rock room's corners are pushed, as a fraction of the room. Past about 0.18 rooms fold through themselves and the roll is rejected.">roughness
+        <input id="gen-rough" type="range" min="0" max="0.18" step="0.01" value="0.13">
+      </label>
+      <label title="How many rock rooms get a lamp. The renderer has no ambient term, so an unlit stretch is genuinely dark - which is the point, not an omission.">lit rock
+        <input id="gen-lit" type="range" min="0" max="1" step="0.05" value="0.45">
+      </label>
+      <label title="0 takes a fresh one. Any other number gives the same mine every time - the number a roll reports is the one to type back in.">seed
+        <input id="gen-seed" type="number" min="0" step="1" value="0">
+      </label>
+
+      <div class="row">
+        <button id="gen-cancel" type="button">Cancel</button>
+        <button id="gen-go" class="primary" value="go">Generate</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="src/main.js"></script>
 </body>
