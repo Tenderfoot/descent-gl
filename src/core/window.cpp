@@ -39,6 +39,10 @@ Window::Window(const Desc& desc) {
     glfwSetKeyCallback(win_, onKey);
     glfwSetCursorPosCallback(win_, onCursor);
     glfwSetMouseButtonCallback(win_, onMouseButton);
+    // Registered here, before ImGui's GLFW backend installs its own callbacks
+    // in main: that backend chains to whatever was already set, so both the
+    // debug panels and the automap see the wheel.
+    glfwSetScrollCallback(win_, onScroll);
 
     glfwMakeContextCurrent(win_);
     glfwSwapInterval(desc.vsync ? 1 : 0);
@@ -125,6 +129,11 @@ void Window::onMouseButton(GLFWwindow* w, int button, int action, int) {
 void Window::onCursor(GLFWwindow* w, double x, double y) {
     auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
     if (self->input_) self->input_->onCursor(x, y);
+}
+
+void Window::onScroll(GLFWwindow* w, double /*xoffset*/, double yoffset) {
+    auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
+    if (self && self->input_) self->input_->onScroll(yoffset);
 }
 
 } // namespace dvk
