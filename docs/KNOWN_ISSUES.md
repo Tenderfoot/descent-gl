@@ -155,9 +155,9 @@ no collision there at all. `mine01`'s rooms are about 22 x 29.5 x 22 and a
 pillar is 4.4 x 18, so it takes roughly 2x vertically, or less than that placed
 near a wall, to reach it.
 
-This is independent of the collider's shape. The tapered-cylinder kind closed
-the gap between a column's collision and its model *within* a segment; it does
-nothing for the part of a large object that has left one.
+This is independent of the collider's shape. The convex-hull kind made a
+column's collision identical to its model *within* a segment; it does nothing
+for the part of a large object that has left one.
 
 **What it costs:** a body can fly through the overhanging part of a heavily
 scaled object. Nothing in a shipped level is scaled at all, so no shipped level
@@ -191,3 +191,39 @@ radius, and only scaling an entity made it obvious.
 
 **To fix:** draw the proxy as a wireframe on the selected object, derived the
 same way `gl::modelTaperedCylinder` derives it, so the two cannot drift.
+
+---
+
+## A model that is not convex still collides as its bounding box
+
+**Where:** `gl::modelConvexHull` in `src/render/model.cpp`.
+
+A convex model gets a collider that is exactly the mesh the renderer draws. A
+model that is not convex is rejected and keeps its bounding box, because the
+only shapes available to it are a convex hull — which fills in its concavities
+and is therefore not the shape on screen either — or per-triangle collision,
+which the project does not do in the sim step.
+
+Of the shipped models, `pillar.obj` and `drone.obj` are convex. The others are
+not, by a corner standing this far outside one of their own faces:
+
+| Model | Worst corner | Hull volume | Box volume |
+| --- | --- | --- | --- |
+| `brute.obj` | 1.00u | 1.06x the mesh | 1.80x |
+| `gunner.obj` | 3.07u | 1.49x | 2.97x |
+| `reactor.obj` | 7.20u | 1.76x | 3.70x |
+
+**What it costs:** a shot or a ship stops against the reactor's bounding box,
+which holds 2.7 times the volume the reactor does. That is the pre-existing
+behaviour and nothing about it got worse, but it is now the largest remaining
+divergence between collision and model in the game.
+
+**In the meantime:** the load-time proxy line names every model that fell back
+and says how far from convex it was, so this is visible rather than assumed.
+
+**To fix:** a real convex hull would roughly halve the error for all three
+without any new query code — the hull is the minimal convex set containing the
+mesh, so it is never worse than the box — at the cost of a hull algorithm and
+the judgement call that a filled-in concavity is acceptable. Exactness needs
+convex decomposition, which is several hulls per model and a broad phase between
+them.

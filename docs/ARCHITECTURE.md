@@ -1166,9 +1166,10 @@ loudly the day someone raises `maxSpeed`.
 A body resting against `mine01`'s pillars used to settle up to **0.92 units**
 past the column's own widest radius, because the proxy was the model's bounding
 box and the column is a tapered octagon — 79% more volume in the collider than
-in the thing being collided with. Columns now get a tapered-cylinder proxy and
-the same measurement reads **0.09 units**, against the column's radius at the
-height the body actually came to rest at. See *Proxy volumes* below.
+in the thing being collided with. A tapered-cylinder proxy took that to 0.09
+units against the cylinder's own surface, leaving the octagon's flats; a convex
+hull takes it to **0.01 units against the mesh itself**, which is the
+resolver's skin and nothing else. See *Proxy volumes* below.
 
 ### `--collision-test`, and four wrong oracles
 
@@ -1317,92 +1318,78 @@ in the sim step are where a projectile system finds its bugs. The box is one
 clamp where the triangle test needs seven barycentric regions, and it has no
 edge or vertex case to get wrong.
 
-#### Three kinds, because a box around a column is mostly air
+#### Three kinds, and the third one is the model
 
 A bounding box is the right shape for a crate and the wrong one for a column.
 `pillar.obj` is a tapered octagon, 2.2 units of radius at the base and 1.7 at
 the top, and the box drawn round it stands 3.11 units out at its corners and
 never narrows. A body could come to rest **1.4 units clear of anything
-visible**, and because `placeProxy` folds the entity's scale into the half
-extents, scaling a pillar in the editor multiplied that gap by the scale: at 3x
-it is 4.2 units, more than two ship radii of open air. That is the divergence
-between collision and model that this kind exists to close.
+visible**, and because `placeProxy` folds the entity's scale into the collider,
+scaling a pillar in the editor multiplied that gap by the scale: at 3x it is 4.2
+units, more than two ship radii of open air.
 
-So `ProxyVolume::Kind` has a third member, `TaperedCylinder`: a conical frustum
-about the model's own Y axis, carrying a radius at each cap alongside the half
-extents every kind already has. `halfExtents` keeps its meaning for all three —
-the box that contains the solid — so `boundingRadius`, the broad-phase reject in
-`occluded`, and anything that only wants to know how big a thing is are
-unchanged. For a frustum that radius is the rim of the wider cap rather than a
-box corner, which is exact.
+So `ProxyVolume::Kind` has a third member, `ConvexHull`, and for a model that is
+convex it is not an approximation of the mesh — **it is the mesh**. The faces
+the renderer draws and the planes that bound the solid are the same planes, so
+the divergence this exists to close is not reduced, it is zero.
 
-The radius is the ring's **circum**radius, not its apothem. An octagon inscribed
-in its own circumscribing circle leaves 7.6% of the radius between the two at
-the flats — 0.17 units on `pillar.obj` — and that is the residual this kind
-does not remove. It is deliberately in that direction: the collider contains the
-mesh everywhere, so a shot always stops at something the player can see. An
-apothem-fitted cylinder would be tighter on the flats and let bolts through the
-column's own corners, which is the failure the proxy work existed to fix in the
-first place.
+There is no hull algorithm here. `gl::modelConvexHull` merges the triangles that
+share a plane (`pillar.obj`'s 28 become 10), checks that no vertex escapes any
+face, and recovers each face's boundary by sorting the vertices on its plane by
+angle about their own middle — no walk over triangle adjacency and nothing to
+get wrong at a shared edge. A model that is **not** convex is rejected rather
+than approximated: computing a real hull for it would produce a solid that is
+not the shape the renderer draws, and how much of that to accept is a separate
+question. The log line says how far from convex it was.
 
-Three primitives in `sim/geometry.h` do the work, beside the box's own:
+Of the shipped models `pillar.obj` (10 planes, 16 corners) and `drone.obj`
+(8 planes, 12 corners) pass. `gunner.obj`, `brute.obj` and `reactor.obj` have
+corners standing 3.07, 1.00 and 7.20 units outside one of their own faces, and
+keep their bounds.
 
-- **`closestPointOnTaperedCylinder`** reduces to two dimensions — a frustum is a
-  solid of revolution, so the problem is the nearest point on a trapezoid in the
-  (radius, height) half plane, swung back around the axis. Its three faces are
-  tested outright; a clamp would only be correct if the side were axis aligned,
-  and on a taper it is not.
-- **`rayTaperedCylinderDistance`** clips to the caps with the box's own slab
-  test and solves one quadratic for the side. Which stretch of the ray that
-  quadratic calls *inside* depends on its leading coefficient — between the
-  roots normally, but **outside** them for a ray running up the taper within the
-  cone's own half angle, and the whole span when there are no roots. Rather than
-  a branch per case the span is cut at the roots and the sign is evaluated at
-  each piece's midpoint, which answers all three identically. The frustum is
-  convex and bounded, so exactly one stretch survives.
-- **`taperedRadiusAt`** is the profile itself, and is what the tests measure
-  against so that a taper is not mistaken for a gap.
+Three primitives in `sim/geometry.h`, beside the box's own:
 
-`proxySphereContact` grows a matching penetration case. A body whose centre is
-inside leaves through the nearest face, as it does for a box, but *nearest* is
-measured along the slanted side's own normal rather than straight out from the
-axis — on a taper those differ, and the perpendicular distance is the one that
-says which face is really closest.
+- **`rayConvexHullDistance`** is the box's slab test with the axes no longer
+  implied — a box *is* this with six planes. It ends up shorter than the code it
+  replaced, which solved a quadratic and had to reason about which side of its
+  roots counted as inside.
+- **`closestPointOnConvexHull`** projects onto each face's plane, asks whether
+  that landed inside the face's boundary, and clamps to the rim when it did not.
+  Every face is tested rather than only the violated ones: for a point beyond an
+  edge the nearest point belongs to two faces at once, and which of them the
+  arithmetic calls violated comes down to the last bit when the dihedral is
+  shallow.
+- **`convexHullEscape`** is the penetration case, and it is the one place a
+  convex solid is easier than a box rather than harder: the nearest face to an
+  interior point is simply the least of the plane distances, exactly, in one
+  pass.
 
-Inflating for a projectile's own thickness is the one place the frustum needs
-arithmetic a box does not. Growing the caps by the bolt's radius is right;
-growing the radii by it is not, because the side moves out along **its** normal,
-which measured radially is `sqrt(4h² + Δr²) / 2h` times as far. On `pillar.obj`
-that factor is 1.0004 and on a steep cone it is not, so it is computed rather
-than assumed.
+`PlacedProxy` carries a `ConvexHullView` — four pointers into arrays the level
+owns — plus the scale. **The hull data is not scaled.** One model's hull is
+shared by every entity placed from it at whatever scale each was given, so a
+query divides into the hull's own space and multiplies the answer back out.
+Uniform scale, so that leaves directions alone and costs one divide. `Level`
+sizes those arrays once and never grows them, because a reallocation would leave
+every proxy in the level pointing at freed memory; `resolveObjectProxies` reads
+every model first and hands out pointers second, for that reason alone.
 
-#### Which models get one, and why the test is strict
+#### The mesh became its own oracle
 
-`gl::modelTaperedCylinder` decides, at load, from the model's own vertices: it
-buckets them into rings by height, requires every ring to be regular (one radius
-within 1%, at least six vertices, no angular gap over 61°) about a shared axis,
-and requires the radius to run **straight** from one cap to the other within 2%.
-Anything it is unsure of it rejects and the caller falls back to bounds.
+This is the part that made the change worth doing rather than merely correct.
 
-Strict on purpose, because a false positive is a collider that does not contain
-its own mesh — the exact bug the proxy work was for, reintroduced. Six sides is
-the floor because a square's corners stand 41% proud of its flats, and
-circumscribing one would be far worse than boxing it; this is also what keeps a
-crate a box. Of the shipped models exactly two pass: `pillar.obj` (2 rings of 8,
-92% round) and `drone.obj` (2 rings of 6, 87% round, and never read — a robot's
-body carries its authored `def.radius`). `reactor.obj` and `brute.obj` are
-rejected because their radius goes back up again partway; `gunner.obj` and
-`ship.obj` are not solids of revolution at all.
+A tapered cylinder is an approximation of a column, so verifying it needed a
+numeric marcher built for the purpose — step along the ray, ask whether the
+point is inside, bisect the crossing. A hull over a convex model has no such
+problem: the triangles ARE the surface, and `geometry.h` already carries exact
+primitives over triangles. So `--light-test`'s `hull oracle` fans the hull's own
+faces into triangles and compares `rayProxyDistance` against
+`rayTriangleDistance` and `closestPointOnProxy` against `closestPointOnTriangle`
+— the same routine the mine's walls use, entirely different arithmetic, and no
+approximation between the two.
 
-The seam is deliberate, and it is the reason this took a new file rather than
-an include:
-
-- **`sim` still never reads an asset.** `ProxyVolume` is glm and nothing else.
-- **`render/model_data.h`** is the GL-free half of `render/model.h`, split out
-  so that something can have a model's geometry without its drawable form.
-  `model.h` pulls in `render/mesh.h` and therefore `render/gl.h`.
-- **`game/proxies.cpp`** is the only place that sees both. It reads OBJ bounds
-  and writes finished `PlacedProxy` values into the level.
+The closest-point path had no oracle at all while the proxies were boxes,
+because a box's closest point is a clamp nobody doubts. It is the fiddliest code
+in the file and it is now the better tested of the two.
 
 `resolveObjectProxies` is called from **`loadLevel`**, not from each caller.
 Eleven headless tests, the asset validator and the game all load levels, and a

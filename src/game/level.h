@@ -5,6 +5,7 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <array>
 #include <cstdint>
@@ -223,6 +224,15 @@ struct Level {
     // `sim::ProxyVolume`. Built by `resolveObjectProxies` in game/proxies.cpp,
     // because deriving it needs the OBJ and `sim` may not read one.
     std::vector<sim::PlacedProxy> objectProxies;
+    // The convex hulls those proxies point into, one per distinct model that
+    // has one, with the flat arrays that back them. Sized once and never grown
+    // afterwards, because a `PlacedProxy` holds raw pointers into them and a
+    // reallocation would leave every proxy in the level pointing at freed
+    // memory. `resolveObjectProxies` builds them in two passes for that reason.
+    std::vector<glm::vec4> hullPlanes;
+    std::vector<glm::vec3> hullVertices;
+    std::vector<int> hullFaceFirst;
+    std::vector<int> hullFaceVertex;
     std::vector<Door> doors;
     std::vector<Pickup> pickups;
     std::vector<FloatingLightDef> floatingLights;

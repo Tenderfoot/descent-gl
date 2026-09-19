@@ -2,6 +2,7 @@
 
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <string>
 #include <vector>
@@ -61,28 +62,46 @@ ModelData cubeModel();
 // with no positions, leaving the outputs untouched.
 bool modelBounds(const ModelData& model, glm::vec3& lo, glm::vec3& hi);
 
-// What `modelTaperedCylinder` found, when it found one.
-struct TaperedCylinderFit {
-    float lowRadius = 0.0f;    // circumradius of the bottom ring
-    float highRadius = 0.0f;   // circumradius of the top ring
-    float halfHeight = 0.0f;
-    glm::vec3 centre{0.0f};    // the axis, midway up, in the model's own space
-    int rings = 0;             // how many rings of vertices it is stacked from
-    int sides = 0;             // the fewest in any one of them
-    float roundness = 0.0f;    // inradius / circumradius of the coarsest ring
-    float profileError = 0.0f; // worst departure from the straight taper, in units
+// A convex polyhedron, derived from a model's own faces.
+//
+// No hull algorithm is involved. For a model that is already convex its faces
+// ARE its hull's faces, so the work is merging the triangles that share a plane
+// - `pillar.obj`'s 28 become 10 - and recovering each face's boundary. A model
+// that is NOT convex is rejected rather than approximated, because computing a
+// real hull for it would produce a solid that is not the shape the renderer
+// draws, and deciding how much of that to accept is a separate question.
+struct ConvexHullFit {
+    // Outward unit normal in xyz, plane offset in w: `dot(n, x) + d <= 0`
+    // inside. The same sign convention the segment sides use, pointing the
+    // other way, because a segment is a space you are inside and this is a
+    // solid you are outside.
+    std::vector<glm::vec4> planes;
+    std::vector<glm::vec3> vertices;
+    // Each plane's boundary polygon, wound counter-clockwise about its outward
+    // normal: `face[i]` is `faceVertex[faceFirst[i] .. faceFirst[i + 1])`,
+    // indexing `vertices`.
+    std::vector<int> faceFirst;
+    std::vector<int> faceVertex;
+
+    float radius = 0.0f;        // the furthest vertex from `centre`
+    glm::vec3 centre{0.0f};     // of the bounds, matching the box proxy
+    glm::vec3 lo{0.0f};
+    glm::vec3 hi{0.0f};
+    // How far the worst vertex sits outside a face plane. Zero for a convex
+    // model; reported so a model that just misses says by how much.
+    float worstOutside = 0.0f;
 };
 
-// Whether the model is a conical frustum about its own Y axis: a stack of
-// regular rings whose radius runs straight from one cap to the other. Tapered
-// columns are, and their bounding boxes are mostly air at the corners.
-//
-// Deliberately strict, because the cost of a false positive is a collider that
-// does not contain its own mesh and lets shots through the parts it missed.
-// Everything it is unsure of it rejects, and the caller falls back to bounds.
-// Of the shipped models only `pillar.obj` and `drone.obj` pass: `reactor.obj`
-// and `brute.obj` have rings whose radius goes back up again, `gunner.obj` and
-// `ship.obj` are not solids of revolution at all.
-bool modelTaperedCylinder(const ModelData& model, TaperedCylinderFit& fit);
+// Beyond these a model is left on its bounding box. Nothing shipped comes near
+// - the largest convex model is 16 vertices over 10 planes - and the point is
+// that the sim step's cost per object stays something you can bound by reading
+// the number, not by trusting the art.
+inline constexpr int kMaxHullPlanes = 64;
+inline constexpr int kMaxHullVertices = 128;
+
+// True when the model is convex, in which case `fit` describes it exactly.
+// False leaves the caller on `modelBounds`, and `fit.worstOutside` says how
+// badly it missed.
+bool modelConvexHull(const ModelData& model, ConvexHullFit& fit);
 
 } // namespace dvk::gl

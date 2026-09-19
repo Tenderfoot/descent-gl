@@ -4,6 +4,7 @@
 #include <glm/geometric.hpp>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -119,150 +120,151 @@ inline float rayBoxDistance(const glm::vec3& origin, const glm::vec3& dir,
     return tFar < 0.0f ? -1.0f : tNear;
 }
 
-// The radius of a conical frustum at a height `y` in its own space, where the
-// axis is Y, the radius is `radii.x` at `y = -halfHeight` and `radii.y` at
-// `y = +halfHeight`. Both radii are positive in every frustum this project
-// builds, so the radius never crosses zero inside the solid and the queries
-// below do not have to ask which nappe of the cone they are on.
-inline float taperedRadiusAt(const glm::vec2& radii, float halfHeight, float y) {
-    if (halfHeight <= 0.0f) return radii.x;
-    const float t = (y + halfHeight) / (2.0f * halfHeight);
-    return radii.x + (radii.y - radii.x) * t;
-}
-
-// Closest point to p on a conical frustum centred on the origin with its axis
-// along Y. A point inside comes back unchanged, so a caller can tell contact
-// from penetration the same way it does for a box.
+// A convex polyhedron handed to the simulation: the planes that bound it, its
+// corners, and each face's boundary. The arrays are owned elsewhere and outlive
+// the view - `Level` builds them once per model type at load.
 //
-// A frustum is a solid of revolution, so this is a two-dimensional problem in
-// the (radius, height) half plane, where the solid is the trapezoid with
-// corners (0, -h), (rLow, -h), (rHigh, +h), (0, +h). The nearest point on that
-// trapezoid, swung back around the axis, is the answer. Its three faces - the
-// two caps and the slanted side - are tested outright rather than clamped,
-// because a clamp is only correct for a box: the side is not axis aligned, so
-// there is no per-axis interval to clamp into.
-inline glm::vec3 closestPointOnTaperedCylinder(const glm::vec3& p, const glm::vec2& radii,
-                                               float halfHeight) {
-    const float h = halfHeight;
-    const float d = std::sqrt(p.x * p.x + p.z * p.z);
+// `sim` still reads no asset. This is the same seam `ProxyVolume` established,
+// widened from a value to a buffer: the game layer is the only thing that sees
+// both an OBJ and a collider, and it hands finished numbers across.
+struct ConvexHullView {
+    const glm::vec4* planes = nullptr;     // xyz outward unit normal, w offset
+    const glm::vec3* vertices = nullptr;
+    const int* faceFirst = nullptr;        // planeCount + 1 entries
+    const int* faceVertex = nullptr;       // indices into `vertices`
+    int planeCount = 0;
+    int vertexCount = 0;
 
-    if (std::abs(p.y) <= h && d <= taperedRadiusAt(radii, h, p.y)) return p;
-
-    // Candidate 1 and 2: straight onto a cap, which for a point off to the side
-    // means the cap's rim.
-    float bestD = glm::clamp(d, 0.0f, radii.x);
-    float bestY = -h;
-    float best = (d - bestD) * (d - bestD) + (p.y + h) * (p.y + h);
-
-    const float topD = glm::clamp(d, 0.0f, radii.y);
-    const float topGap = (d - topD) * (d - topD) + (p.y - h) * (p.y - h);
-    if (topGap < best) {
-        best = topGap;
-        bestD = topD;
-        bestY = h;
+    bool valid() const {
+        return planes && vertices && faceFirst && faceVertex && planeCount >= 4;
     }
-
-    // Candidate 3: the slanted side, as a segment from (rLow, -h) to (rHigh, h).
-    const glm::vec2 a(radii.x, -h);
-    const glm::vec2 edge(radii.y - radii.x, 2.0f * h);
-    const float lengthSquared = glm::dot(edge, edge);
-    if (lengthSquared > 1e-12f) {
-        const glm::vec2 toPoint(d - a.x, p.y - a.y);
-        const float t = glm::clamp(glm::dot(toPoint, edge) / lengthSquared, 0.0f, 1.0f);
-        const glm::vec2 on = a + edge * t;
-        const float gap = (d - on.x) * (d - on.x) + (p.y - on.y) * (p.y - on.y);
-        if (gap < best) {
-            best = gap;
-            bestD = on.x;
-            bestY = on.y;
-        }
+    // Inside is `dot(n, x) + d <= 0` on every plane.
+    float signedDistance(int plane, const glm::vec3& p) const {
+        return glm::dot(glm::vec3(planes[plane]), p) + planes[plane].w;
     }
+};
 
-    // Back out of the half plane. A point on the axis has no radial direction,
-    // and needs none: the nearest point there is on the axis too.
-    if (d > 1e-6f) {
-        const float spread = bestD / d;
-        return glm::vec3(p.x * spread, bestY, p.z * spread);
-    }
-    return glm::vec3(bestD, bestY, 0.0f);
-}
-
-// Distance along a unit `dir` at which the ray enters a conical frustum centred
-// on the origin with its axis along Y, or a negative number if it misses. An
-// origin already inside returns 0. Same contract as `rayBoxDistance`.
+// Distance along a unit `dir` at which the ray enters a convex polyhedron, or a
+// negative number if it misses. An origin already inside returns 0. Same
+// contract as `rayBoxDistance`, and the same algorithm: a box IS this with six
+// planes, so the only change is that the axes are no longer implied.
 //
-// The slab clip on the caps is the box test's, and what is left is a quadratic:
-// the ray is inside the cone where x^2 + z^2 <= radius(y)^2, and radius is
-// linear in y, so squaring both sides gives one quadratic in t.
-//
-// Which stretch of the ray that quadratic marks as inside depends on its
-// leading coefficient - between the roots for a ray crossing the column, but
-// OUTSIDE them for a ray running up the taper steeply enough to stay within the
-// cone's own half angle, and the whole span when there are no roots at all.
-// Rather than a case for each, the span is cut at the roots and the sign is
-// evaluated at the midpoint of each piece, which answers all three the same
-// way. The frustum is convex and bounded, so a ray is inside it over exactly
-// one stretch and the first such piece is the entry.
-inline float rayTaperedCylinderDistance(const glm::vec3& origin, const glm::vec3& dir,
-                                        const glm::vec2& radii, float halfHeight) {
+// `inflate` moves every face outward by that much, which for a polyhedron
+// over-covers the edges and corners where the true swept shape is rounded. The
+// same bias the box takes, for the same reason - a shot stops at something the
+// player can see rather than visibly clipping through it.
+inline float rayConvexHullDistance(const ConvexHullView& hull, const glm::vec3& origin,
+                                   const glm::vec3& dir, float inflate = 0.0f) {
     constexpr float kParallel = 1e-8f;
-    const float h = halfHeight;
-    if (h <= 0.0f) return -1.0f;
+    float tNear = 0.0f;
+    float tFar = std::numeric_limits<float>::max();
 
-    // The window between the two caps.
-    float lo = 0.0f;
-    float hi = std::numeric_limits<float>::max();
-    if (std::abs(dir.y) < kParallel) {
-        if (origin.y < -h || origin.y > h) return -1.0f;
-    } else {
-        float t0 = (-h - origin.y) / dir.y;
-        float t1 = (h - origin.y) / dir.y;
-        if (t0 > t1) std::swap(t0, t1);
-        lo = std::max(lo, t0);
-        hi = std::min(hi, t1);
-    }
-    // The solid is bounded, so nothing past this can be on it. This is also
-    // what keeps `hi` finite for a ray running parallel to the caps, and a
-    // finite `hi` is what lets the midpoints below be evaluated at all.
-    const float widest = std::max(radii.x, radii.y);
-    hi = std::min(hi, glm::length(origin) + std::sqrt(widest * widest + h * h));
-    if (hi < lo) return -1.0f;
-
-    // radius(y) = a + b * y.
-    const float b = (radii.y - radii.x) / (2.0f * h);
-    const float a = 0.5f * (radii.x + radii.y);
-    const float k = a + b * origin.y;
-    const float m = b * dir.y;
-    const float qa = dir.x * dir.x + dir.z * dir.z - m * m;
-    const float qb = 2.0f * (origin.x * dir.x + origin.z * dir.z - k * m);
-    const float qc = origin.x * origin.x + origin.z * origin.z - k * k;
-    const auto inside = [&](float t) { return (qa * t + qb) * t + qc <= 0.0f; };
-
-    float bounds[4];
-    int count = 0;
-    bounds[count++] = lo;
-    if (std::abs(qa) > kParallel) {
-        const float discriminant = qb * qb - 4.0f * qa * qc;
-        if (discriminant >= 0.0f) {
-            const float root = std::sqrt(discriminant);
-            float r0 = (-qb - root) / (2.0f * qa);
-            float r1 = (-qb + root) / (2.0f * qa);
-            if (r0 > r1) std::swap(r0, r1);
-            if (r0 > lo && r0 < hi) bounds[count++] = r0;
-            if (r1 > lo && r1 < hi && r1 > r0) bounds[count++] = r1;
+    for (int i = 0; i < hull.planeCount; ++i) {
+        const glm::vec3 n(hull.planes[i]);
+        const float offset = hull.planes[i].w - inflate;
+        const float denom = glm::dot(n, dir);
+        const float distance = glm::dot(n, origin) + offset;
+        if (std::abs(denom) < kParallel) {
+            // Parallel to this face: either always on its inner side or never.
+            // Guarded explicitly rather than by dividing, for the reason
+            // `rayBoxDistance` spells out.
+            if (distance > 0.0f) return -1.0f;
+            continue;
         }
-    } else if (std::abs(qb) > kParallel) {
-        const float root = -qc / qb;
-        if (root > lo && root < hi) bounds[count++] = root;
+        const float t = -distance / denom;
+        if (denom < 0.0f) tNear = std::max(tNear, t);   // coming in through it
+        else tFar = std::min(tFar, t);                  // going out through it
+        if (tNear > tFar) return -1.0f;
     }
-    bounds[count++] = hi;
+    return tNear;
+}
 
-    for (int i = 0; i + 1 < count; ++i) {
-        if (inside(0.5f * (bounds[i] + bounds[i + 1]))) return std::max(0.0f, bounds[i]);
+// Closest point to `p` on a convex polyhedron. A point inside comes back
+// unchanged, so a caller tells contact from penetration the way it does for a
+// box.
+//
+// Every face is tested rather than only the ones `p` is outside of. That is the
+// conservative reading: for a point beyond an edge the nearest point belongs to
+// two faces at once, and which of them the arithmetic calls "violated" comes
+// down to the last bit when the dihedral is shallow. A shipped hull has ten
+// faces and the broad phase has already thrown out everything not nearby, so
+// the saving was never worth the case analysis.
+inline glm::vec3 closestPointOnConvexHull(const ConvexHullView& hull, const glm::vec3& p) {
+    bool outside = false;
+    for (int i = 0; i < hull.planeCount && !outside; ++i) {
+        if (hull.signedDistance(i, p) > 0.0f) outside = true;
     }
-    // A window of no width, where a midpoint says nothing: the ray grazes the
-    // rim exactly, and the one point it touches is the answer or there is none.
-    return inside(lo) ? std::max(0.0f, lo) : -1.0f;
+    if (!outside) return p;
+
+    glm::vec3 best(0.0f);
+    float bestGap = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < hull.planeCount; ++i) {
+        const glm::vec3 n(hull.planes[i]);
+        const int first = hull.faceFirst[i];
+        const int count = hull.faceFirst[i + 1] - first;
+        if (count < 3) continue;
+
+        // Straight down onto the face's plane, then ask whether that landed on
+        // the face. The boundary is wound counter-clockwise about the outward
+        // normal, so a point inside is to the left of every edge.
+        const glm::vec3 onPlane = p - n * hull.signedDistance(i, p);
+        bool within = true;
+        for (int e = 0; e < count && within; ++e) {
+            const glm::vec3& a = hull.vertices[hull.faceVertex[first + e]];
+            const glm::vec3& b = hull.vertices[hull.faceVertex[first + (e + 1) % count]];
+            if (glm::dot(glm::cross(b - a, onPlane - a), n) < 0.0f) within = false;
+        }
+
+        glm::vec3 candidate = onPlane;
+        if (!within) {
+            // Past the face's rim, so the nearest point on THIS face is on one
+            // of its edges. Clamping to each in turn also covers the corners,
+            // which is the case a plane projection alone gets wrong.
+            float rim = std::numeric_limits<float>::max();
+            for (int e = 0; e < count; ++e) {
+                const glm::vec3& a = hull.vertices[hull.faceVertex[first + e]];
+                const glm::vec3& b = hull.vertices[hull.faceVertex[first + (e + 1) % count]];
+                const glm::vec3 along = b - a;
+                const float lengthSquared = glm::dot(along, along);
+                const float t = lengthSquared > 1e-12f
+                                    ? glm::clamp(glm::dot(p - a, along) / lengthSquared, 0.0f, 1.0f)
+                                    : 0.0f;
+                const glm::vec3 on = a + along * t;
+                const glm::vec3 away = p - on;
+                const float gap = glm::dot(away, away);
+                if (gap < rim) {
+                    rim = gap;
+                    candidate = on;
+                }
+            }
+        }
+
+        const glm::vec3 away = p - candidate;
+        const float gap = glm::dot(away, away);
+        if (gap < bestGap) {
+            bestGap = gap;
+            best = candidate;
+        }
+    }
+
+    return bestGap < std::numeric_limits<float>::max() ? best : p;
+}
+
+// For a point INSIDE a convex polyhedron: how far it is from the nearest face,
+// and that face's outward normal. Exact, and one pass - the nearest face to an
+// interior point of a convex solid is simply the least of its plane distances,
+// where a box needs the same rule and a triangle mesh has no such shortcut.
+inline float convexHullEscape(const ConvexHullView& hull, const glm::vec3& p, glm::vec3& normal) {
+    float least = std::numeric_limits<float>::max();
+    for (int i = 0; i < hull.planeCount; ++i) {
+        const float room = -hull.signedDistance(i, p);   // positive inside
+        if (room < least) {
+            least = room;
+            normal = glm::vec3(hull.planes[i]);
+        }
+    }
+    return least;
 }
 
 // Moller-Trumbore. Returns the distance along a unit `dir`, or a negative

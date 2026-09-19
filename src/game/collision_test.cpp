@@ -592,15 +592,37 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         log::info("pair containment: {} corner cases, {} escapes", tested, escapes);
     }
 
-    // The column's own radius at a height in its own space, whichever shape the
-    // loader gave it. A box around a SQUARE column is a perfect fit and reads
-    // its half width here; a box around a round one reads the widest it ever
-    // is, and the gap at its corners is exactly the bug. Shared by the two
-    // checks below so neither can quietly stop testing the shape it was given.
-    const auto columnRadiusAt = [](const sim::PlacedProxy& proxy, float y) {
-        return proxy.kind == sim::ProxyVolume::Kind::TaperedCylinder
-                   ? sim::taperedRadiusAt(proxy.radii, proxy.halfExtents.y, y)
-                   : std::max(proxy.halfExtents.x, proxy.halfExtents.z);
+    // What the resolver leaves between a body and what it stopped against.
+    // Both object checks below are measured in multiples of it, because it is
+    // the floor on any standoff they could possibly report.
+    constexpr float kSkin = 0.01f;   // sim::CollisionConfig::skin
+
+    // How far a body's hull sits off the object's own surface, in any
+    // direction and for whatever shape the loader chose.
+    //
+    // This used to need a formula per kind - the box's widest half width, then
+    // the frustum's radius at that height - and each one was an argument about
+    // which part of the collider counted as the surface. A convex hull ends
+    // that: `closestPointOnProxy` returns a point on the solid, the solid is
+    // the model's own faces, so the gap it measures is the gap to the mesh the
+    // renderer draws. A box column still reads correctly here, and a box around
+    // a ROUND column reads the 0.92u that started all this.
+    const auto standoff = [](const sim::PlacedProxy& proxy, const glm::vec3& position,
+                             float radius) {
+        return glm::length(position - sim::closestPointOnProxy(proxy, position)) - radius;
+    };
+
+    // The unplaced volume behind a placed proxy, so the same shape can be put
+    // down again at another scale through the call the loader uses. `centre`
+    // stays at the origin, so re-placing it at the proxy's own centre grows it
+    // about the point it already stands on.
+    const auto unplace = [](const sim::PlacedProxy& placed) {
+        sim::ProxyVolume volume;
+        volume.kind = placed.kind;
+        volume.halfExtents = placed.halfExtents / placed.scale;
+        volume.hull = placed.hull;
+        volume.radius = placed.radius / placed.scale;
+        return volume;
     };
 
     // --- a body cannot enter a level object -------------------------------
@@ -614,7 +636,6 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         int tested = 0;
         int entered = 0;
         int settled = 0;
-        int tapered = 0;
         float worstGap = 0.0f;
 
         // Everything is solid for this test: no robots in the way of the point.
@@ -659,28 +680,26 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                     ++entered;
                     continue;
                 }
-                // Only a body that actually came to rest against the box says
-                // anything about the box's fit. One that stopped against a wall
-                // on the way in is measuring the room, not the column.
-                if (!sim::proxySphereContact(proxy, body.position, body.radius + 0.25f, contact)) {
+                // Only a body that actually came to rest against the OBJECT
+                // says anything about its fit. One that stopped against a wall
+                // on the way in is measuring the room.
+                //
+                // The slack used to be 0.25u, which was noise beside a box's
+                // 0.92u of air. Against a collider that is the mesh it would be
+                // the whole signal - a body a fifth of a unit off the column,
+                // held there by a wall, would be reported as the column's own
+                // fit. Five times the resolver's skin is what "in contact"
+                // means here.
+                if (!sim::proxySphereContact(proxy, body.position, body.radius + 5.0f * kSkin,
+                                             contact)) {
                     continue;
                 }
                 ++settled;
-                // How far it sits from the column's own surface. The column is
-                // a solid of revolution about its own Y, so compare against its
-                // radius AT THIS HEIGHT - against the widest it ever is, which
-                // is what this measured while the proxy was a box, a taper
-                // reads as a gap that is really the model getting narrower.
-                // Only meaningful beside the column, not above or below its
-                // caps.
-                const glm::vec3 local =
-                    glm::conjugate(proxy.orientation) * (body.position - proxy.centre);
-                if (std::abs(local.y) < proxy.halfExtents.y - body.radius) {
-                    const float radial = glm::length(glm::vec2(local.x, local.z));
-                    worstGap = std::max(worstGap, radial - body.radius -
-                                                      columnRadiusAt(proxy, local.y));
-                    ++tapered;
-                }
+                // Every resting contact counts now, caps included. The old
+                // measure compared against a radius, so a body on a cap had
+                // nothing to be measured against and was skipped; a distance to
+                // the surface has no such blind spot.
+                worstGap = std::max(worstGap, standoff(proxy, body.position, body.radius));
             }
         }
 
@@ -689,21 +708,18 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         } else {
             ok &= expect(entered == 0, "a body never ends up inside a level object");
             log::info("object collision: {} approaches, {} came to rest on the object, {} "
-                      "entered it; worst standoff past the column's own radius at that height "
-                      "{:.2f}u, over {} contacts beside it (the rest came to rest on a cap, "
-                      "where there is no radius to measure)",
-                      tested, settled, entered, worstGap, tapered);
-            if (tapered > 0) {
-                // Asserted for whatever shape the loader chose, not only for a
-                // tapered one: a box around a square column passes this too,
-                // and a box around a ROUND column - which is what this used to
-                // be, at 0.92u - fails it. Gating the assertion on the kind
-                // would make a regression to bounds skip the check rather than
-                // trip it. What is left is the resolver's own skin plus the
-                // flats of an octagon inside the circle drawn round it; the
-                // load-time proxy line reports how round the ring is.
-                ok &= expect(worstGap < 0.25f,
-                             "a body rests within a quarter unit of the column's own surface");
+                      "entered it; worst standoff past the object's own surface {:.2f}u",
+                      tested, settled, entered, worstGap);
+            if (settled > 0) {
+                // Asserted for whatever shape the loader chose, never gated on
+                // the kind: a box around a SQUARE column passes this, and a box
+                // around a round one - which is what this was, at 0.92u - does
+                // not. Gating would let a regression to bounds skip the check
+                // rather than trip it. What is left is the resolver's own skin,
+                // because the surface being measured against is now the mesh
+                // itself rather than a shape drawn around it.
+                ok &= expect(worstGap < 0.1f,
+                             "a body rests within a tenth of a unit of the object's own surface");
             }
         }
     }
@@ -735,13 +751,8 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
             const sim::PlacedProxy& placed = level.objectProxies[static_cast<size_t>(column)];
             // Back to an unplaced volume, so it can be put down again at other
             // scales through the same call the level loader uses.
-            const sim::ProxyVolume volume =
-                placed.kind == sim::ProxyVolume::Kind::TaperedCylinder
-                    ? sim::taperedCylinderProxy(placed.radii.x, placed.radii.y,
-                                                placed.halfExtents.y)
-                    : sim::boxProxy(-placed.halfExtents, placed.halfExtents);
+            const sim::ProxyVolume volume = unplace(placed);
 
-            constexpr float kSkin = 0.01f;
             const float radius = flight.shipRadius;
             float worstPerScale = 0.0f;
             float worstAt = 1.0f;
@@ -753,16 +764,12 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                     sim::placeProxy(volume, placed.centre, placed.orientation, scale);
                 const float half = grown.halfExtents.y;
 
-                for (const glm::vec3& dir : dirs) {
-                    // Sideways only: a cap has no radius to be measured against,
-                    // and is the box's one good fit anyway.
-                    const glm::vec3 flat(dir.x, 0.0f, dir.z);
-                    if (glm::length(flat) < 1e-3f) continue;
-                    const glm::vec3 out = glm::normalize(flat);
-
+                for (const glm::vec3& out : dirs) {
+                    // All 26, caps and corners included. The old measure only
+                    // made sense beside the column; a distance to the surface
+                    // works in every direction, so every direction is flown.
                     for (const float fraction : {-0.6f, -0.3f, 0.0f, 0.3f, 0.6f}) {
                         const float y = fraction * half;
-                        const float surface = columnRadiusAt(grown, y);
 
                         // Fly it in, rather than starting it inside and pushing
                         // it out. The two are not the same question: a body
@@ -772,29 +779,35 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                         // air was. Approaching is what the player does.
                         glm::vec3 position =
                             grown.centre + grown.orientation * glm::vec3(0.0f, y, 0.0f) +
-                            out * (surface + radius + 4.0f * scale);
+                            out * (grown.boundingRadius() + radius + scale);
 
+                        // In until it touches, then out until it is clear -
+                        // the resolver's own two moves, and nothing after them.
+                        //
+                        // The first draft kept marching for a fixed count after
+                        // contact, which let the body slide along a face, off
+                        // its rim, and away into open space; the gap was then
+                        // measured wherever it had drifted to and reported 5.8u
+                        // per unit of scale against a collider that is exact.
+                        // Where a body stops on the way IN is the question.
                         const float step = 0.02f * scale;
                         bool touched = false;
                         sim::ProxyContact contact;
-                        for (int i = 0; i < 400; ++i) {
+                        for (int i = 0; i < 1200 && !touched; ++i) {
                             position -= out * step;
-                            if (!sim::proxySphereContact(grown, position, radius, contact)) {
-                                continue;
-                            }
-                            touched = true;
-                            position += contact.normal * (contact.depth + kSkin);
+                            touched = sim::proxySphereContact(grown, position, radius, contact);
                         }
                         if (!touched) {
                             ++missed;
                             continue;
                         }
+                        for (int i = 0; i < 8; ++i) {
+                            if (!sim::proxySphereContact(grown, position, radius, contact)) break;
+                            position += contact.normal * (contact.depth + kSkin);
+                        }
 
                         ++checked;
-                        const glm::vec3 local =
-                            glm::conjugate(grown.orientation) * (position - grown.centre);
-                        const float radial = glm::length(glm::vec2(local.x, local.z));
-                        const float gap = radial - radius - columnRadiusAt(grown, local.y);
+                        const float gap = standoff(grown, position, radius);
                         if (gap / scale > worstPerScale) {
                             worstPerScale = gap / scale;
                             worstAt = scale;

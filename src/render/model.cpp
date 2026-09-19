@@ -8,13 +8,12 @@
 #include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
-#include <glm/gtc/constants.hpp>
-#include <glm/trigonometric.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <vector>
 
 namespace dvk::gl {
@@ -77,115 +76,124 @@ bool modelBounds(const ModelData& model, glm::vec3& lo, glm::vec3& hi) {
     return true;
 }
 
-bool modelTaperedCylinder(const ModelData& model, TaperedCylinderFit& fit) {
+namespace {
+
+// Where a plane already in the list matches this one, within tolerance.
+int findPlane(const std::vector<glm::vec4>& planes, const glm::vec3& n, float d, float tol) {
+    for (size_t i = 0; i < planes.size(); ++i) {
+        const glm::vec3 pn(planes[i]);
+        if (glm::dot(pn, n) > 0.9999f && std::abs(planes[i].w - d) <= tol) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
+bool modelConvexHull(const ModelData& model, ConvexHullFit& fit) {
+    fit = ConvexHullFit{};
+    if (model.positions.size() < 4 || model.triangles.size() < 4) return false;
+    if (model.positions.size() > static_cast<size_t>(kMaxHullVertices)) return false;
+
     glm::vec3 lo(0.0f);
     glm::vec3 hi(0.0f);
     if (!modelBounds(model, lo, hi)) return false;
+    const glm::vec3 size = hi - lo;
+    const float extent = std::max(size.x, std::max(size.y, size.z));
+    if (extent <= 1e-6f) return false;
+    // Relative, so a model authored at any scale is judged the same way.
+    const float tol = extent * 1e-4f;
 
-    const float height = hi.y - lo.y;
-    const float width = std::max(hi.x - lo.x, hi.z - lo.z);
-    if (height <= 1e-4f || width <= 1e-4f) return false;
+    // A point known to be inside, used only to orient the planes. The mean of
+    // the vertices is inside any convex solid, which saves this from having to
+    // trust the winding - and the winding is exactly the thing an art pipeline
+    // gets wrong quietly.
+    glm::vec3 interior(0.0f);
+    for (const glm::vec3& p : model.positions) interior += p;
+    interior /= static_cast<float>(model.positions.size());
 
-    // Group the vertices into rings by height. The tolerance is relative, so a
-    // model authored in any scale buckets the same way.
-    const float bucket = std::max(1e-4f, height * 1e-3f);
-    std::vector<float> levels;
-    for (const glm::vec3& p : model.positions) {
-        bool found = false;
-        for (const float y : levels) {
-            if (std::abs(p.y - y) <= bucket) {
-                found = true;
-                break;
+    for (const glm::uvec3& tri : model.triangles) {
+        const glm::vec3& a = model.positions[tri.x];
+        const glm::vec3& b = model.positions[tri.y];
+        const glm::vec3& c = model.positions[tri.z];
+        glm::vec3 n = glm::cross(b - a, c - a);
+        const float area = glm::length(n);
+        if (area <= 1e-9f) continue;   // degenerate sliver, carries no plane
+        n /= area;
+        float d = -glm::dot(n, a);
+        if (glm::dot(n, interior) + d > 0.0f) {
+            n = -n;
+            d = -d;
+        }
+        // A flat or hollow model puts its own middle on a face. There is no
+        // solid there to collide with, so say so rather than building one.
+        if (glm::dot(n, interior) + d > -tol) return false;
+        if (findPlane(fit.planes, n, d, tol) < 0) {
+            if (fit.planes.size() >= static_cast<size_t>(kMaxHullPlanes)) return false;
+            fit.planes.emplace_back(n, d);
+        }
+    }
+    if (fit.planes.size() < 4) return false;
+
+    // Convex exactly when no vertex escapes any face.
+    for (const glm::vec4& plane : fit.planes) {
+        for (const glm::vec3& p : model.positions) {
+            fit.worstOutside = std::max(fit.worstOutside, glm::dot(glm::vec3(plane), p) + plane.w);
+        }
+    }
+    if (fit.worstOutside > tol) return false;
+
+    fit.vertices = model.positions;
+    fit.lo = lo;
+    fit.hi = hi;
+    fit.centre = (lo + hi) * 0.5f;
+    for (const glm::vec3& p : fit.vertices) {
+        fit.radius = std::max(fit.radius, glm::length(p - fit.centre));
+    }
+
+    // Each face's boundary. For a convex solid the vertices ON a plane are
+    // exactly that face's corners, so the boundary is recovered by sorting them
+    // by angle about their own middle - no walk over triangle adjacency, and
+    // nothing to get wrong at a shared edge.
+    std::vector<std::pair<float, int>> ring;
+    fit.faceFirst.reserve(fit.planes.size() + 1);
+    fit.faceFirst.push_back(0);
+    for (const glm::vec4& plane : fit.planes) {
+        const glm::vec3 n(plane);
+        ring.clear();
+
+        glm::vec3 middle(0.0f);
+        for (size_t vi = 0; vi < fit.vertices.size(); ++vi) {
+            if (std::abs(glm::dot(n, fit.vertices[vi]) + plane.w) <= tol) {
+                middle += fit.vertices[vi];
+                ring.emplace_back(0.0f, static_cast<int>(vi));
             }
         }
-        if (!found) levels.push_back(p.y);
-    }
-    if (levels.size() < 2 || levels.size() > 64) return false;
-    std::sort(levels.begin(), levels.end());
+        if (ring.size() < 3) return false;   // a plane with no face on it
+        middle /= static_cast<float>(ring.size());
 
-    // The axis, from the rings themselves rather than from the bounding box: a
-    // regular ring's centroid is its centre exactly, and a model whose rings do
-    // not share one axis fails the radius check below rather than being fitted
-    // to a lie.
-    glm::vec2 axis(0.0f);
-    for (const float y : levels) {
-        glm::vec2 sum(0.0f);
-        int members = 0;
-        for (const glm::vec3& p : model.positions) {
-            if (std::abs(p.y - y) > bucket) continue;
-            sum += glm::vec2(p.x, p.z);
-            ++members;
+        // An in-plane basis. `u` points at the first corner, and `w = n x u`
+        // makes (u, w, n) right-handed, so sorting by increasing angle winds
+        // the face counter-clockwise seen from outside - which is what the
+        // edge test in `closestPointOnConvexHull` assumes.
+        glm::vec3 u = fit.vertices[static_cast<size_t>(ring.front().second)] - middle;
+        const float uLength = glm::length(u);
+        if (uLength <= 1e-9f) return false;
+        u /= uLength;
+        const glm::vec3 w = glm::cross(n, u);
+
+        for (auto& entry : ring) {
+            const glm::vec3 away = fit.vertices[static_cast<size_t>(entry.second)] - middle;
+            entry.first = std::atan2(glm::dot(away, w), glm::dot(away, u));
         }
-        if (members == 0) return false;
-        axis += sum / static_cast<float>(members);
-    }
-    axis /= static_cast<float>(levels.size());
+        std::sort(ring.begin(), ring.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    std::vector<float> radii;
-    radii.reserve(levels.size());
-    fit.sides = 0;
-    fit.roundness = 1.0f;
-
-    std::vector<float> angles;
-    for (const float y : levels) {
-        angles.clear();
-        float ringRadius = 0.0f;
-        float tightest = std::numeric_limits<float>::max();
-        for (const glm::vec3& p : model.positions) {
-            if (std::abs(p.y - y) > bucket) continue;
-            const glm::vec2 flat = glm::vec2(p.x, p.z) - axis;
-            const float r = glm::length(flat);
-            // A cap fan's middle vertex sits on the axis and says nothing about
-            // the ring's radius.
-            if (r <= 1e-4f * width) continue;
-            ringRadius = std::max(ringRadius, r);
-            tightest = std::min(tightest, r);
-            angles.push_back(std::atan2(flat.y, flat.x));
-        }
-
-        // Six sides is the fewest that still rounds: a square's corners stand
-        // 41% proud of its own flats, so circumscribing one would put the
-        // collider a long way outside the mesh. This is also what keeps a crate
-        // a box.
-        if (angles.size() < 6) return false;
-        // One radius per ring, or it is not a ring.
-        if (ringRadius - tightest > ringRadius * 0.01f) return false;
-
-        // Evenly spread, so the circumscribing circle really does track the
-        // silhouette rather than riding on one distant vertex.
-        std::sort(angles.begin(), angles.end());
-        float widestGap = angles.front() + 2.0f * glm::pi<float>() - angles.back();
-        for (size_t i = 1; i < angles.size(); ++i) {
-            widestGap = std::max(widestGap, angles[i] - angles[i - 1]);
-        }
-        if (widestGap > glm::radians(61.0f)) return false;
-
-        fit.roundness = std::min(fit.roundness, std::cos(widestGap * 0.5f));
-        fit.sides = fit.sides == 0 ? static_cast<int>(angles.size())
-                                   : std::min(fit.sides, static_cast<int>(angles.size()));
-        radii.push_back(ringRadius);
+        for (const auto& entry : ring) fit.faceVertex.push_back(entry.second);
+        fit.faceFirst.push_back(static_cast<int>(fit.faceVertex.size()));
     }
 
-    // The radius has to run STRAIGHT from one cap to the other. A model that
-    // bulges or waists between them - the reactor does both - is not a frustum,
-    // and fitting one to it would put its collider inside its own mesh.
-    const float low = radii.front();
-    const float high = radii.back();
-    const float span = levels.back() - levels.front();
-    if (span <= 1e-4f) return false;
-
-    fit.profileError = 0.0f;
-    for (size_t i = 0; i < levels.size(); ++i) {
-        const float t = (levels[i] - levels.front()) / span;
-        fit.profileError = std::max(fit.profileError, std::abs(radii[i] - (low + (high - low) * t)));
-    }
-    if (fit.profileError > std::max(low, high) * 0.02f) return false;
-
-    fit.lowRadius = low;
-    fit.highRadius = high;
-    fit.halfHeight = span * 0.5f;
-    fit.centre = glm::vec3(axis.x, 0.5f * (levels.front() + levels.back()), axis.y);
-    fit.rings = static_cast<int>(levels.size());
     return true;
 }
 
