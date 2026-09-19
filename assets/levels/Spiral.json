@@ -1,0 +1,178 @@
+{
+  "name": "Spiral",
+  "comment": "Created in the level editor. One room; grow the rest with extrude.",
+  "vertices": [
+    [
+      -90.0,
+      0.0,
+      0.0
+    ],
+    [
+      20.0,
+      0.0,
+      0.0
+    ],
+    [
+      20.0,
+      50.0,
+      0.0
+    ],
+    [
+      -70.0,
+      50.0,
+      0.0
+    ],
+    [
+      -90.0,
+      0.0,
+      100.0
+    ],
+    [
+      20.0,
+      0.0,
+      100.0
+    ],
+    [
+      20.0,
+      50.0,
+      100.0
+    ],
+    [
+      -70.0,
+      50.0,
+      100.0
+    ]
+  ],
+  "segments": [
+    {
+      "verts": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "sides": [
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 1
+        },
+        {
+          "texture": 0
+        },
+        {
+          "texture": 0
+        }
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "position": [
+        -37.0,
+        10.0,
+        68.0
+      ],
+      "radius": 90.0,
+      "color": [
+        1.0,
+        0.92,
+        0.8
+      ],
+      "intensity": 2.0,
+      "type": "point",
+      "segment": 0
+    },
+    {
+      "position": [
+        -40.0,
+        25.0,
+        50.0
+      ],
+      "radius": 30.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "type": "point",
+      "segment": 0
+    },
+    {
+      "position": [
+        -33.0,
+        34.0,
+        35.0
+      ],
+      "radius": 30.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "type": "point",
+      "segment": 0
+    },
+    {
+      "position": [
+        -12.0,
+        39.0,
+        33.0
+      ],
+      "radius": 30.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "intensity": 1.0,
+      "type": "point",
+      "segment": 0
+    }
+  ],
+  "start": {
+    "segment": 0,
+    "position": [
+      10.0,
+      10.0,
+      10.0
+    ],
+    "orientation": [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "objects": [
+    {
+      "type": "pillar",
+      "position": [
+        -22.0,
+        26.0,
+        50.0
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": 3.0,
+      "segment": 0
+    }
+  ]
+}
