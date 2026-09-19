@@ -198,3 +198,14 @@ details summary { cursor: pointer; padding: 4px 0; font-size: 12px; }
 }
 #generate-form input[type="range"] { padding: 0; accent-color: var(--accent); }
 #generate-form .row { margin: 4px 0 0; }
+
+/* What the last roll turned out to be. Its seed is the number that brings that
+   mine back, and it lives here rather than only in the status line because the
+   next message would wipe it. */
+#generate-form .last-roll {
+    padding: 6px 8px;
+    color: var(--ok);
+    background: #21252c;
+    border-left: 2px solid var(--ok);
+    border-radius: 0 3px 3px 0;
+}

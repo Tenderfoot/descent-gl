@@ -61,10 +61,20 @@ export function newLevel(name, size = 20) {
 // say no before a round trip rather than after.
 export const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
-export function checkName(name, existing) {
+// The pattern half on its own, because the two buttons that make levels want
+// different answers to "it already exists". New... refuses outright: writing an
+// empty room over a level is always a mistake. Generate... asks, because
+// re-rolling until a mine is worth keeping is the whole point of it.
+export function checkLevelName(name) {
     if (!NAME_PATTERN.test(name ?? '')) {
         return 'a level name is letters, digits, dash and underscore, starting with a letter or digit';
     }
+    return null;
+}
+
+export function checkName(name, existing) {
+    const complaint = checkLevelName(name);
+    if (complaint) return complaint;
     if (existing.includes(name)) return `${name} already exists — open it instead`;
     return null;
 }

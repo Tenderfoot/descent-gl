@@ -74,6 +74,12 @@ const STEPS = [
 ];
 const OPPOSITE_STEP = [2, 3, 0, 1, 5, 4];
 
+// The mark every generated mine carries in its comment.
+//
+// Exported so the editor can tell a roll it may replace from a level somebody
+// built by hand, without a second copy of the string to drift out of step.
+export const GENERATED_MARK = 'Generated in the level editor.';
+
 export const GENERATOR_DEFAULTS = {
     rooms: 24,
     loops: 3,
@@ -645,7 +651,7 @@ function attempt(name, options, seed) {
     // the mine grows from matches every room grown from it.
     moveVertices(level, level.vertices.map((v, i) => [i, [v[0], v[1] / ROOM * CELL[1],
                                                           v[2] / ROOM * CELL[2]]]));
-    level.comment = `Generated in the level editor. seed ${seed}, ${options.rooms} rooms.`;
+    level.comment = `${GENERATED_MARK} seed ${seed}, ${options.rooms} rooms.`;
 
     const cells = growCells(rng, Math.max(2, options.rooms), options.loops);
     const edges = latticeEdges(cells);

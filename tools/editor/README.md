@@ -89,7 +89,19 @@ that can judge the rest.
 
 The seed a roll reports is the one that produced the mine you are looking at —
 when earlier rolls were rejected it is not the number you typed. Type it back
-in to get the same mine on the first roll.
+in to get the same mine on the first roll. It stays on the dialog as *last
+roll* so it survives the next status message.
+
+Rolling again over the same name **replaces** it, after asking. That is the
+loop the button is for, and it is why an existing name is a question here
+rather than the refusal **New…** gives: a mine you have discarded should not
+outlive you discarding it. Generated levels are validated at every game start
+and listed in the player's own level menu, so a session of re-rolls that left
+`Generated7` behind would cost something every launch.
+
+A name that was **not** made by the generator gets a blunter question, because
+the field is one typo away from `mine01` and a file write cannot be undone from
+here.
 
 **Top** (or `T`) is the automap's view — straight down, orthographic, rotation
 locked. It is the view that makes "this corridor doubles back over that room"
