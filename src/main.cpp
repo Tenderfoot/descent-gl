@@ -314,6 +314,17 @@ int main(int argc, char** argv) {
     session.load(level, robotConfig, opts.startSegment);
     dvk::SimState& prev = session.previous();
     dvk::SimState& cur = session.current();
+    // What the level's script says the player starts with. On `initial()` for
+    // the same reason the headlight below is: that is the state every start
+    // and every restart is copied from, and the live states are only written
+    // here as well so a run that never calls start() - a screenshot, a
+    // frame-limited pass - still shows the loadout the level asked for.
+    const auto applySessionLoadout = [&] {
+        dvk::applyLoadout(script.loadout(), session.initial().combat.player);
+        dvk::applyLoadout(script.loadout(), prev.combat.player);
+        dvk::applyLoadout(script.loadout(), cur.combat.player);
+    };
+    applySessionLoadout();
     // The headlight is off at the start, so a frame-limited run has no way to
     // show it without someone pressing H. Both states have to be screenshot-
     // able for the retune to be checkable at all. Set on the initial state
@@ -460,6 +471,7 @@ int main(int argc, char** argv) {
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
         loadScript();
+        applySessionLoadout();
         activeCommMessage = -1;
         activeCommClip = 0;
         commPlayer.stop();

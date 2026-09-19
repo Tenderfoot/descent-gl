@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "core/alloc_count.h"
 #include "game/level.h"
+#include "sim/combat.h"
 #include "sim/gameflow.h"
 
 #include <lua.hpp>
@@ -22,6 +23,25 @@ constexpr size_t kMaxMessageId = 64;
 constexpr size_t kMaxClipName = 64;
 constexpr size_t kMaxSpeaker = 32;
 constexpr size_t kMaxText = 512;
+
+// One optional number out of a declaration table. Absent leaves `out`
+// untouched, which is how a loadout field the script never mentioned keeps
+// the PlayerState default rather than being zeroed.
+bool optionalNumber(lua_State* state, int table, const char* field, const char* what, double low,
+                    double high, double& out) {
+    lua_getfield(state, table, field);
+    const bool present = !lua_isnil(state, -1);
+    if (present) {
+        const double value = luaL_checknumber(state, -1);
+        if (!std::isfinite(value) || value < low || value > high) {
+            lua_pop(state, 1);
+            luaL_error(state, "loadout %s must be between %g and %g", what, low, high);
+        }
+        out = value;
+    }
+    lua_pop(state, 1);
+    return present;
+}
 
 const char* requiredString(lua_State* state, int table, const char* field) {
     lua_getfield(state, table, field);
@@ -82,6 +102,8 @@ void ScriptHost::clear() {
     if (state_) lua_close(state_);
     state_ = nullptr;
     memory_.used = 0;
+    loadout_ = ScriptLoadout{};
+    loadoutDeclared_ = false;
     triggers_ = sim::TriggerSet{};
     callbacks_.fill(LUA_NOREF);
     messages_.clear();
@@ -115,6 +137,7 @@ void ScriptHost::load(const Level& level) {
     removeGlobal(state_, "load");
     removeGlobal(state_, "loadfile");
 
+    expose(state_, this, "loadout", &ScriptHost::declareLoadout);
     expose(state_, this, "message", &ScriptHost::declareMessage);
     expose(state_, this, "trigger", &ScriptHost::declareTrigger);
     expose(state_, this, "comm", &ScriptHost::startComm);
@@ -164,6 +187,40 @@ int ScriptHost::declareMessage(lua_State* state) {
     if (host->findMessage(id) >= 0) return luaL_error(state, "duplicate message id '%s'", id);
 
     host->messages_.push_back({id, clip, speaker, text, seconds});
+    return 0;
+}
+
+int ScriptHost::declareLoadout(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->loadoutDeclared_) return luaL_error(state, "a level declares at most one loadout");
+
+    // Shields are the one field with no zero: at zero the level is already
+    // lost, and a level that starts lost is a level file bug rather than an
+    // authoring choice. Everything between there and the disabled threshold
+    // is legitimate - that band is how a level starts the ship crippled.
+    double value = 0.0;
+    if (optionalNumber(state, 1, "shields", "shields", 0.01,
+                       static_cast<double>(sim::kPlayerMaxShields), value)) {
+        host->loadout_.shields = static_cast<float>(value);
+    }
+    if (optionalNumber(state, 1, "energy", "energy", 0.0, 100.0, value)) {
+        host->loadout_.energy = static_cast<float>(value);
+    }
+    if (optionalNumber(state, 1, "vulcan", "vulcan ammo", 0.0, 50'000.0, value)) {
+        host->loadout_.vulcanAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "concussion", "concussion ammo", 0.0, 999.0, value)) {
+        host->loadout_.concussionAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "homing", "homing ammo", 0.0, 999.0, value)) {
+        host->loadout_.homingAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {
+        host->loadout_.flares = static_cast<int>(value);
+    }
+
+    host->loadoutDeclared_ = true;
     return 0;
 }
 
@@ -356,6 +413,15 @@ static int runOneScriptTest(const std::string& levelPath) {
     log::info("script-test: {} trigger(s), callbacks healthy, 10000 evaluations and {} allocation(s): passed",
               host.triggers().count, allocationCount);
     return 0;
+}
+
+void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player) {
+    if (loadout.shields >= 0.0f) player.shields = loadout.shields;
+    if (loadout.energy >= 0.0f) player.energy = loadout.energy;
+    if (loadout.vulcanAmmo >= 0) player.vulcanAmmo = loadout.vulcanAmmo;
+    if (loadout.concussionAmmo >= 0) player.concussionAmmo = loadout.concussionAmmo;
+    if (loadout.homingAmmo >= 0) player.homingAmmo = loadout.homingAmmo;
+    if (loadout.flares >= 0) player.flares = loadout.flares;
 }
 
 int runScriptTest(const std::string& levelPath) {
