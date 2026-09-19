@@ -2485,3 +2485,117 @@ than a shape one, and now written up in `docs/KNOWN_ISSUES.md`.
 **The editor still draws no proxy.** `tools/editor` renders the true mesh scaled
 by `object.scale` and nothing else, so an author cannot see the collider they
 are placing. That is how this shipped unnoticed at 1x.
+
+## The collider is the model
+
+The tapered cylinder closed most of the gap between a column's collision and its
+mesh, and left 8% of it: the collider was the circle drawn round an octagon, so
+its flats sat 0.17 units inside it at scale 1 — and that residual scaled with
+the entity like everything else, reaching a full ship radius at 10x. A cylinder
+is an approximation of a column. A convex model does not need one.
+
+`ProxyVolume::Kind::ConvexHull` replaces `TaperedCylinder` outright. For a
+convex model the faces the renderer draws and the planes that bound the collider
+are the same planes, so what stops a ship, what stops a shot, what a robot
+cannot see through and what the CPU light query treats as solid are not merely
+the same volume as each other — they are the same volume as the picture. The
+full argument is in `docs/ARCHITECTURE.md` under *Proxy volumes*.
+
+No hull algorithm is involved: `gl::modelConvexHull` merges coplanar triangles
+into planes, checks no vertex escapes a face, and recovers each face's boundary
+by angle. A model that is not convex is rejected rather than approximated, and
+the load-time line says how far from convex it was.
+
+### What the numbers did
+
+| Measurement | box (M9) | cylinder (`main`) | here |
+| --- | --- | --- | --- |
+| Standoff past the proxy's own surface | 0.92u | 0.09u | **0.01u** |
+| Standoff past the MESH the renderer draws | 1.41u | 0.26u | **0.01u** |
+| Standoff per unit of entity scale, 1x to 7.5x | 0.921u | 0.011u | **0.010u** |
+| Proxy volume against the model's | +79% | +8% | **+0%** |
+| Planes in the pillar's collider | 6 | — | 10 |
+
+0.01u is `CollisionConfig::skin`. There is nothing else left in the number: the
+surface being measured against is the surface being drawn.
+
+The second row is the one worth reading twice. The first row flatters the
+cylinder, because it measures against the cylinder rather than against the
+column — the two were only the same thing once the collider became the mesh.
+
+### Tests
+
+`--collision-test` no longer needs a radius formula per kind. Both object checks
+measure through `closestPointOnProxy`, so they work for any shape and now report
+distance to the mesh rather than to a shape drawn around it. Two consequences:
+every resting contact counts, caps included, where the old radial measure had to
+skip them; and the "came to rest on the object" slack came down from 0.25u to
+five times the resolver's skin, because 0.25u was noise beside a box's 0.92u and
+would have been the entire signal against a collider that is exact.
+
+`--light-test` replaces the frustum's numeric marcher with `hull oracle`, which
+checks **both** query paths against the model's own triangles through
+Möller–Trumbore and `closestPointOnTriangle`: **5670 rays and 3936 closest-point
+probes, 0 disagreements, worst gaps 0.0005u and 0.0003u.** The box oracle still
+runs on the reactor and the robot proxies at 630 rays / 0 disagreements.
+
+### Two bugs the off-tree harness found, both in the harness
+
+Worth recording, because the failures looked exactly like broken collision code
+and were not.
+
+A stress harness ran 2.16M rays and 1.65M closest-point probes over nine convex
+shapes — triangular prism, near-cone, inverted taper, sheared prism, a 0.2-unit
+slab, a 32-gon — at four scales under an arbitrary rotation, with 513k origins
+inside the solid and 540k rays exactly parallel to a face. Its first run reported
+gaps of 30 and 45 units and 346 failures to escape.
+
+1. **It flipped its plane normals outward but never reordered its face
+   vertices**, so its winding disagreed with its own normals and the edge test
+   in `closestPointOnConvexHull` inverted. `modelConvexHull` cannot have this
+   bug — it sorts each face in a basis built *from* the outward normal — which
+   is why the in-repo oracle passed throughout.
+2. **It classified inside/outside with a different margin from the query's own
+   definition**, so a point a hair inside was compared as though outside: the
+   slab test answers 0 there and the triangles answer the *exit* distance.
+
+Fixed, the harness reports **0 mismatches**: 26 ray verdict splits, all landing
+on the surface within the triangle test's own 1e-4 edge slack; 0 returned points
+off the solid; 0 failures to escape from 513k buried contacts; worst resting
+overshoot 0.0001u per unit of scale.
+
+The remaining disagreements are all one-sided in the same direction —
+`closestPointOnProxy` comes back *shorter* than the brute force, by up to 0.0025
+per unit of scale on the near-cone. That is the oracle losing precision, not the
+query: a long thin trapezoid fans into a needle and `closestPointOnTriangle`'s
+barycentric arithmetic degrades on it, while the analytic answer does not. The
+harness asserts the property one-sidedly for that reason, and separately checks
+that every returned point really is on the solid.
+
+### Verification
+
+| Check | Result |
+| --- | --- |
+| `linux-debug` / `linux-release` | ✅ both clean, no warnings |
+| Twelve headless tests, both configurations | ✅ exit 0, no `[ERROR]`/`[FATAL]` |
+| `--light-test` `hull oracle` | ✅ 5670 rays + 3936 probes, 0 disagreements |
+| `--robots-test` `pillar cover` | ✅ unchanged: awareness 0.00 behind the column, 1.00 on a clear line |
+| `--loop-test` | ❌ three settings-menu assertions — **fails identically on `main`**, unrelated, not touched |
+
+Windows/MSVC was not built — no dev machine in this container. The render path
+is untouched.
+
+### Not done
+
+**Four of six models still keep their bounding box.** A hull is roughly half the
+box's error even for the non-convex ones — measured by Monte Carlo against the
+mesh, `reactor.obj` is 1.76x its own volume as a hull against 3.70x as a box,
+`gunner.obj` 1.49x against 2.97x — but building one needs a real hull algorithm
+and produces a solid that is not the shape on screen. Exactness for those means
+convex decomposition, or mesh collision, which is per-triangle queries in the
+sim step and the line `proxy.h` draws on purpose.
+
+**The two issues in `docs/KNOWN_ISSUES.md` are untouched and unaffected by
+shape.** Object collision is still gated to the object's own segment, and an
+object's segment still comes from its origin rather than its extents; the editor
+still draws no proxy.

@@ -17,6 +17,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace dvk {
@@ -609,38 +610,58 @@ int runLightTest(const char* levelPath) {
         }
     }
 
-    // --- the frustum test against a numeric march ---------------------------
+    // --- the hull tests against the model's own triangles -------------------
     //
-    // `rayTaperedCylinderDistance` solves a quadratic and picks the stretch of
-    // the ray that is inside it. The independent method is the definition
-    // itself, walked: step along the ray, ask "is this point inside the
-    // column", and bisect the first crossing. No quadratic, no roots, no
-    // shared line of arithmetic with the thing it is checking - and unlike a
-    // tessellation it tests the true surface rather than a polygon near it, so
-    // a disagreement is a bug and not a facet.
+    // The box oracle above compares an analytic test against Moller-Trumbore
+    // over twelve triangles it derives from the box's corners. A hull's oracle
+    // is the same idea with a stronger claim behind it: for a convex model the
+    // hull's faces ARE the model's faces, so triangulating them does not
+    // approximate the collider the way a tessellated cylinder would have. The
+    // triangles are the surface, exactly, and any disagreement is a bug.
+    //
+    // Two queries are checked, not one. The ray test is a slab loop and the
+    // closest-point test is a face-edge-vertex classification, and the second
+    // is the fiddly one - it had no oracle at all while the proxies were boxes,
+    // because a box's closest point is a clamp nobody doubts.
     {
-        int tested = 0;
-        int disagreed = 0;
-        int grazing = 0;
-        float worst = 0.0f;
+        int rays = 0;
+        int rayDisagreed = 0;
+        int rayGrazing = 0;
+        float worstRay = 0.0f;
+
+        int points = 0;
+        int pointDisagreed = 0;
+        float worstPoint = 0.0f;
+
+        // Room for the triangulated faces of the largest hull the loader will
+        // accept, so this allocates nothing per occluder.
+        std::vector<std::array<glm::vec3, 3>> surface;
 
         for (int oi = 0; oi < objectOccluders.count; ++oi) {
             const sim::OccluderEntry& e = objectOccluders.entries[static_cast<size_t>(oi)];
-            if (e.proxy.kind != sim::ProxyVolume::Kind::TaperedCylinder) continue;
+            if (e.proxy.kind != sim::ProxyVolume::Kind::ConvexHull) continue;
+            const sim::ConvexHullView& hull = e.proxy.hull;
+            if (!hull.valid()) continue;
 
-            const float h = e.proxy.halfExtents.y;
-            const float widest = std::max(e.proxy.radii.x, e.proxy.radii.y);
-            const glm::quat inverse = glm::conjugate(e.proxy.orientation);
-            const auto insideColumn = [&](const glm::vec3& world) {
-                const glm::vec3 p = inverse * (world - e.proxy.centre);
-                if (std::abs(p.y) > h) return false;
-                return std::sqrt(p.x * p.x + p.z * p.z) <=
-                       sim::taperedRadiusAt(e.proxy.radii, h, p.y);
+            // Every face, fanned, in world space - through the same transform
+            // the proxy uses, so this checks the query and not the placement.
+            const auto toWorld = [&](const glm::vec3& v) {
+                return e.proxy.centre + e.proxy.orientation * (v * e.proxy.scale);
             };
+            surface.clear();
+            for (int f = 0; f < hull.planeCount; ++f) {
+                const int first = hull.faceFirst[f];
+                const int count = hull.faceFirst[f + 1] - first;
+                for (int c = 1; c + 1 < count; ++c) {
+                    surface.push_back({toWorld(hull.vertices[hull.faceVertex[first]]),
+                                       toWorld(hull.vertices[hull.faceVertex[first + c]]),
+                                       toWorld(hull.vertices[hull.faceVertex[first + c + 1]])});
+                }
+            }
+            if (surface.empty()) continue;
 
-            // Aim across the column at a spread of heights, and off to the side
-            // of it by a spread of offsets, so caps, the slanted side, the rims
-            // where they meet and clean misses all appear.
+            const float reach = e.proxy.boundingRadius();
+
             for (const glm::vec3& dir : makeSpread()) {
                 const glm::vec3 across =
                     glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)) +
@@ -649,80 +670,94 @@ int runLightTest(const char* levelPath) {
                     for (float side = -1.3f; side <= 1.3f; side += 0.65f) {
                         const glm::vec3 from = e.proxy.centre + dir * 40.0f;
                         const glm::vec3 at = e.proxy.centre +
-                                             glm::vec3(0.0f, aim * h, 0.0f) +
-                                             across * (side * widest);
+                                             glm::vec3(0.0f, aim * e.proxy.halfExtents.y, 0.0f) +
+                                             across * (side * reach);
                         const glm::vec3 ray = glm::normalize(at - from);
 
-                        const float solved = sim::rayProxyDistance(e.proxy, from, ray);
+                        const float slab = sim::rayProxyDistance(e.proxy, from, ray);
 
-                        // The march. A step well under the column's own radius
-                        // cannot step over it; what it CAN miss is a chord
-                        // shorter than one step, which is why a near-tangent
-                        // ray is counted apart below rather than asserted on.
-                        constexpr float kStepLength = 0.02f;
-                        const float reach = 80.0f;
-                        float marched = -1.0f;
-                        float previous = 0.0f;
-                        for (float t = 0.0f; t <= reach; t += kStepLength) {
-                            if (!insideColumn(from + ray * t)) {
-                                previous = t;
-                                continue;
-                            }
-                            // Bisect the step it entered on.
-                            float outside = previous;
-                            float in = t;
-                            for (int bisect = 0; bisect < 40; ++bisect) {
-                                const float mid = 0.5f * (outside + in);
-                                if (insideColumn(from + ray * mid)) in = mid;
-                                else outside = mid;
-                            }
-                            marched = in;
-                            break;
+                        float brute = -1.0f;
+                        for (const auto& tri : surface) {
+                            // The same edge slack the box oracle takes, for the
+                            // same reason: a ray straight down a shared edge
+                            // misses both triangles without it, where the
+                            // analytic test has no seam to fall through.
+                            const float t = sim::rayTriangleDistance(from, ray, tri[0], tri[1],
+                                                                     tri[2], 1e-4f);
+                            if (t > 1e-4f && (brute < 0.0f || t < brute)) brute = t;
                         }
 
-                        ++tested;
-                        const bool solvedHit = solved >= 0.0f;
-                        const bool marchedHit = marched >= 0.0f;
-
-                        // How close to the silhouette this ray passes, as a
-                        // fraction of the radius it passes it at. A ray along
-                        // the rim enters over a chord the march can step
-                        // across, and both methods are within their own error
-                        // of each other there; the verdict is still compared
-                        // for every ray that is not.
+                        ++rays;
+                        const bool slabHit = slab >= 0.0f;
+                        const bool bruteHit = brute >= 0.0f;
+                        // A ray aimed along the silhouette clips an edge, and
+                        // which triangle catches it comes down to the last bit.
                         const bool nearRim =
-                            std::abs(std::abs(side) - 1.0f) < 0.1f || std::abs(aim) > 0.95f;
+                            std::abs(std::abs(side) - 1.0f) < 0.15f || std::abs(aim) > 0.95f;
 
-                        if (solvedHit != marchedHit) {
+                        if (slabHit != bruteHit) {
                             if (nearRim) {
-                                ++grazing;
-                                continue;
+                                ++rayGrazing;
+                            } else {
+                                if (rayDisagreed < 4) {
+                                    log::error("hull ray says {} but its own triangles say {} "
+                                               "from {:.1f} {:.1f} {:.1f}",
+                                               slabHit ? "hit" : "miss", bruteHit ? "hit" : "miss",
+                                               from.x, from.y, from.z);
+                                }
+                                ++rayDisagreed;
                             }
-                            if (disagreed < 4) {
-                                log::error("frustum says {} but the march says {} from {:.1f} "
-                                           "{:.1f} {:.1f} (aim {:.2f}, side {:.2f})",
-                                           solvedHit ? "hit" : "miss",
-                                           marchedHit ? "hit" : "miss", from.x, from.y, from.z,
-                                           aim, side);
-                            }
-                            ++disagreed;
-                        } else if (solvedHit) {
-                            if (nearRim) ++grazing;
-                            else worst = std::max(worst, std::abs(solved - marched));
+                        } else if (slabHit) {
+                            if (nearRim) ++rayGrazing;
+                            else worstRay = std::max(worstRay, std::abs(slab - brute));
                         }
+
+                        // And the closest point, from the same place. Compared
+                        // as a DISTANCE rather than as a point: on a flat face
+                        // every point of it is equally close to a ray's origin
+                        // only if the origin is on its normal, and the two
+                        // methods are entitled to disagree about which corner
+                        // of a tie they return.
+                        const glm::vec3 probe = at + dir * 0.5f;
+                        const glm::vec3 mine = sim::closestPointOnProxy(e.proxy, probe);
+                        const bool inside = glm::length(probe - mine) < 1e-5f &&
+                                            sim::rayProxyDistance(e.proxy, probe, dir) == 0.0f;
+                        if (inside) continue;   // interior points come back unchanged
+
+                        float nearest = std::numeric_limits<float>::max();
+                        for (const auto& tri : surface) {
+                            nearest = std::min(nearest, sim::distanceToTriangle(probe, tri[0],
+                                                                                tri[1], tri[2]));
+                        }
+                        ++points;
+                        const float gap = std::abs(glm::length(probe - mine) - nearest);
+                        if (gap > 0.01f) {
+                            if (pointDisagreed < 4) {
+                                log::error("hull closest point is {:.4f}u away but its own "
+                                           "triangles say {:.4f}u, from {:.1f} {:.1f} {:.1f}",
+                                           glm::length(probe - mine), nearest, probe.x, probe.y,
+                                           probe.z);
+                            }
+                            ++pointDisagreed;
+                        }
+                        worstPoint = std::max(worstPoint, gap);
                     }
                 }
             }
         }
 
-        if (tested == 0) {
-            log::info("frustum oracle: SKIPPED, no tapered cylinder in this level");
+        if (rays == 0) {
+            log::info("hull oracle: SKIPPED, no convex hull in this level");
         } else {
-            ok &= expect(disagreed == 0, "the frustum test and a numeric march agree");
-            ok &= expect(worst < 0.05f, "and they agree on the distance, not only the verdict");
-            log::info("frustum oracle: {} rays, {} disagreements, worst distance gap {:.4f}u over "
-                      "{} square hits ({} rays along a rim agreed loosely and are not compared)",
-                      tested, disagreed, worst, tested - grazing, grazing);
+            ok &= expect(rayDisagreed == 0, "the hull ray test and the model's triangles agree");
+            ok &= expect(worstRay < 0.01f, "and they agree on the distance, not only the verdict");
+            ok &= expect(pointDisagreed == 0,
+                         "the hull closest point and the model's triangles agree");
+            log::info("hull oracle: {} rays, {} disagreements, worst distance gap {:.6f}u over {} "
+                      "square hits ({} along a rim, not compared); {} closest-point probes, {} "
+                      "disagreements, worst gap {:.6f}u",
+                      rays, rayDisagreed, worstRay, rays - rayGrazing, rayGrazing, points,
+                      pointDisagreed, worstPoint);
         }
     }
 
@@ -740,8 +775,8 @@ int runLightTest(const char* levelPath) {
         for (size_t oi = 0; oi < level.objectProxies.size(); ++oi) {
             const sim::PlacedProxy& proxy = level.objectProxies[oi];
             // Any solid with a side to hide behind. Not boxes only: the level's
-            // column is a tapered cylinder from M9, and it is the case this
-            // check exists for.
+            // column is a convex hull, and it is the case this check exists
+            // for.
             if (proxy.kind == sim::ProxyVolume::Kind::Sphere) continue;
             const int segment = level.objects[oi].segment;
 
