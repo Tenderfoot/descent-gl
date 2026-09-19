@@ -3,6 +3,7 @@
 #include "sim/geometry.h"
 
 #include <glm/gtc/quaternion.hpp>
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
 #include <algorithm>
@@ -29,13 +30,19 @@ namespace dvk::sim {
 //
 // Header-only and allocation-free: this runs per object in the combat trace.
 struct ProxyVolume {
-    enum class Kind : int { Sphere = 0, Box };
+    enum class Kind : int { Sphere = 0, Box, TaperedCylinder };
 
     Kind kind = Kind::Sphere;
-    // Box: the half extent along each of the model's own axes. Sphere: the
-    // radius, held in all three components so `boundingRadius` is one read
-    // either way.
+    // The half extent along each of the model's own axes - for every kind, the
+    // box that contains the solid. Sphere: the radius, held in all three
+    // components so `boundingRadius` is one read either way. TaperedCylinder:
+    // the widest radius on x and z, and the half height on y.
     glm::vec3 halfExtents{1.0f};
+    // TaperedCylinder only: the radius at the low-y cap and at the high-y cap,
+    // about the volume's own Y axis. A column is a solid of revolution and a
+    // box around one is mostly air at the corners - see the note on
+    // `taperedCylinderProxy` below.
+    glm::vec2 radii{1.0f, 1.0f};
     // The volume's centre in the model's own space. An OBJ sits wherever its
     // author put it, and `pillar.obj` is modelled about its middle while the
     // level places it by that same middle - but nothing guarantees the next
@@ -44,7 +51,15 @@ struct ProxyVolume {
     glm::vec3 centre{0.0f};
 
     float boundingRadius() const {
-        return kind == Kind::Sphere ? halfExtents.x : glm::length(halfExtents);
+        switch (kind) {
+            case Kind::Sphere: return halfExtents.x;
+            // The rim of the wider cap, which is as far from the centre as a
+            // frustum reaches. Not the box's corner: that would hand every
+            // broad-phase reject a radius the solid never fills.
+            case Kind::TaperedCylinder:
+                return std::sqrt(halfExtents.x * halfExtents.x + halfExtents.y * halfExtents.y);
+            default: return glm::length(halfExtents);
+        }
     }
 };
 
@@ -54,6 +69,28 @@ inline ProxyVolume boxProxy(const glm::vec3& lo, const glm::vec3& hi) {
     v.kind = ProxyVolume::Kind::Box;
     v.halfExtents = glm::max((hi - lo) * 0.5f, glm::vec3(0.0f));
     v.centre = (lo + hi) * 0.5f;
+    return v;
+}
+
+// A conical frustum about the model's own Y axis: `lowRadius` at the bottom
+// cap, `highRadius` at the top, `halfHeight` either way from `centre`.
+//
+// The kind a column wants. `pillar.obj` is a tapered octagon 4.4 across at the
+// base and 3.4 at the top, and its bounding box holds 79% more volume than the
+// column does: a ship could come to rest 1.4 units clear of anything visible,
+// and scaling the entity in the editor multiplied that gap by the scale. The
+// radius here is the model's CIRCUMradius - the ring's vertices, not its flats
+// - so the solid still contains the mesh everywhere and the error is the
+// octagon's own 7.6%, in the direction of stopping at something the player can
+// plainly see rather than letting them through it.
+inline ProxyVolume taperedCylinderProxy(float lowRadius, float highRadius, float halfHeight,
+                                        const glm::vec3& centre = glm::vec3(0.0f)) {
+    ProxyVolume v;
+    v.kind = ProxyVolume::Kind::TaperedCylinder;
+    v.radii = glm::max(glm::vec2(lowRadius, highRadius), glm::vec2(0.0f));
+    v.halfExtents = glm::vec3(std::max(v.radii.x, v.radii.y), std::max(halfHeight, 0.0f),
+                              std::max(v.radii.x, v.radii.y));
+    v.centre = centre;
     return v;
 }
 
@@ -75,11 +112,26 @@ struct PlacedProxy {
     glm::vec3 centre{0.0f};                     // world space
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
     glm::vec3 halfExtents{1.0f};                // scaled
+    glm::vec2 radii{1.0f, 1.0f};                // scaled, TaperedCylinder only
 
     float boundingRadius() const {
-        return kind == ProxyVolume::Kind::Sphere ? halfExtents.x : glm::length(halfExtents);
+        switch (kind) {
+            case ProxyVolume::Kind::Sphere: return halfExtents.x;
+            case ProxyVolume::Kind::TaperedCylinder:
+                return std::sqrt(halfExtents.x * halfExtents.x + halfExtents.y * halfExtents.y);
+            default: return glm::length(halfExtents);
+        }
     }
 };
+
+// A column: tall enough that its height is the dimension that matters. The
+// headless tests pick the level's pillar out by shape rather than by name, so a
+// second column under another name is covered too and a level without one
+// reports SKIPPED instead of quietly passing.
+inline bool proxyIsColumn(const PlacedProxy& proxy) {
+    return proxy.kind != ProxyVolume::Kind::Sphere &&
+           proxy.halfExtents.y > 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z);
+}
 
 inline PlacedProxy placeProxy(const ProxyVolume& volume, const glm::vec3& position,
                               const glm::quat& orientation, float scale) {
@@ -87,6 +139,7 @@ inline PlacedProxy placeProxy(const ProxyVolume& volume, const glm::vec3& positi
     placed.kind = volume.kind;
     placed.orientation = orientation;
     placed.halfExtents = volume.halfExtents * scale;
+    placed.radii = volume.radii * scale;
     placed.centre = position + orientation * (volume.centre * scale);
     return placed;
 }
@@ -102,7 +155,11 @@ inline glm::vec3 closestPointOnProxy(const PlacedProxy& proxy, const glm::vec3& 
     }
     const glm::quat inverse = glm::conjugate(proxy.orientation);
     const glm::vec3 local = inverse * (p - proxy.centre);
-    return proxy.centre + proxy.orientation * closestPointOnBox(local, proxy.halfExtents);
+    const glm::vec3 on = proxy.kind == ProxyVolume::Kind::TaperedCylinder
+                             ? closestPointOnTaperedCylinder(local, proxy.radii,
+                                                             proxy.halfExtents.y)
+                             : closestPointOnBox(local, proxy.halfExtents);
+    return proxy.centre + proxy.orientation * on;
 }
 
 // Where a sphere touches a proxy, and how to get it out.
@@ -135,10 +192,13 @@ inline bool proxySphereContact(const PlacedProxy& proxy, const glm::vec3& centre
         return true;
     }
 
+    const bool tapered = proxy.kind == ProxyVolume::Kind::TaperedCylinder;
     const glm::quat inverse = glm::conjugate(proxy.orientation);
     const glm::vec3 local = inverse * (centre - proxy.centre);
-    const glm::vec3 clamped = closestPointOnBox(local, proxy.halfExtents);
-    const glm::vec3 away = local - clamped;
+    const glm::vec3 nearest =
+        tapered ? closestPointOnTaperedCylinder(local, proxy.radii, proxy.halfExtents.y)
+                : closestPointOnBox(local, proxy.halfExtents);
+    const glm::vec3 away = local - nearest;
     const float distance = glm::length(away);
 
     glm::vec3 localNormal;
@@ -147,6 +207,37 @@ inline bool proxySphereContact(const PlacedProxy& proxy, const glm::vec3& centre
         if (distance >= radius) return false;
         localNormal = away / distance;
         depth = radius - distance;
+    } else if (tapered) {
+        // Inside the frustum, so the nearest point came back as the point
+        // itself and carries no direction. Same rule as the box below - leave
+        // through the nearest face - over the two caps and the slanted side.
+        const float h = proxy.halfExtents.y;
+        float least = local.y + h;                  // out through the bottom
+        localNormal = glm::vec3(0.0f, -1.0f, 0.0f);
+        if (h - local.y < least) {                  // out through the top
+            least = h - local.y;
+            localNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+        // Out through the side, measured along the side's own normal rather
+        // than straight out from the axis: on a taper those differ, and it is
+        // the perpendicular distance that says which face is really nearest.
+        const glm::vec2 edge(proxy.radii.y - proxy.radii.x, 2.0f * h);
+        const float edgeLength = glm::length(edge);
+        const float flat = std::sqrt(local.x * local.x + local.z * local.z);
+        if (edgeLength > 1e-6f) {
+            const glm::vec2 outward(edge.y / edgeLength, -edge.x / edgeLength);
+            const float room =
+                -((flat - proxy.radii.x) * outward.x + (local.y + h) * outward.y);
+            if (room < least) {
+                least = room;
+                // On the axis no radial direction is more correct than any
+                // other, the same as a sphere's concentric case.
+                const glm::vec2 radial = flat > 1e-6f ? glm::vec2(local.x, local.z) / flat
+                                                      : glm::vec2(1.0f, 0.0f);
+                localNormal = glm::vec3(radial.x * outward.x, outward.y, radial.y * outward.x);
+            }
+        }
+        depth = radius + least;
     } else {
         // Inside the box. The clamp returned the point itself, so there is no
         // direction in it - the way out is the nearest face, which is the axis
@@ -194,8 +285,22 @@ inline float rayProxyDistance(const PlacedProxy& proxy, const glm::vec3& origin,
         return std::max(0.0f, -projected - std::sqrt(discriminant));
     }
     const glm::quat inverse = glm::conjugate(proxy.orientation);
-    return rayBoxDistance(inverse * (origin - proxy.centre), inverse * dir,
-                          proxy.halfExtents + glm::vec3(inflate));
+    const glm::vec3 localOrigin = inverse * (origin - proxy.centre);
+    const glm::vec3 localDir = inverse * dir;
+    if (proxy.kind == ProxyVolume::Kind::TaperedCylinder) {
+        // Growing a frustum by the projectile's radius moves the caps out by
+        // `inflate` and the slanted side out by `inflate` ALONG ITS OWN NORMAL,
+        // which measured radially - the only way a radius can be grown here -
+        // is more than that. A gentle taper makes the difference tiny and a
+        // steep one makes it matter, so it is computed rather than ignored.
+        const float h = proxy.halfExtents.y;
+        const float rise = proxy.radii.y - proxy.radii.x;
+        const float radial =
+            h > 0.0f ? inflate * std::sqrt(4.0f * h * h + rise * rise) / (2.0f * h) : inflate;
+        return rayTaperedCylinderDistance(localOrigin, localDir, proxy.radii + glm::vec2(radial),
+                                          h + inflate);
+    }
+    return rayBoxDistance(localOrigin, localDir, proxy.halfExtents + glm::vec3(inflate));
 }
 
 } // namespace dvk::sim

@@ -592,6 +592,17 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         log::info("pair containment: {} corner cases, {} escapes", tested, escapes);
     }
 
+    // The column's own radius at a height in its own space, whichever shape the
+    // loader gave it. A box around a SQUARE column is a perfect fit and reads
+    // its half width here; a box around a round one reads the widest it ever
+    // is, and the gap at its corners is exactly the bug. Shared by the two
+    // checks below so neither can quietly stop testing the shape it was given.
+    const auto columnRadiusAt = [](const sim::PlacedProxy& proxy, float y) {
+        return proxy.kind == sim::ProxyVolume::Kind::TaperedCylinder
+                   ? sim::taperedRadiusAt(proxy.radii, proxy.halfExtents.y, y)
+                   : std::max(proxy.halfExtents.x, proxy.halfExtents.z);
+    };
+
     // --- a body cannot enter a level object -------------------------------
     //
     // And how far off the visible surface it stops, which is the honest number:
@@ -603,6 +614,7 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         int tested = 0;
         int entered = 0;
         int settled = 0;
+        int tapered = 0;
         float worstGap = 0.0f;
 
         // Everything is solid for this test: no robots in the way of the point.
@@ -613,11 +625,7 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
 
         for (size_t oi = 0; oi < level.objectProxies.size() && oi < 64; ++oi) {
             const sim::PlacedProxy& proxy = level.objectProxies[oi];
-            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
-            // Columns only: the ones where the box is a poor fit.
-            if (proxy.halfExtents.y < 2.0f * std::max(proxy.halfExtents.x, proxy.halfExtents.z)) {
-                continue;
-            }
+            if (!sim::proxyIsColumn(proxy)) continue;
             const int segment = level.objects[oi].segment;
 
             for (const glm::vec3& dir : dirs) {
@@ -658,17 +666,20 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
                     continue;
                 }
                 ++settled;
-                // How far it sits from the column's own surface, as opposed to
-                // its box. The column is a solid of revolution about its own Y,
-                // so compare against its radius at this height. Only meaningful
-                // beside the column, not above or below its caps.
+                // How far it sits from the column's own surface. The column is
+                // a solid of revolution about its own Y, so compare against its
+                // radius AT THIS HEIGHT - against the widest it ever is, which
+                // is what this measured while the proxy was a box, a taper
+                // reads as a gap that is really the model getting narrower.
+                // Only meaningful beside the column, not above or below its
+                // caps.
                 const glm::vec3 local =
                     glm::conjugate(proxy.orientation) * (body.position - proxy.centre);
                 if (std::abs(local.y) < proxy.halfExtents.y - body.radius) {
                     const float radial = glm::length(glm::vec2(local.x, local.z));
-                    // The widest the column itself ever is, at its base.
-                    const float columnReach = std::max(proxy.halfExtents.x, proxy.halfExtents.z);
-                    worstGap = std::max(worstGap, radial - body.radius - columnReach);
+                    worstGap = std::max(worstGap, radial - body.radius -
+                                                      columnRadiusAt(proxy, local.y));
+                    ++tapered;
                 }
             }
         }
@@ -678,12 +689,131 @@ int runCollisionTest(const char* levelPath, const char* flightConfigPath) {
         } else {
             ok &= expect(entered == 0, "a body never ends up inside a level object");
             log::info("object collision: {} approaches, {} came to rest on the object, {} "
-                      "entered it; worst standoff past the column's own widest radius {:.2f}u",
-                      tested, settled, entered, worstGap);
-            log::info("  NOTE the box is the model's bounds: on a tapered octagonal column it "
-                      "holds 79% more volume than the column, so a body can stop up to 1.4u "
-                      "from anything visible. A tapered-cylinder proxy is the fix; see the "
-                      "roadmap.");
+                      "entered it; worst standoff past the column's own radius at that height "
+                      "{:.2f}u, over {} contacts beside it (the rest came to rest on a cap, "
+                      "where there is no radius to measure)",
+                      tested, settled, entered, worstGap, tapered);
+            if (tapered > 0) {
+                // Asserted for whatever shape the loader chose, not only for a
+                // tapered one: a box around a square column passes this too,
+                // and a box around a ROUND column - which is what this used to
+                // be, at 0.92u - fails it. Gating the assertion on the kind
+                // would make a regression to bounds skip the check rather than
+                // trip it. What is left is the resolver's own skin plus the
+                // flats of an octagon inside the circle drawn round it; the
+                // load-time proxy line reports how round the ring is.
+                ok &= expect(worstGap < 0.25f,
+                             "a body rests within a quarter unit of the column's own surface");
+            }
+        }
+    }
+
+    // --- scaling a column scales its collision, and nothing else -----------
+    //
+    // The case this change exists for. An entity scaled in the editor keeps one
+    // model and one proxy, both multiplied by the same number, so the gap
+    // between what a body stops against and what the player can see is
+    // multiplied too: the bounding box left 0.92u of air beside a column at
+    // scale 1 and 2.8u at scale 3, which is most of a ship.
+    //
+    // So the thing to assert is not a distance, it is that the distance is
+    // PROPORTIONATE - measured against the column's own surface at that height,
+    // the standoff per unit of scale must not grow. A proxy that tracks the
+    // model has a flat line here; the box had one that climbed.
+    {
+        int column = -1;
+        for (size_t oi = 0; oi < level.objectProxies.size(); ++oi) {
+            if (sim::proxyIsColumn(level.objectProxies[oi])) {
+                column = static_cast<int>(oi);
+                break;
+            }
+        }
+
+        if (column < 0) {
+            log::info("column scaling: SKIPPED, no column in this level");
+        } else {
+            const sim::PlacedProxy& placed = level.objectProxies[static_cast<size_t>(column)];
+            // Back to an unplaced volume, so it can be put down again at other
+            // scales through the same call the level loader uses.
+            const sim::ProxyVolume volume =
+                placed.kind == sim::ProxyVolume::Kind::TaperedCylinder
+                    ? sim::taperedCylinderProxy(placed.radii.x, placed.radii.y,
+                                                placed.halfExtents.y)
+                    : sim::boxProxy(-placed.halfExtents, placed.halfExtents);
+
+            constexpr float kSkin = 0.01f;
+            const float radius = flight.shipRadius;
+            float worstPerScale = 0.0f;
+            float worstAt = 1.0f;
+            int missed = 0;
+            int checked = 0;
+
+            for (const float scale : {1.0f, 2.0f, 4.0f, 7.5f}) {
+                const sim::PlacedProxy grown =
+                    sim::placeProxy(volume, placed.centre, placed.orientation, scale);
+                const float half = grown.halfExtents.y;
+
+                for (const glm::vec3& dir : dirs) {
+                    // Sideways only: a cap has no radius to be measured against,
+                    // and is the box's one good fit anyway.
+                    const glm::vec3 flat(dir.x, 0.0f, dir.z);
+                    if (glm::length(flat) < 1e-3f) continue;
+                    const glm::vec3 out = glm::normalize(flat);
+
+                    for (const float fraction : {-0.6f, -0.3f, 0.0f, 0.3f, 0.6f}) {
+                        const float y = fraction * half;
+                        const float surface = columnRadiusAt(grown, y);
+
+                        // Fly it in, rather than starting it inside and pushing
+                        // it out. The two are not the same question: a body
+                        // buried in a box leaves through the nearest FACE
+                        // whatever direction it came from, so pushing out never
+                        // visits a corner, and a corner is exactly where the
+                        // air was. Approaching is what the player does.
+                        glm::vec3 position =
+                            grown.centre + grown.orientation * glm::vec3(0.0f, y, 0.0f) +
+                            out * (surface + radius + 4.0f * scale);
+
+                        const float step = 0.02f * scale;
+                        bool touched = false;
+                        sim::ProxyContact contact;
+                        for (int i = 0; i < 400; ++i) {
+                            position -= out * step;
+                            if (!sim::proxySphereContact(grown, position, radius, contact)) {
+                                continue;
+                            }
+                            touched = true;
+                            position += contact.normal * (contact.depth + kSkin);
+                        }
+                        if (!touched) {
+                            ++missed;
+                            continue;
+                        }
+
+                        ++checked;
+                        const glm::vec3 local =
+                            glm::conjugate(grown.orientation) * (position - grown.centre);
+                        const float radial = glm::length(glm::vec2(local.x, local.z));
+                        const float gap = radial - radius - columnRadiusAt(grown, local.y);
+                        if (gap / scale > worstPerScale) {
+                            worstPerScale = gap / scale;
+                            worstAt = scale;
+                        }
+                    }
+                }
+            }
+
+            ok &= expect(missed == 0, "a body flown at a scaled column always reaches it");
+            // The push-out overshoots by one skin, and by the sliver between a
+            // surface normal and the radial direction on a taper. Both are
+            // fixed costs, so dividing by the scale is what makes this a real
+            // bound rather than a number that drifts up with it.
+            ok &= expect(worstPerScale < 0.05f,
+                         "a scaled column stands a body off at its own scaled surface");
+            log::info("column scaling: {} contacts over scales 1 to 7.5, worst standoff {:.3f}u "
+                      "per unit of scale (at {:.1f}x); the bounding box this replaced left "
+                      "0.91u per unit of scale at the corners",
+                      checked, worstPerScale, worstAt);
         }
     }
 

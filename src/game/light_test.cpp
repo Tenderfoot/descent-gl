@@ -609,6 +609,123 @@ int runLightTest(const char* levelPath) {
         }
     }
 
+    // --- the frustum test against a numeric march ---------------------------
+    //
+    // `rayTaperedCylinderDistance` solves a quadratic and picks the stretch of
+    // the ray that is inside it. The independent method is the definition
+    // itself, walked: step along the ray, ask "is this point inside the
+    // column", and bisect the first crossing. No quadratic, no roots, no
+    // shared line of arithmetic with the thing it is checking - and unlike a
+    // tessellation it tests the true surface rather than a polygon near it, so
+    // a disagreement is a bug and not a facet.
+    {
+        int tested = 0;
+        int disagreed = 0;
+        int grazing = 0;
+        float worst = 0.0f;
+
+        for (int oi = 0; oi < objectOccluders.count; ++oi) {
+            const sim::OccluderEntry& e = objectOccluders.entries[static_cast<size_t>(oi)];
+            if (e.proxy.kind != sim::ProxyVolume::Kind::TaperedCylinder) continue;
+
+            const float h = e.proxy.halfExtents.y;
+            const float widest = std::max(e.proxy.radii.x, e.proxy.radii.y);
+            const glm::quat inverse = glm::conjugate(e.proxy.orientation);
+            const auto insideColumn = [&](const glm::vec3& world) {
+                const glm::vec3 p = inverse * (world - e.proxy.centre);
+                if (std::abs(p.y) > h) return false;
+                return std::sqrt(p.x * p.x + p.z * p.z) <=
+                       sim::taperedRadiusAt(e.proxy.radii, h, p.y);
+            };
+
+            // Aim across the column at a spread of heights, and off to the side
+            // of it by a spread of offsets, so caps, the slanted side, the rims
+            // where they meet and clean misses all appear.
+            for (const glm::vec3& dir : makeSpread()) {
+                const glm::vec3 across =
+                    glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f)) +
+                                   glm::vec3(1e-4f, 0.0f, 0.0f));
+                for (float aim = -1.2f; aim <= 1.2f; aim += 0.3f) {
+                    for (float side = -1.3f; side <= 1.3f; side += 0.65f) {
+                        const glm::vec3 from = e.proxy.centre + dir * 40.0f;
+                        const glm::vec3 at = e.proxy.centre +
+                                             glm::vec3(0.0f, aim * h, 0.0f) +
+                                             across * (side * widest);
+                        const glm::vec3 ray = glm::normalize(at - from);
+
+                        const float solved = sim::rayProxyDistance(e.proxy, from, ray);
+
+                        // The march. A step well under the column's own radius
+                        // cannot step over it; what it CAN miss is a chord
+                        // shorter than one step, which is why a near-tangent
+                        // ray is counted apart below rather than asserted on.
+                        constexpr float kStepLength = 0.02f;
+                        const float reach = 80.0f;
+                        float marched = -1.0f;
+                        float previous = 0.0f;
+                        for (float t = 0.0f; t <= reach; t += kStepLength) {
+                            if (!insideColumn(from + ray * t)) {
+                                previous = t;
+                                continue;
+                            }
+                            // Bisect the step it entered on.
+                            float outside = previous;
+                            float in = t;
+                            for (int bisect = 0; bisect < 40; ++bisect) {
+                                const float mid = 0.5f * (outside + in);
+                                if (insideColumn(from + ray * mid)) in = mid;
+                                else outside = mid;
+                            }
+                            marched = in;
+                            break;
+                        }
+
+                        ++tested;
+                        const bool solvedHit = solved >= 0.0f;
+                        const bool marchedHit = marched >= 0.0f;
+
+                        // How close to the silhouette this ray passes, as a
+                        // fraction of the radius it passes it at. A ray along
+                        // the rim enters over a chord the march can step
+                        // across, and both methods are within their own error
+                        // of each other there; the verdict is still compared
+                        // for every ray that is not.
+                        const bool nearRim =
+                            std::abs(std::abs(side) - 1.0f) < 0.1f || std::abs(aim) > 0.95f;
+
+                        if (solvedHit != marchedHit) {
+                            if (nearRim) {
+                                ++grazing;
+                                continue;
+                            }
+                            if (disagreed < 4) {
+                                log::error("frustum says {} but the march says {} from {:.1f} "
+                                           "{:.1f} {:.1f} (aim {:.2f}, side {:.2f})",
+                                           solvedHit ? "hit" : "miss",
+                                           marchedHit ? "hit" : "miss", from.x, from.y, from.z,
+                                           aim, side);
+                            }
+                            ++disagreed;
+                        } else if (solvedHit) {
+                            if (nearRim) ++grazing;
+                            else worst = std::max(worst, std::abs(solved - marched));
+                        }
+                    }
+                }
+            }
+        }
+
+        if (tested == 0) {
+            log::info("frustum oracle: SKIPPED, no tapered cylinder in this level");
+        } else {
+            ok &= expect(disagreed == 0, "the frustum test and a numeric march agree");
+            ok &= expect(worst < 0.05f, "and they agree on the distance, not only the verdict");
+            log::info("frustum oracle: {} rays, {} disagreements, worst distance gap {:.4f}u over "
+                      "{} square hits ({} rays along a rim agreed loosely and are not compared)",
+                      tested, disagreed, worst, tested - grazing, grazing);
+        }
+    }
+
     // --- a pillar casts into the light query -------------------------------
     //
     // The case the whole milestone is for. Stand a point in a light's beam, then
@@ -622,7 +739,10 @@ int runLightTest(const char* levelPath) {
 
         for (size_t oi = 0; oi < level.objectProxies.size(); ++oi) {
             const sim::PlacedProxy& proxy = level.objectProxies[oi];
-            if (proxy.kind != sim::ProxyVolume::Kind::Box) continue;
+            // Any solid with a side to hide behind. Not boxes only: the level's
+            // column is a tapered cylinder from M9, and it is the case this
+            // check exists for.
+            if (proxy.kind == sim::ProxyVolume::Kind::Sphere) continue;
             const int segment = level.objects[oi].segment;
 
             // A light that actually reaches this column.
