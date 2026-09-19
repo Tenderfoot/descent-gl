@@ -11,18 +11,24 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import {
     addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
-    ceilingAnchor, moveEntity, removeEntity,
+    ceilingAnchor, ENTITY_LISTS, entityFacing, entityList, moveEntities, moveEntity, removeEntity,
     segmentCentre, setExit,
 } from './entities.js';
-import { KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import {
+    KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
+} from './format.js';
 import { ModelCache } from './obj.js';
 import { checkName, newLevel } from './create.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
 import {
-    deleteSegment, extrudeSide, joinSides, moveVertex, segmentDepth, setTexture, splitPortal,
+    deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setTexture,
+    splitPortal,
 } from './ops.js';
+import {
+    centroid, groupTransform, IDENTITY_QUAT, transformPoints,
+} from './transform.js';
 import { EDITOR_ONLY_RULES, validateLevel } from './validate.js';
 import { LevelView } from './view.js';
 
@@ -44,6 +50,13 @@ const LAYERS = [
 
 const MODES = [['segment', 'Segment'], ['side', 'Side'], ['vertex', 'Vertex'],
                ['entity', 'Entity']];
+
+// What the gizmo does. Translate is the only one that means anything for a
+// single vertex - rotating a point about itself is a no-op - so the other two
+// are here for groups, and for the one single case that does have a facing of
+// its own: a piece of scenery.
+const GIZMO_MODES = [['translate', 'Move', 'W'], ['rotate', 'Turn', 'E'],
+                     ['scale', 'Scale', 'R']];
 
 const models = new ModelCache();
 
@@ -115,7 +128,8 @@ viewport.appendChild(renderer.domElement);
 
 const hud = document.createElement('div');
 hud.id = 'hud';
-hud.textContent = 'drag to orbit · click to select · double-click to fly in · 1/2/3/4 mode · T top · F frame';
+hud.textContent = 'drag to orbit · click to select · shift+click to add · double-click to fly in '
+    + '· 1/2/3/4 mode · W/E/R gizmo · T top · F frame';
 viewport.appendChild(hud);
 
 const scene = new THREE.Scene();
@@ -295,6 +309,7 @@ function refresh() {
     renderTools();
     renderSelection();
     renderHistoryButtons();
+    syncGizmo();
 }
 
 function replaceLevel(next) {
@@ -494,6 +509,13 @@ function renderTools() {
 
     if (app.mode === 'segment') {
         if (selection?.kind !== 'segment') return hint('Click a segment.');
+        // The whole room as a selection. Shift+clicking eight corners one at a
+        // time works and is nobody's idea of a good afternoon.
+        button('Select its 8 vertices',
+               'Switches to vertex mode with this segment\u2019s corners selected, so the ' +
+               'gizmo moves, turns or scales the whole room',
+               () => selectVertices(app.level.segments[selection.index].verts,
+                                    `selected segment ${selection.index}'s vertices`));
         button('Delete segment',
                'Seals the neighbours, reindexes everything, and takes the lights, pickups and ' +
                'objects inside it with it',
@@ -518,6 +540,15 @@ function renderTools() {
         }
         const { segment, side } = selection;
         const sd = app.level.segments[segment].sides[side];
+
+        // Offered for a portal too: the four vertices a portal shares are the
+        // ones both segments deform through, and moving them is how a doorway
+        // gets widened without breaking the share.
+        button('Select its 4 vertices',
+               'Switches to vertex mode with this side\u2019s corners selected, so the gizmo ' +
+               'moves, turns or scales the whole wall',
+               () => selectVertices(SIDE_VERTICES[side].map((c) => app.level.segments[segment].verts[c]),
+                                    `selected segment ${segment} ${SIDE_NAMES[side]} vertices`));
 
         if (sd.neighbour >= 0) {
             hint(`portal → segment ${sd.neighbour}`);
@@ -571,9 +602,25 @@ function renderTools() {
     }
 
     if (app.mode === 'vertex') {
-        if (selection?.kind !== 'vertex') return hint('Click a vertex. Drag the gizmo to move it.');
-        const using = app.level.segments.filter((seg) => seg.verts.includes(selection.index)).length;
-        return hint(`vertex ${selection.index}, used by ${using} segment(s)`);
+        const chosen = selectionItems(selection).filter(isGeometry);
+        if (chosen.length === 0) {
+            return hint('Click a vertex, shift+click to add more. Drag the gizmo to move them; ' +
+                        'W/E/R switch it between move, turn and scale.');
+        }
+        if (chosen.length > 1) {
+            const segments = new Set();
+            for (const { index } of chosen) {
+                app.level.segments.forEach((seg, si) => {
+                    if (seg.verts.includes(index)) segments.add(si);
+                });
+            }
+            hint(`${chosen.length} vertices across ${segments.size} segment(s)`);
+            button('Clear', 'Deselect all of them (Escape)',
+                   () => { clearSelection(); renderTools(); renderSelection(); });
+            return;
+        }
+        const using = app.level.segments.filter((seg) => seg.verts.includes(chosen[0].index)).length;
+        return hint(`vertex ${chosen[0].index}, used by ${using} segment(s)`);
     }
 
     // --- entity mode --------------------------------------------------------
@@ -884,8 +931,30 @@ function renderSelection() {
     const container = $('selection');
     const selection = app.selection;
     if (!selection) {
-        container.textContent = 'Click a wall or a gizmo.';
+        container.textContent = 'Click a wall or a gizmo. Shift+click to add to the selection.';
         view.highlightSegments([]);
+        return;
+    }
+
+    // More than one thing selected: describe the group and what the gizmo will
+    // do to it, rather than the primary on its own. The primary still gets a
+    // line, because it is the thing the author just clicked.
+    const items = selectionItems(selection);
+    if (items.length > 1) {
+        const kinds = [...new Set(items.map((i) => i.kind))];
+        const points = items.map(itemPosition).filter(Boolean);
+        const middle = centroid(points).map((n) => n.toFixed(2)).join(' ');
+        const what = kinds.length === 1
+            ? plural(kinds[0], items.length)
+            : kinds.join(' + ');
+        const indices = items.map((i) => i.index).join(' ');
+        const verb = { translate: 'moves', rotate: 'turns', scale: 'scales' }[gizmo.mode];
+        container.innerHTML =
+            `<b>${items.length} ${escapeHtml(what)}</b>\n${escapeHtml(indices)}\n` +
+            `centre ${middle}\ngizmo ${verb} the group about its centre\n` +
+            `primary ${escapeHtml(selection.kind)} ${selection.index}`;
+        if (items.every(isGeometry)) view.highlightVertices(items.map((i) => i.index));
+        else view.highlightSegments([]);
         return;
     }
 
@@ -991,12 +1060,137 @@ $('layers').innerHTML = LAYERS.map(([group, label, on]) =>
     `<label><input type="checkbox" data-group="${group}"${on ? ' checked' : ''}>${label}</label>`).join('');
 $('layers').addEventListener('change', applyLayers);
 
+$('gizmo-modes').innerHTML = GIZMO_MODES.map(([mode, label, key]) =>
+    `<button data-gizmo="${mode}" title="${key}" aria-pressed="${mode === 'translate'}">` +
+    `${label}</button>`).join('');
+$('gizmo-modes').addEventListener('click', (e) => {
+    const mode = e.target.dataset?.gizmo;
+    if (mode) setGizmoMode(mode);
+});
+
+// Switching what the gizmo does re-parks it, because a mode change mid-selection
+// must not carry the previous mode's pose into the next drag.
+function setGizmoMode(mode) {
+    gizmo.setMode(mode);
+    for (const b of $('gizmo-modes').querySelectorAll('button')) {
+        b.setAttribute('aria-pressed', String(b.dataset.gizmo === mode));
+    }
+    syncGizmo();
+    renderSelection();
+}
+
 $('modes').innerHTML = MODES.map(([mode, label]) =>
     `<button data-mode="${mode}" aria-pressed="${mode === 'segment'}">${label}</button>`).join('');
 $('modes').addEventListener('click', (e) => {
     const mode = e.target.closest('button')?.dataset.mode;
     if (mode) setMode(mode);
 });
+
+// --- the selection ----------------------------------------------------------
+
+// A selection is one primary item plus, when more than one thing is selected,
+// the whole list.
+//
+// `kind` and `index` keep naming the PRIMARY - the last thing clicked, the one
+// the panel describes, the one every single-selection tool acts on - so nothing
+// that already read a selection had to learn about groups. `items` appears only
+// when there is more than one, which is what keeps a single click producing
+// exactly the selection it produced before.
+const sameItem = (a, b) => a.kind === b.kind && a.index === b.index;
+
+function selectionItems(selection) {
+    if (!selection) return [];
+    if (selection.items) return selection.items.slice();
+    return [{ kind: selection.kind, index: selection.index }];
+}
+
+function makeSelection(items) {
+    if (items.length === 0) return null;
+    const primary = items[items.length - 1];
+    return items.length === 1 ? { ...primary } : { ...primary, items: items.slice() };
+}
+
+// Shift+click adds the item, or takes it back out if it was already in.
+//
+// A vertex and a light never end up in the same selection: one is geometry and
+// the other is a thing standing in it, they are transformed through different
+// functions, and a group holding both would have to answer what rotating it
+// means. Shift+clicking across that line replaces rather than mixes. Entity
+// kinds DO mix - moving a light and the pickup beside it together is the whole
+// point - because they all move the same way.
+const isGeometry = (item) => item.kind === 'vertex';
+
+// Every kind but one pluralises by adding an s.
+const plural = (kind, n) => (n === 1 ? kind : (kind === 'vertex' ? 'vertices' : `${kind}s`));
+
+function selectItem(item, extend) {
+    let items = extend ? selectionItems(app.selection) : [];
+    if (items.length > 0 && isGeometry(items[0]) !== isGeometry(item)) items = [];
+
+    const at = items.findIndex((s) => sameItem(s, item));
+    if (at >= 0) items.splice(at, 1);
+    else items.push(item);
+
+    app.selection = makeSelection(items);
+    syncGizmo();
+}
+
+function clearSelection() {
+    app.selection = null;
+    gizmo.detach();
+}
+
+// Selects a set of vertices and switches to vertex mode, without going through
+// setMode - which clears the selection, and the whole point here is to arrive
+// with one. The last index becomes the primary.
+function selectVertices(indices, label) {
+    const unique = [...new Set(indices)];
+    if (unique.length === 0) return;
+    app.mode = 'vertex';
+    app.joinFrom = null;
+    setModeButtons();
+    view.groups.vertices.visible = true;
+    app.selection = makeSelection(unique.map((index) => ({ kind: 'vertex', index })));
+    syncGizmo();
+    renderTools();
+    renderSelection();
+    status(label, 'ok');
+}
+
+// The items in the selection the gizmo can actually move, which depends on the
+// mode: vertices in vertex mode, the movable kinds in entity mode, nothing
+// anywhere else.
+function draggableItems() {
+    const items = selectionItems(app.selection);
+    if (app.mode === 'vertex') return items.filter(isGeometry);
+    if (app.mode === 'entity') return items.filter((s) => MOVABLE.has(s.kind));
+    return [];
+}
+
+function itemPosition(item) {
+    return item.kind === 'vertex'
+        ? app.level.vertices[item.index]
+        : entityPosition(item.kind, item.index);
+}
+
+// Parks the gizmo on the selection's centroid, reset to identity, or detaches it
+// when there is nothing to move.
+//
+// Reset every time rather than left where the last drag put it: the pose the
+// gizmo reports is read as a delta from identity, so a handle still carrying the
+// previous drag's rotation would apply that rotation again the moment the next
+// drag started.
+function syncGizmo() {
+    if (!app.level) { gizmo.detach(); return; }
+    const items = draggableItems();
+    const points = items.map(itemPosition).filter(Boolean);
+    if (points.length === 0 || points.length !== items.length) { gizmo.detach(); return; }
+
+    handle.position.set(...centroid(points));
+    handle.quaternion.set(0, 0, 0, 1);
+    handle.scale.set(1, 1, 1);
+    gizmo.attach(handle);
+}
 
 // --- picking and dragging ---------------------------------------------------
 
@@ -1015,8 +1209,10 @@ function pointerAt(e) {
 // whole mine, so the pick radius scales with how far away the camera is.
 const vertexThreshold = () => camera.position.distanceTo(controls.target) * 0.012;
 
+const gridStep = () => Number($('snap').value) || 0;
+
 const snap = (value) => {
-    const step = Number($('snap').value) || 0;
+    const step = gridStep();
     return step > 0 ? Math.round(value / step) * step : value;
 };
 
@@ -1036,14 +1232,10 @@ renderer.domElement.addEventListener('click', (e) => {
 
     if (app.mode === 'vertex') {
         const index = view.pickVertex(raycaster, vertexThreshold());
-        if (index >= 0) {
-            app.selection = { kind: 'vertex', index };
-            handle.position.set(...app.level.vertices[index]);
-            gizmo.attach(handle);
-        } else {
-            app.selection = null;
-            gizmo.detach();
-        }
+        // A shift+click that misses keeps the group. Losing eight vertices to a
+        // near miss is the one thing a multi-selection must not do.
+        if (index >= 0) selectItem({ kind: 'vertex', index }, e.shiftKey);
+        else if (!e.shiftKey) clearSelection();
         renderTools();
         renderSelection();
         return;
@@ -1053,10 +1245,8 @@ renderer.domElement.addEventListener('click', (e) => {
     // almost always meant the gizmo.
     const entity = view.pickEntity(raycaster);
     if (entity) {
-        app.selection = entity;
-        const position = entityPosition(entity.kind, entity.index);
-        if (app.mode === 'entity' && position && MOVABLE.has(entity.kind)) attachGizmo(position);
-        else gizmo.detach();
+        if (app.mode === 'entity') selectItem(entity, e.shiftKey);
+        else { app.selection = entity; gizmo.detach(); }
         renderTools();
         renderSelection();
         return;
@@ -1067,6 +1257,12 @@ renderer.domElement.addEventListener('click', (e) => {
         // portal acts on one, and neither is reachable if a click passes
         // through the opening to the wall behind it.
         const face = view.pickFace(raycaster, { portals: true });
+        if (app.mode === 'entity' && e.shiftKey && app.selection) {
+            // Shift is for gathering things. A wall is not a thing, so a
+            // shift+click that lands on one leaves the group alone rather than
+            // replacing it with a side.
+            return;
+        }
         // In entity mode a wall click is how a door gets placed and how the
         // "place into segment N" target is chosen, so it does both.
         if (face && app.mode === 'entity') app.lastSegment = face.segment;
@@ -1080,48 +1276,127 @@ renderer.domElement.addEventListener('click', (e) => {
     selectSegment(view.pickSegment(raycaster));
 });
 
-// Dragging a vertex rebuilds the level every frame, which at a few hundred
-// triangles is cheaper than maintaining an incremental path that could get the
-// derived planes out of step with the vertices.
-let dragStart = null;
+// Dragging rebuilds the level every frame, which at a few hundred triangles is
+// cheaper than maintaining an incremental path that could get the derived planes
+// out of step with the vertices.
+//
+// Every frame applies the gizmo's pose to the positions recorded at drag START,
+// never to the ones it last produced. TransformControls reports absolute state -
+// the whole drag so far - so feeding its output back in would compound over the
+// few hundred frames of a drag and leave a group quietly deformed by the act of
+// having been moved.
+let drag = null;
+
 gizmo.addEventListener('dragging-changed', (e) => {
-    const selection = app.selection;
-    if (!selection) return;
-    const draggable = selection.kind === 'vertex' || MOVABLE.has(selection.kind);
-    if (!draggable) return;
-
     if (e.value) {
-        dragStart = app.history.snapshot(app.level);
-    } else if (dragStart !== null) {
-        // One undo entry per drag, not per frame.
-        const what = selection.kind === 'vertex'
-            ? `move vertex ${selection.index}`
-            : `move ${selection.kind}`;
-        app.history.past.push({ text: dragStart, label: what });
-        app.history.future.length = 0;
-        dragStart = null;
-        app.validation = validateLevel(app.level);
-        renderFindings();
-        renderHistoryButtons();
-    }
-});
-
-gizmo.addEventListener('objectChange', () => {
-    const selection = app.selection;
-    if (!selection) return;
-    const position = [snap(handle.position.x), snap(handle.position.y), snap(handle.position.z)];
-
-    if (selection.kind === 'vertex') {
-        moveVertex(app.level, selection.index, position);
-        view.build(app.level);
-        applyLayers();
-        view.highlightVertex(selection.index);
-        renderSelection();
+        const items = draggableItems();
+        if (items.length === 0) return;
+        const origin = items.map((item) => itemPosition(item).slice());
+        drag = {
+            items,
+            origin,
+            pivot: centroid(origin),
+            // What each entity was facing before the drag, so a rotation
+            // composes onto that rather than onto its own last frame's output.
+            facing: items.map((item) => (item.kind === 'vertex'
+                ? null
+                : entityFacing(app.level, item.kind, item.index))),
+            undo: app.history.snapshot(app.level),
+        };
         return;
     }
 
-    if (!MOVABLE.has(selection.kind)) return;
-    moveEntity(app.level, selection.kind, selection.index, position);
+    if (!drag) return;
+    // One undo entry per drag, not per frame - and none at all for a drag that
+    // ended where it started, which is what a click on a gizmo arrow is.
+    //
+    // Facings are compared as well as positions, because the one thing a drag
+    // can change without moving anything is where a single object is pointing:
+    // rotating it about its own centre leaves its position exactly where it was.
+    const changed = drag.items.some((item, i) => {
+        const now = itemPosition(item);
+        if (!now || drag.origin[i].some((n, k) => Math.abs(n - now[k]) > 1e-9)) return true;
+        const facing = item.kind === 'vertex'
+            ? null
+            : entityFacing(app.level, item.kind, item.index);
+        return !!facing && !!drag.facing[i]
+            && facing.some((n, k) => Math.abs(n - drag.facing[i][k]) > 1e-9);
+    });
+    if (changed) {
+        app.history.past.push({ text: drag.undo, label: dragLabel(drag.items) });
+        app.history.future.length = 0;
+    }
+    drag = null;
+    app.validation = validateLevel(app.level);
+    renderFindings();
+    renderHistoryButtons();
+    // Re-centre on wherever the group ended up, so the next drag starts from
+    // the new middle rather than from the old one.
+    syncGizmo();
+    renderSelection();
+});
+
+function dragLabel(items) {
+    const verb = { translate: 'move', rotate: 'rotate', scale: 'scale' }[gizmo.mode] ?? 'move';
+    if (items.length === 1) {
+        return items[0].kind === 'vertex'
+            ? `${verb} vertex ${items[0].index}`
+            : `${verb} ${items[0].kind}`;
+    }
+    const kinds = new Set(items.map((s) => s.kind));
+    const what = kinds.size === 1 ? plural([...kinds][0], items.length) : 'things';
+    return `${verb} ${items.length} ${what}`;
+}
+
+// Grid snap, and the one place a group behaves differently from a single point.
+//
+// A single point snaps its own position, which is what a grid is for: "put this
+// corner on the grid". Doing that to every member of a group would round
+// distinct vertices onto the SAME grid point and collapse the shape the author
+// was moving, so a group snaps the STEP it takes instead and keeps its internal
+// offsets exactly. For one point the two are the same thing, because the pivot
+// is the point.
+function translationDelta() {
+    const raw = [handle.position.x, handle.position.y, handle.position.z];
+    const delta = raw.map((n, k) => n - drag.pivot[k]);
+    if (gridStep() <= 0) return delta;
+    if (drag.items.length === 1) return raw.map(snap).map((n, k) => n - drag.pivot[k]);
+    return delta.map(snap);
+}
+
+gizmo.addEventListener('objectChange', () => {
+    if (!drag) return;
+
+    const transform = groupTransform({
+        pivot: drag.pivot,
+        translate: translationDelta(),
+        rotation: [handle.quaternion.x, handle.quaternion.y,
+                   handle.quaternion.z, handle.quaternion.w],
+        scale: [handle.scale.x, handle.scale.y, handle.scale.z],
+    });
+    const turned = transform.rotation.some((n, k) => Math.abs(n - IDENTITY_QUAT[k]) > 1e-9);
+    const moved = transformPoints(transform, drag.origin);
+
+    const vertices = [];
+    const entities = [];
+    drag.items.forEach((item, i) => {
+        if (item.kind === 'vertex') {
+            vertices.push([item.index, moved[i]]);
+            return;
+        }
+        entities.push({
+            kind: item.kind,
+            index: item.index,
+            position: moved[i],
+            rotation: turned ? transform.rotation : null,
+            facing: drag.facing[i],
+        });
+    });
+
+    // One rebuild for the whole group, after every member has been written.
+    if (vertices.length > 0) moveVertices(app.level, vertices);
+    if (entities.length > 0) moveEntities(app.level, entities);
+
     view.build(app.level);
     applyLayers();
     renderSelection();
@@ -1131,16 +1406,11 @@ gizmo.addEventListener('objectChange', () => {
 // to a place.
 const MOVABLE = new Set(['light', 'pickup', 'object', 'ball', 'lamp', 'start', 'exit']);
 
-function attachGizmo(position) {
-    handle.position.set(...position);
-    gizmo.attach(handle);
-}
-
 function entityPosition(kind, index) {
     if (kind === 'start') return app.level.start.position;
     if (kind === 'exit') return app.level.exitTrigger?.position ?? null;
-    const list = { light: app.level.lights, pickup: app.level.pickups, object: app.level.objects }[kind];
-    return list?.[index]?.position ?? null;
+    if (!ENTITY_LISTS[kind]) return null;
+    return entityList(app.level, kind)[index]?.position ?? null;
 }
 
 // --- wiring -----------------------------------------------------------------
@@ -1207,7 +1477,10 @@ window.addEventListener('keydown', (e) => {
     if (e.key === '4') setMode('entity');
     if (e.key === 'f' && app.level) frameLevel();
     if (e.key === 't' && app.level) setTopDown(!topDown);
-    if (e.key === 'Escape') { app.selection = null; app.joinFrom = null; gizmo.detach(); renderTools(); renderSelection(); }
+    if (e.key === 'w') setGizmoMode('translate');
+    if (e.key === 'e') setGizmoMode('rotate');
+    if (e.key === 'r') setGizmoMode('scale');
+    if (e.key === 'Escape') { clearSelection(); app.joinFrom = null; renderTools(); renderSelection(); }
 });
 
 window.addEventListener('beforeunload', (e) => {

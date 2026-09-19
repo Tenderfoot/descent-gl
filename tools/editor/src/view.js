@@ -498,14 +498,36 @@ export class LevelView {
     }
 
     highlightVertex(index, color = 0xff8844) {
+        this.highlightVertices(index < 0 ? [] : [index], color);
+    }
+
+    // Every vertex in the selection, with the last one in the list drawn
+    // brighter.
+    //
+    // That last one is the primary - the one the author just clicked, the one
+    // the panel describes, the one a single-vertex tool would act on - and a
+    // group of eight identical blobs loses it. One geometry and two materials
+    // for the whole group rather than a pair per vertex, because a segment's
+    // eight corners are selected in one action and this runs on every rebuild
+    // of a drag.
+    highlightVertices(indices, color = 0xff8844, primaryColor = 0xfff0a0) {
         this.groups.highlight.clear();
-        if (!this.level || index < 0) return;
-        const mesh = new THREE.Mesh(
-            this.track(new THREE.SphereGeometry(1.1, 12, 8)),
-            this.track(new THREE.MeshBasicMaterial({ color, depthTest: false })));
-        mesh.position.copy(v3(this.level.vertices[index]));
-        mesh.renderOrder = 999;
-        this.groups.highlight.add(mesh);
+        if (!this.level || indices.length === 0) return;
+
+        const geometry = this.track(new THREE.SphereGeometry(1.1, 12, 8));
+        const material = this.track(new THREE.MeshBasicMaterial({ color, depthTest: false }));
+        const primary = this.track(new THREE.MeshBasicMaterial({
+            color: primaryColor, depthTest: false }));
+
+        indices.forEach((index, i) => {
+            const position = this.level.vertices[index];
+            if (!position) return;
+            const mesh = new THREE.Mesh(geometry,
+                                        i === indices.length - 1 ? primary : material);
+            mesh.position.copy(v3(position));
+            mesh.renderOrder = 999;
+            this.groups.highlight.add(mesh);
+        });
     }
 
     lightReach(index) {
@@ -565,10 +587,23 @@ export class LevelView {
         return hits.length > 0 ? hits[0].index : -1;
     }
 
+    // What a click on a gizmo landed on, or null. Nearest first.
+    //
+    // `props` is in here so the two moving kinds can be clicked at all: their
+    // meshes, cords and swept arcs already carry a pick record, but the group
+    // they live in was not in this list, so a floating ball and a swinging lamp
+    // were selectable only from the panel - no use to a shift+click that is
+    // meant to gather a group.
+    //
+    // Hidden groups are skipped, the way pickFace skips a hidden portal group.
+    // That matters more now: a lamp draws its whole swept arc and a light can
+    // draw its reach, so unticking the layer is how an author reaches the wall
+    // behind one.
     pickEntity(raycaster) {
-        const candidates = [...this.groups.lights.children, ...this.groups.objects.children,
-                            ...this.groups.pickups.children, ...this.groups.start.children,
-                            ...this.groups.exit.children];
+        const candidates = [];
+        for (const name of ['lights', 'objects', 'pickups', 'props', 'start', 'exit']) {
+            if (this.groups[name].visible) candidates.push(...this.groups[name].children);
+        }
         for (const hit of raycaster.intersectObjects(candidates, true)) {
             let node = hit.object;
             while (node && !node.userData.pick) node = node.parent;

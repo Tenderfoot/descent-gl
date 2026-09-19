@@ -285,7 +285,29 @@ export function deleteSegment(level, si) {
 // Moves one vertex. Every segment referencing it deforms, which is the whole
 // reason the format shares a vertex array: a portal cannot come apart.
 export function moveVertex(level, index, position) {
-    level.vertices[index] = position.slice();
+    moveVertices(level, [[index, position]]);
+}
+
+// Several vertices at once, from a group transform.
+//
+// One rebuildDerived for the whole group rather than one per vertex: the
+// derived planes, centres and diagonals are a function of the FINAL positions,
+// so rebuilding per vertex costs N times as much for the same answer - and
+// during a drag of a segment's eight corners that is eight full rebuilds a
+// frame.
+//
+// `updates` is a list of [index, position]. Every index is checked before
+// anything is written, so a bad one leaves the level untouched, which is what
+// edit() in main.js relies on to keep its undo entry honest.
+export function moveVertices(level, updates) {
+    for (const [index] of updates) {
+        if (!Number.isInteger(index) || index < 0 || index >= level.vertices.length) {
+            throw new Error(`no vertex ${index}`);
+        }
+    }
+    for (const [index, position] of updates) {
+        level.vertices[index] = position.slice();
+    }
     rebuildDerived(level);
 }
 

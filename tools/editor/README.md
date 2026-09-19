@@ -48,7 +48,8 @@ lighting is something a browser cannot do; structure is what this owns.
 ## State
 
 E0–E5 are done: the editor views, validates, round-trips, edits geometry,
-places entities, and creates a level from nothing.
+places entities, and creates a level from nothing. Selections hold more than one
+thing, and the gizmo moves, turns and scales the whole of one.
 
 ## Making a level (E5)
 
@@ -67,6 +68,42 @@ obvious, which is why the game's automap uses it.
 
 Three selection modes — **1** segment, **2** side, **3** vertex.
 
+**Shift+click adds to the selection**, and shift+clicking something already in
+it takes it back out. A shift+click that misses hits nothing rather than
+clearing the group, because losing eight vertices to a near miss is the one
+thing a multi-selection must not do. Escape clears it.
+
+The gizmo then acts on the whole selection, about its centre: **W** move, **E**
+turn, **R** scale, or the buttons under the mode row. Rotate and scale are for
+groups — rotating one vertex about itself is a no-op — with one exception: a
+single piece of scenery has a facing of its own, so **E** turns it, which is the
+only way to aim one without editing the file.
+
+A selection holds either geometry or entities, never both. A vertex and a light
+are moved by different functions, and a group holding both would have to answer
+what rotating it means; shift+clicking across that line replaces the selection
+instead of mixing it. Entity kinds do mix — moving a light and the pickup beside
+it together is the point.
+
+Two shortcuts for the selections worth having: with a segment selected,
+**Select its 8 vertices**; with a side selected, **Select its 4 vertices**. Both
+switch to vertex mode with the corners already picked, which is how a room gets
+widened or a wall angled without shift+clicking eight blobs one at a time. The
+side version is offered for a portal too: the four vertices a portal shares are
+the ones both segments deform through.
+
+A group rotate turns each member's own facing as well as carrying it around the
+pivot — a robot's orientation, a spot's aim, a lamp's swing axis — because a
+cluster rotated ninety degrees and still facing the way it was placed reads as a
+bug. A group scale moves positions only: it does not scale a model, a light's
+radius or a cord.
+
+Scale cannot go through zero. Nothing in either validator has a winding rule, so
+a segment mirrored by a negative scale references the same vertices in the same
+order, passes every structural check, and renders with its normals pointing out
+of the mine — a room lit from nowhere that the ship falls through. The handle
+cannot express it.
+
 A portal is clickable in side and entity mode, which is the only way one can
 be: a portal has no wall triangles of its own, so the translucent quad drawn
 for it is the whole of it, and a click resolves against that quad. It selects
@@ -76,6 +113,13 @@ still passes through the opening to the room beyond, because that is how
 double-click flies from room to room. Unticking **Portals** under Show hands
 those clicks back to whatever is behind them.
 
+The same now holds for the things inside a mine: a hidden layer is not
+pickable, so unticking **Moving lights** is how an author reaches the wall
+behind a lamp's swept arc. That arc, and a ball's cage and cord, already carried
+a pick record, but the group they are drawn in was not in the candidate list — so
+a floating light and a swinging lamp could be selected only from the panel, which
+is no use to a shift+click meant to gather a group. They are clickable now.
+
 | Tool | |
 | --- | --- |
 | **Extrude** | Grows a new segment out of a wall. The wall's four vertices become four of the new segment's, *by index*, so the portal is exact by construction. Depth defaults to the depth of the segment it grew from. |
@@ -83,12 +127,19 @@ those clicks back to whatever is behind them.
 | **Split portal** | Turns a portal back into two walls. |
 | **Delete segment** | Seals the neighbours, reindexes the graph, the doors and every entity, and takes the lights, pickups and objects inside it with it. The player start and the exit are not furniture and are left pointing at nothing, loudly. |
 | **Texture** | Per wall, from the five tiles in `procedural.h`. |
-| **Vertex drag** | Moves one vertex; every segment referencing it deforms together, which is the shared vertex array doing its job. Optional grid snap, off by default. |
+| **Vertex drag** | Moves the selected vertices; every segment referencing one deforms together, which is the shared vertex array doing its job. Optional grid snap, off by default. |
+
+**Grid snap** works on the position of a single point and on the *step* a group
+takes. Rounding every member of a group to the grid would put distinct vertices
+on the same grid point and collapse the shape being moved, so a group keeps its
+internal offsets exactly and only its displacement is snapped. It applies to
+moving, not to turning or scaling.
 
 Mode **4** places the things inside a mine: lights (radius, intensity, colour,
 point or spot), robots and scenery from `assets/models/` drawn as their real
 meshes, pickups including keys, the exit trigger, doors on portals, and the two
-kinds that move once the level is running. Drag the gizmo to move any of them.
+kinds that move once the level is running. Drag the gizmo to move any of them,
+or shift+click several and move them together.
 
 **Floating lights** are a light in a ball: shoot one in the game and it bounces
 around the room. Mass divides every impulse it takes, bounce is how much of a
@@ -164,6 +215,7 @@ one keystroke away.
 | `src/create.js` | the starter level, and what a level may be called |
 | `src/obj.js` | just enough OBJ to draw the shipped models |
 | `src/history.js` | undo and redo, by snapshot |
+| `src/transform.js` | the group transform, as plain arrays so it needs no three.js |
 | `src/view.js` | the only module that imports three.js |
 | `src/main.js` | the application |
 | `serve.py` | static files, level read/write, and the Verify endpoint |
@@ -172,6 +224,7 @@ one keystroke away.
 | `tests/entities.mjs` | entity placement, and the segment-resolution rule |
 | `tests/portals.mjs` | what a click on a portal resolves to |
 | `tests/create.mjs` | the starter level, and that it can be grown |
+| `tests/transform.mjs` | transforming more than one thing at once |
 | `testdata/base.json` | the three-segment level every broken variant is made from |
 
 ## Verification
@@ -182,6 +235,7 @@ node tools/editor/tests/ops.mjs           # the structural edits
 node tools/editor/tests/entities.mjs      # placement and segment resolution
 node tools/editor/tests/create.mjs        # the starter level
 node tools/editor/tests/portals.mjs       # what a click on a portal resolves to
+node tools/editor/tests/transform.mjs    # transforming more than one thing at once
 ```
 
 Both need a Linux debug build (`cmake --preset linux && cmake --build --preset

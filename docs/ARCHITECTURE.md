@@ -248,6 +248,35 @@ editor's `parseLevel` did not — a gap with no symptom while portals could not
 be clicked, and a duplicate door the moment they could, because a portal whose
 door the editor could not see is a portal it offers to add a door to.
 
+### Transforming more than one thing
+
+A selection holds a list, and the gizmo moves, turns and scales the whole of it
+about its centre. Two rules make that safe, and both are about where the maths
+lives and what it is applied to.
+
+`tools/editor/src/transform.js` speaks plain arrays and imports nothing.
+three.js lives only in `view.js`, so the part of a group transform that can be
+wrong — the pivot, the quaternion, the composition — is testable under node with
+no browser, the same reason `portalFaces()` is in `geometry.js`.
+`tests/transform.mjs` is that test.
+
+Every frame of a drag applies the gizmo's pose to the positions recorded when
+the drag **started**, never to the ones it last produced. `TransformControls`
+reports absolute state — the whole drag so far — so feeding its output back in
+compounds, sixty times a second, and a group comes out of a rotation slightly
+deformed by the act of having been moved. The same rule is why `turnEntity()`
+takes the facing to rotate *from*: composing an absolute rotation onto an
+object's current orientation once per frame spins it off into the rock.
+
+Two consequences worth writing down. A group snaps the *step* it takes rather
+than each member's position, because rounding every vertex of a group to the
+grid puts distinct vertices on one grid point and collapses the shape. And scale
+cannot reach zero or go negative: neither validator has a winding rule, so a
+segment mirrored by a scale handle references the same vertices in the same
+order, passes every structural check, and renders with its normals pointing out
+of the mine. `MIN_SCALE` makes the drag unable to express it, which is the only
+place that check exists.
+
 ### The server, and Verify
 
 `tools/editor/serve.py` is loopback-only and does the three things a browser
