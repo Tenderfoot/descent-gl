@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -35,7 +36,12 @@ bool optionalNumber(lua_State* state, int table, const char* field, const char* 
         const double value = luaL_checknumber(state, -1);
         if (!std::isfinite(value) || value < low || value > high) {
             lua_pop(state, 1);
-            luaL_error(state, "loadout %s must be between %g and %g", what, low, high);
+            // Formatted here rather than by luaL_error: Lua's own formatter
+            // has no %g, and handing it one aborts with a complaint about the
+            // format string instead of reporting the level's actual mistake.
+            char range[64];
+            std::snprintf(range, sizeof(range), "%g and %g", low, high);
+            luaL_error(state, "loadout %s must be between %s", what, range);
         }
         out = value;
     }
