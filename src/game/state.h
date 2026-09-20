@@ -6,6 +6,7 @@
 #include "sim/robots.h"
 #include "sim/ship.h"
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/vec3.hpp>
 
@@ -19,6 +20,22 @@ namespace dvk {
 // game; chase exists so the ship model is visible while its flight constants
 // are being tuned.
 enum class CameraMode { FirstPerson, Chase };
+
+// Where the chase camera's eye wants to sit, in the ship's own space, and how
+// far ahead of the ship it looks.
+//
+// Wants, not does: the mine is frequently in the way, and the eye is pulled in
+// along this same line until it is not. That resolve needs the level and the
+// doors, so it happens in prepareRenderFrame and its answer arrives here as
+// RenderState::chaseDistance.
+inline constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
+inline constexpr float kChaseLookAhead = 6.0f;
+
+// The unit vector along kChaseOffset, which is what a resolved distance is
+// measured in. A function rather than a constant because normalising is not
+// constexpr, and a namespace-scope variable needing a dynamic initialiser is a
+// static-order hazard for the sake of three arithmetic operations.
+inline glm::vec3 chaseDirection() { return glm::normalize(kChaseOffset); }
 
 // State advanced by the fixed 120 Hz step. Everything the renderer needs to
 // interpolate lives here and nowhere else.
@@ -156,6 +173,18 @@ struct RenderState {
     // level's own elapsed time, used only to give the pulse a phase.
     bool shipDisabled = false;
     float shipDisabledTime = 0.0f;
+
+    // Chase camera only, and meaningless in first person.
+    //
+    // How far along kChaseOffset the eye actually ended up once the mine had
+    // its say, and whether the ship is close enough to the eye that drawing it
+    // would put the camera inside its own hull. Both are resolved once per
+    // frame and read here rather than recomputed, because the view matrix, the
+    // light culling and the specular term all ask where the eye is and a
+    // disagreement between them is a frame that shades against one camera and
+    // draws from another.
+    float chaseDistance = 0.0f;
+    bool drawShip = false;
 };
 
 inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
