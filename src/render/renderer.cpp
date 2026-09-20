@@ -878,13 +878,25 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // property is what lets a weapon the player is not carrying hold its place
     // as an empty mount.
     {
-        const float capScale = s * 0.5f;
-        const float keyScale = s * 0.55f;
-        const float nameScale = s * 0.75f;
-        const float pad = 3.0f * s;
-        const float cellPad = 2.5f * s;
-        const float groupGap = 6.0f * s;
-        const float rule = std::max(1.0f, 0.8f * s);
+        // The strip carries more small text than anything else on the HUD and
+        // reads as a block rather than as a line, so at the HUD's own scale it
+        // sits heavier on the screen than what it reports is worth. It is drawn
+        // at half of it.
+        //
+        // Floored at the same 1.5 the HUD's scale is floored at, and for the
+        // same reason: the font is a 5x7 bitmap, and below one device pixel per
+        // font pixel a glyph stops being a letter and becomes a smudge. On a
+        // small window the strip therefore stops shrinking rather than going
+        // unreadable, and at that size it is already the whole HUD's minimum.
+        const float ss = std::max(1.5f, s * 0.5f);
+
+        const float capScale = ss * 0.5f;
+        const float keyScale = ss * 0.55f;
+        const float nameScale = ss * 0.75f;
+        const float pad = 3.0f * ss;
+        const float cellPad = 2.5f * ss;
+        const float groupGap = 6.0f * ss;
+        const float rule = std::max(1.0f, 0.8f * ss);
         const float space = static_cast<float>(font::kAdvance) * nameScale;
         const float countW = hud_.textWidth("0000", nameScale);
 
@@ -903,9 +915,9 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const float keyH = 7.0f * keyScale;
         const float nameH = 7.0f * nameScale;
         const float capY = pad;
-        const float keyY = capY + capH + 2.0f * s;
-        const float nameY = keyY + keyH + 1.5f * s;
-        const float underY = nameY + nameH + 1.5f * s;
+        const float keyY = capY + capH + 2.0f * ss;
+        const float nameY = keyY + keyH + 1.5f * ss;
+        const float underY = nameY + nameH + 1.5f * ss;
         const float rowH = underY + rule + pad;
 
         // Into a buffer rather than into a string: this is the draw path, and
@@ -1001,8 +1013,8 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             for (int i = 0; i < count; ++i) {
                 const float cw = cellWidth(cells[i]);
                 if (i > 0) {
-                    hud_.rect(cellX, top + keyY - 1.0f * s, std::max(1.0f, s * 0.35f),
-                              nameY + nameH - keyY + 2.0f * s,
+                    hud_.rect(cellX, top + keyY - 1.0f * ss, std::max(1.0f, ss * 0.35f),
+                              nameY + nameH - keyY + 2.0f * ss,
                               glm::vec4(0.55f, 0.66f, 0.78f, 0.22f));
                 }
                 drawCell(cells[i], cellX, top, cw, !shared);
