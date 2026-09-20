@@ -31,6 +31,41 @@ constexpr float kHeadlightForward = 2.2f;
 constexpr float kAimNearDistance = 12.0f;
 constexpr float kAimFarDistance = kDefaultAimDistance;
 
+// How much clear air is left between the chase camera's eye and the wall it
+// was stopped by.
+//
+// A ray and a pad rather than a sphere sweep. kZNear is 0.05, so even at the
+// widest FOV the setting allows the near plane's far corner sits under 0.2
+// units from the eye: padding a point hit by more than that is geometrically
+// indistinguishable from sweeping the frustum itself. And a ray cannot grind
+// to a halt the way conservative advancement does when it runs nearly tangent
+// to a surface - which is exactly what an up-and-back chase direction does
+// under a low ceiling, where sweepSphere would exhaust its step budget and
+// report no hit at all. Failing open there means the camera in the ceiling,
+// which is the bug this exists to fix.
+constexpr float kChaseWallPad = 0.25f;
+
+// Coming back out is eased; going in is not.
+//
+// The asymmetry is the whole point. A camera that eases INTO its new distance
+// is a camera inside the wall for the length of the ease, which is the same
+// bug, only briefer. Nothing is in the way on the way out, so that half can
+// take its time and does.
+constexpr float kChaseReturnRate = 5.0f;   // 1/s
+
+// The ship stops being drawn once the eye is this close to it.
+//
+// At three units the hull is a little over a metre ahead of the near plane and
+// still reads as a ship; any closer and the camera is inside the mesh, looking
+// at culled backfaces through a near plane that has sliced the fuselage open.
+// First person does not draw the ship for exactly this reason.
+//
+// A band rather than a single cut, because the resolved distance eases back
+// out after every snap: a ship grinding along a wall that held the camera near
+// one threshold would blink on and off several times a second.
+constexpr float kChaseShipHide = 3.0f;
+constexpr float kChaseShipShow = 3.6f;
+
 } // namespace
 
 PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
@@ -54,6 +89,7 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
     sim::Illumination& playerLight = ctx.playerLight;
     sim::PlayerVisibility& playerSeen = ctx.playerSeen;
     float& aimDistance = ctx.aimDistance;
+    ChaseCamera& chase = ctx.chase;
 
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
         rs.camera = camera;
@@ -83,6 +119,49 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
             // A flicker that dips rather than brightens: the lights are failing.
             const float flicker = 0.72f + 0.28f * std::sin(t * 26.0f) * std::sin(t * 7.3f);
             rs.staticLightScale = 1.0f - cur.game.shake * (1.0f - flicker);
+        }
+
+        // --- the chase camera against the mine ---------------------------
+        //
+        // The eye wants to sit at kChaseOffset in the ship's own space. Where
+        // the mine is in the way it is pulled in along that same line - all the
+        // way to the ship's own position if it has to, which is the one point
+        // on the line that is guaranteed clear, because the ship's own
+        // collision is what keeps it clear.
+        //
+        // Pulling in along the line rather than sliding along the wall: the
+        // line always has an answer and the answer is continuous, where sliding
+        // has to pick a direction at a corner and picks a different one the
+        // next frame.
+        rs.chaseDistance = 0.0f;
+        rs.drawShip = false;
+        if (camera == dvk::CameraMode::Chase) {
+            const glm::vec3 ideal = glm::mat3_cast(rs.shipOrientation) * dvk::kChaseOffset;
+            const float reach = glm::length(ideal);
+            const dvk::sim::RayHit back =
+                dvk::sim::raycast(level, rs.shipPos, ideal, reach, rs.shipSegment, &solidDoors);
+
+            // The shake is added to the eye by the renderer, downstream of
+            // everything here, and would walk a pinned camera straight back
+            // through the wall it was just pulled out of. So it is paid for
+            // here, out of the same budget, rather than being allowed to escape
+            // the clamp.
+            const float target =
+                std::clamp((back.hit ? back.distance : reach) - kChaseWallPad -
+                               glm::length(rs.shakeOffset),
+                           0.0f, reach);
+
+            float& held = chase.distance;
+            if (target < held) {
+                held = target;
+            } else {
+                held += (target - held) *
+                        (1.0f - std::exp(-kChaseReturnRate * static_cast<float>(elapsed)));
+            }
+
+            chase.shipDrawn = held >= (chase.shipDrawn ? kChaseShipHide : kChaseShipShow);
+            rs.chaseDistance = held;
+            rs.drawShip = chase.shipDrawn;
         }
 
         // --- sound -------------------------------------------------------

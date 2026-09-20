@@ -515,6 +515,10 @@ int main(int argc, char** argv) {
     // How far down the firing line the reticle is drawn. Held across frames
     // because it is chased rather than set: see where it is updated below.
     float aimDistance = dvk::kDefaultAimDistance;
+    // Where the chase camera's eye ended up once the mine had its say, and
+    // whether the ship is still far enough from it to draw. Held across frames
+    // for the same reason: see where they are updated below.
+    dvk::ChaseCamera chaseCamera;
     // Whether the soundtrack is in combat. Held across frames because the
     // fight being over is a thing that has to last: see where it is updated
     // below.
@@ -1096,7 +1100,7 @@ int main(int argc, char** argv) {
         dvk::FramePrepareContext frameContext{
             prev, cur, alpha, camera, settings, clock.seconds(), elapsed, audio, soundEvents,
             level, flight, weapons, flood, lightDoorSignature, dynamicLights, solidDoors,
-            occluders, playerLight, playerSeen, aimDistance};
+            occluders, playerLight, playerSeen, aimDistance, chaseCamera};
         dvk::PreparedFrame prepared = dvk::prepareRenderFrame(frameContext);
         dvk::RenderState& rs = prepared.renderState;
         const glm::vec3& shipForward = prepared.shipForward;

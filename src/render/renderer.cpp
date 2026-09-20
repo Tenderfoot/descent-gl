@@ -34,9 +34,6 @@ constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
 constexpr const char* kCommRoot = "assets/comm";
 
-constexpr glm::vec3 kChaseOffset{0.0f, 2.6f, 9.0f};
-constexpr float kChaseLookAhead = 6.0f;
-
 } // namespace
 
 Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
@@ -1588,8 +1585,15 @@ glm::mat4 Renderer::buildView(const RenderState& rs) const {
 
     // The shake is added to the eye and not to the look-at target, so the mine
     // appears to move rather than the ship appearing to aim somewhere else.
+    //
+    // The eye is along kChaseOffset, but only as far along it as the mine
+    // allowed: that distance was resolved against the level in
+    // prepareRenderFrame and is a number this side only reads. The look-at
+    // target does not move with it, so pulling the camera in tightens the view
+    // on the ship rather than swinging it off.
     if (rs.camera == CameraMode::Chase) {
-        const glm::vec3 eye = rs.shipPos + basis * kChaseOffset + rs.shakeOffset;
+        const glm::vec3 eye = rs.shipPos + basis * chaseDirection() * rs.chaseDistance +
+                              rs.shakeOffset;
         return glm::lookAt(eye, rs.shipPos + forward * kChaseLookAhead, up);
     }
     return glm::lookAt(rs.shipPos + rs.shakeOffset, rs.shipPos + rs.shakeOffset + forward, up);
@@ -1597,7 +1601,8 @@ glm::mat4 Renderer::buildView(const RenderState& rs) const {
 
 glm::vec3 Renderer::eyePos(const RenderState& rs) const {
     if (rs.camera == CameraMode::Chase) {
-        return rs.shipPos + glm::mat3_cast(rs.shipOrientation) * kChaseOffset;
+        return rs.shipPos +
+               glm::mat3_cast(rs.shipOrientation) * chaseDirection() * rs.chaseDistance;
     }
     return rs.shipPos;
 }
@@ -1691,18 +1696,20 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                 ++stats_.shadowCasters;
             }
 
-            // The ship casts only when it is actually on screen, which is the
-            // chase camera. In first person the camera sits INSIDE the hull, so
-            // its shadow volume begins at the eye and blacks out most of the
-            // view - the player shadowing themselves with a mesh they cannot
-            // even see. The ship is not drawn in first person either, so this
-            // keeps what casts a shadow and what is visible in agreement.
+            // The ship casts only when it is actually on screen, which is what
+            // rs.drawShip says - first person, and a chase camera the mine has
+            // pulled in against the hull, both leave it undrawn. The camera is
+            // at or inside the mesh in both cases, so its shadow volume would
+            // begin at the eye and black out most of the view: the player
+            // shadowing themselves with a mesh they cannot even see. Sharing
+            // the one flag keeps what casts a shadow and what is visible in
+            // agreement however the eye got that close.
             //
             // It is never an occluder for the headlight at all: a lamp bolted
             // to the hull would spend every frame shadowing the hull it is
             // bolted to, and the view would be a black cone.
             const bool isHeadlight = static_cast<int>(li) == headlightIndex_;
-            if (!isHeadlight && rs.camera == CameraMode::Chase &&
+            if (!isHeadlight && rs.drawShip &&
                 std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
                 volumes_.add(shipOccluder_, light.position);
                 ++stats_.shadowCasters;
@@ -1767,7 +1774,7 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         slabMesh_->draw();
     }
 
-    if (rs.camera == CameraMode::Chase) {
+    if (rs.drawShip) {
         depthShader_->setMat4("uModel", shipModelMatrix(rs));
         ship_->draw();
     }
@@ -1950,7 +1957,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
 
         // The ship is lit by the same pass. It carries no texture-layer
         // attribute, so the override selects its tile from the same array.
-        if (rs.camera == CameraMode::Chase && walk.isVisible(rs.shipSegment) &&
+        if (rs.drawShip && walk.isVisible(rs.shipSegment) &&
             std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
             wallShader_->setInt("uLayerOverride", WallHull);
             wallShader_->setVec3("uAlbedoTint",
