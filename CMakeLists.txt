@@ -38,12 +38,18 @@ add_executable(descent
     src/core/options.cpp
     src/core/window.cpp
     src/game/asset_check.cpp
+    src/game/automap_build.cpp
     src/game/collision_test.cpp
+    src/game/comm_director.cpp
     src/game/comm_player.cpp
+    src/game/frame_report.cpp
+    src/game/hud_build.cpp
     src/game/hud_slots.cpp
     src/game/input_actions.cpp
     src/game/level.cpp
     src/game/level_list.cpp
+    src/game/level_load.cpp
+    src/game/level_switch_test.cpp
     src/game/light_test.cpp
     src/game/visibility.cpp
     src/game/loop_test.cpp
@@ -51,10 +57,14 @@ add_executable(descent
     src/game/music.cpp
     src/game/progress.cpp
     src/game/proxies.cpp
+    src/game/resize_test.cpp
     src/game/robots_test.cpp
     src/game/session.cpp
     src/game/settings.cpp
+    src/game/shell.cpp
+    src/game/sim_sets.cpp
     src/game/script.cpp
+    src/game/soundtrack.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp
