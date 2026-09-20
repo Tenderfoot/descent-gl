@@ -1170,6 +1170,7 @@ int main(int argc, char** argv) {
         hud.hasAimPoint = !automap.open;
         hud.shipDisabled = cur.ship.disabled;
         hud.shipDisabledTime = cur.game.elapsed;
+        hud.energyDepleted = dvk::sim::playerEnergyDepleted(cur.combat.player);
         // Both the bar and the word come from `playerSeen` rather than from
         // `playerLight`, even though the latter is the better-behaved number.
         // They have to agree: a bar sitting under its own threshold tick beside

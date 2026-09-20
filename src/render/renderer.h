@@ -206,6 +206,11 @@ struct HudData {
     // not an event: the edges stay red and pulsing until something changes.
     bool shipDisabled = false;
     float shipDisabledTime = 0.0f;
+
+    // The ship has nothing left to spend. A state like the one above and drawn
+    // beside it, rather than a number the player is expected to read off the
+    // energy bar at the moment their guns stop answering.
+    bool energyDepleted = false;
 };
 
 // The automap, gathered by the game layer for the same reason `HudData` is: the

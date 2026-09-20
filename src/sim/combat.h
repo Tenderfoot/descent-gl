@@ -202,6 +202,21 @@ inline bool playerDisabled(const PlayerState& player) {
     return player.shields <= kPlayerMaxShields * kDisabledHealthFraction;
 }
 
+// The energy a ship has to be under to count as out of it.
+//
+// Not zero. Energy is spent in whole shots and nothing puts it back, so what is
+// left once the last affordable shot has been taken is a remainder somewhere
+// under the cheapest thing that could have been fired - a ship that has run dry
+// sits on a fraction rather than on nothing, and a test against zero would
+// never fire.
+inline constexpr float kEnergyDepleted = 1.0f;
+
+// True while the ship has nothing left to spend: no energy weapon it could
+// fire and no headlight it could hold on.
+inline bool playerEnergyDepleted(const PlayerState& player) {
+    return player.energy < kEnergyDepleted;
+}
+
 // How long after an out-of-ammo click before another one is allowed.
 inline constexpr float kEmptyClickInterval = 0.4f;
 
