@@ -39,11 +39,16 @@ constexpr const char* kCommRoot = "assets/comm";
 // from `y` downwards. Returns the y the next line would have been on, so a
 // caller can put something under a block whose height it does not know.
 //
+// A null `hud` measures without drawing, which is how a block that wants to be
+// centred on a line finds its own height: the wrap decides how many lines there
+// are, so nothing else can answer that question, and a second copy of the
+// loop that only counted would be a second copy to keep in step.
+//
 // Slices rather than strings: this runs every frame a panel is up, and the
 // draw path is one of the two places this project does not allocate in. Long
 // text is cut rather than overflowed - the load-time length limits are what
 // bound the worst case, and this bounds the geometry whatever gets past them.
-float drawWrapped(Hud& hud, std::string_view body, float x, float y, float scale,
+float drawWrapped(Hud* hud, std::string_view body, float x, float y, float scale,
                   const glm::vec4& color, float width, int maxLines, float lineStep) {
     const int columns =
         std::max(1, static_cast<int>(width / (static_cast<float>(font::kAdvance) * scale)));
@@ -59,7 +64,7 @@ float drawWrapped(Hud& hud, std::string_view body, float x, float y, float scale
             const size_t space = body.rfind(' ', last);
             if (space != std::string_view::npos && space > first) last = space;
         }
-        hud.text(body.substr(first, last - first), x, lineY, scale, color);
+        if (hud) hud->text(body.substr(first, last - first), x, lineY, scale, color);
         first = last;
         if (first < body.size() && body[first] == '\n') ++first;
         lineY += lineStep;
@@ -785,7 +790,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         }
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
         hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);
-        drawWrapped(hud_, hud.commText ? hud.commText : "", x, y + panelH + 12.0f * s,
+        drawWrapped(&hud_, hud.commText ? hud.commText : "", x, y + panelH + 12.0f * s,
                     s * 0.52f, glm::vec4(0.78f, 0.94f, 1.0f, alpha), panelW, 6, 6.0f * s);
     }
 
@@ -1267,16 +1272,17 @@ void Renderer::buildMenu(const MenuView& menu) {
     hud_.rect(0.0f, 0.0f, width, height, glm::vec4(0.0f, 0.015f, 0.025f, 0.78f));
 
     // A tutorial is a page rather than a column of choices, so it gets its own
-    // layout: a heading, the clip it was authored with, and the words beside
-    // it. Only the okay button underneath comes from the shared button loop,
-    // which is why this falls through to it rather than returning.
+    // layout: a centred heading, the clip it was authored with under it, and
+    // the words under that. Only the okay button below the pane comes from the
+    // shared button loop, which is why this falls through to it rather than
+    // returning.
     if (menu.screen == MenuScreen::Tutorial) {
         const float alpha = std::clamp(menu.tutorialAlpha, 0.0f, 1.0f);
         const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
         const glm::vec4 body(0.80f, 0.90f, 0.98f, alpha);
 
-        // Wide enough to sit a readable column of text beside the picture, and
-        // capped so it does not become a wall at 4K.
+        // Wide enough for a readable line of text, and capped so it does not
+        // become a wall at 4K.
         const float paneWidth = std::clamp(width * 0.62f, 420.0f, 940.0f);
         const float paneLeft = (width - paneWidth) * 0.5f;
         // Stops short of the okay button below it at every window size the
@@ -1289,41 +1295,55 @@ void Renderer::buildMenu(const MenuView& menu) {
         hud_.rect(paneLeft, paneTop, paneWidth, std::max(2.0f, scale * 0.8f), cyan);
 
         const float pad = std::max(10.0f, scale * 6.0f);
+        const float paneCenter = paneLeft + paneWidth * 0.5f;
         const float titleScale = scale * 1.3f;
-        hud_.text(menu.tutorialTitle, paneLeft + pad, paneTop + pad, titleScale,
+        const float titleWidth = hud_.textWidth(menu.tutorialTitle, titleScale);
+        hud_.text(menu.tutorialTitle, paneCenter - titleWidth * 0.5f, paneTop + pad, titleScale,
                   glm::vec4(0.92f, 0.98f, 1.0f, alpha));
 
+        // The picture on the pane's first third, the words on its second: a
+        // column down the middle rather than two blocks side by side, which at
+        // a wide aspect ratio left the text a ribbon a couple of words across.
+        //
         // The clip's own aspect, so a library authored at another shape is
         // letterboxed by the layout rather than stretched by it.
-        const float contentTop = paneTop + pad * 2.0f + 7.0f * titleScale;
         const float videoWidth = paneWidth * 0.46f;
         const float videoHeight = videoWidth * static_cast<float>(commHeight_) /
                                   static_cast<float>(std::max(commWidth_, 1));
-        const float videoLeft = paneLeft + pad;
+        const float videoLeft = paneCenter - videoWidth * 0.5f;
+        const float videoTop = paneTop + paneHeight / 3.0f - videoHeight * 0.5f;
         const float border = std::max(1.0f, scale * 0.5f);
-        hud_.rect(videoLeft - border, contentTop - border, videoWidth + border * 2.0f,
+        hud_.rect(videoLeft - border, videoTop - border, videoWidth + border * 2.0f,
                   videoHeight + border * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
         const int layer = commLayer(menu.tutorialClip, menu.tutorialFrame);
         if (layer >= 0) {
-            hud_.image(videoLeft, contentTop, videoWidth, videoHeight, layer,
+            hud_.image(videoLeft, videoTop, videoWidth, videoHeight, layer,
                        glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         }
 
-        // Beside the picture while there is room for a column there, and
-        // underneath it once the pane is narrow enough that there is not.
-        const float textLeft = videoLeft + videoWidth + pad;
-        const float textRight = paneLeft + paneWidth - pad;
+        // The body spans the pane rather than the picture above it, so the
+        // wrap gets the whole width to work with.
+        const float textLeft = paneLeft + pad;
+        const float textWidth = paneWidth - pad * 2.0f;
+        const float textBottom = paneTop + paneHeight - pad;
         const float bodyScale = scale * 0.72f;
         const float lineStep = 9.0f * bodyScale;
-        const float sideRoom = textRight - textLeft;
-        const bool beside = sideRoom > paneWidth * 0.28f;
-        const float textWidth = beside ? sideRoom : paneWidth - pad * 2.0f;
-        const float textX = beside ? textLeft : paneLeft + pad;
-        const float textY = beside ? contentTop : contentTop + videoHeight + pad;
-        const float textBottom = paneTop + paneHeight - pad;
-        const int lines = std::max(1, static_cast<int>((textBottom - textY) / lineStep));
-        drawWrapped(hud_, menu.tutorialText, textX, textY, bodyScale, body, textWidth, lines,
-                    lineStep);
+
+        // Centred on the pane's two-thirds line, which is where a short body
+        // wants to sit; a long one is pushed clear of the picture instead and
+        // runs down from there. Measured first because only the wrap knows how
+        // many lines there are, and the block cannot be centred on a height
+        // nobody has worked out yet.
+        const int roomToBottom =
+            std::max(1, static_cast<int>((textBottom - videoTop - videoHeight - pad) / lineStep));
+        // Measured from zero, so what comes back is the block's own height.
+        const float blockHeight = drawWrapped(nullptr, menu.tutorialText, textLeft, 0.0f,
+                                              bodyScale, body, textWidth, roomToBottom, lineStep);
+        const float textTop = std::max(paneTop + paneHeight * 2.0f / 3.0f - blockHeight * 0.5f,
+                                       videoTop + videoHeight + pad);
+        const int lines = std::max(1, static_cast<int>((textBottom - textTop) / lineStep));
+        drawWrapped(&hud_, menu.tutorialText, textLeft, textTop, bodyScale, body, textWidth,
+                    lines, lineStep);
     }
 
     const float panelWidth = std::clamp(width * 0.48f, 360.0f, 680.0f);
