@@ -59,12 +59,60 @@ namespace dvk::gl {
 // geometry is axis-aligned text and rectangles that gain nothing from
 // multisampling, and keeping it out means the resolve carries only scene
 // colour.
+
+// One cell of the weapon strip, as the HUD draws it.
+//
+// The renderer is handed a fixed row of these and never learns what a weapon
+// is: which guns exist, what order they sit in, and which key each one answers
+// to are all decided by the game layer, because that is the only place that
+// knows both the WeaponId enum and the player's current bindings.
+//
+// The row's length is fixed and its cells keep their places. A cell the player
+// cannot fire from is dimmed rather than dropped, so nothing on the strip moves
+// under the player's eye when a count runs out.
+struct HudWeaponSlot {
+    // The bound key, formatted the way the controls screen formats it, so a
+    // rebound gun names the key it actually answers to. A buffer rather than a
+    // pointer, because the string is built per frame from the live bindings.
+    // Empty draws no key.
+    char key[8] = "";
+    // Short enough to fit a cell: the strip has no room for "concussion". Points
+    // at static storage, so naming a weapon costs no allocation in the draw
+    // path.
+    const char* name = "";
+    int ammo = -1;          // -1 when the weapon runs on energy rather than a count
+    int level = 0;          // laser's upgrade level; 0 for every other weapon
+    bool selected = false;  // the gun this slot's trigger would fire right now
+    // Whether the weapon is carried at all. Always true today, because every gun
+    // is available from the first frame. It is a field rather than an assumption
+    // so that the strip already has somewhere to read the answer from if that
+    // ever stops being true.
+    bool available = true;
+    // Whether it could fire this instant: a count that is not zero, or energy
+    // that covers a shot. False is a dimmer cell, never a hidden one - a player
+    // out of ammo needs to see which gun is empty.
+    bool usable = true;
+};
+
 // Everything the HUD draws, gathered by the game layer so the renderer does not
 // reach into simulation state.
 struct HudData {
     bool show = true;
     float shields = 100.0f;
     float energy = 100.0f;
+
+    // The weapon strip, bottom right: the primaries in key order, then the
+    // missiles in the order their key cycles them. Both orders are the game
+    // layer's and neither is the WeaponId enum's, which is why they arrive as a
+    // filled row rather than as an index the renderer would have to interpret.
+    static constexpr int kPrimarySlots = 4;
+    static constexpr int kSecondarySlots = 2;
+    HudWeaponSlot primaries[kPrimarySlots];
+    HudWeaponSlot secondaries[kSecondarySlots];
+
+    // The loadout as the text readout states it. Superseded by the slots above
+    // and still what the bottom-right text draws from; fill both while both are
+    // read, or the two will disagree.
     const char* primaryWeaponName = "laser";
     int primaryLaserLevel = 1;
     int primaryAmmo = -1;          // -1 when the weapon runs on energy
