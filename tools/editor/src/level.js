@@ -94,6 +94,7 @@ export function parseLevel(json, path = '<memory>') {
             segment: dj.segment,
             side: dj.side,
             key: KEY_NAMES.indexOf(dj.key ?? 'none'),   // -1 is KeyColor::None
+            hatch: dj.hatch === true,                   // sealed until the reactor goes
             openDistance: dj.openDistance ?? DEFAULTS.doorOpenDistance,
             openTime: dj.openTime ?? DEFAULTS.doorOpenTime,
             closeDelay: dj.closeDelay ?? DEFAULTS.doorCloseDelay,
@@ -239,6 +240,10 @@ export function serializeLevel(level) {
     if (level.doors.length) {
         j.doors = level.doors.map((d) => {
             const dj = { segment: d.segment, side: d.side, key: d.key >= 0 ? KEY_NAMES[d.key] : 'none' };
+            // Only when set, matching saveLevel: an ordinary door says nothing
+            // about the reactor and a level full of "hatch": false would be
+            // noise in every diff.
+            if (d.hatch) dj.hatch = true;
             // saveLevel always writes these three; the shipped levels leave
             // them out and take the defaults. Omitting them keeps a door that
             // nobody has tuned looking untouched.
