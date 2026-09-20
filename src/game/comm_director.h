@@ -50,6 +50,12 @@ public:
     // --comm's held frame belongs to the level the run started in.
     void leaveLevel();
 
+    // Take whatever is on screen off it, now. The same thing leaveLevel does
+    // and named apart from it because it is a different event: this is a
+    // transmission cut short inside a level that is still being played, which
+    // is what raising a tutorial pane over one has to do.
+    void stop();
+
     // A script callback asking for a message. The clip's own displaySeconds is
     // how long the pictures run; the message says how long it is on screen, and
     // the frames loop to fill it.

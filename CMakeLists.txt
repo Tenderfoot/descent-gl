@@ -65,6 +65,7 @@ add_executable(descent
     src/game/sim_sets.cpp
     src/game/script.cpp
     src/game/soundtrack.cpp
+    src/game/tutorial.cpp
     src/game/weapons_test.cpp
     src/game/world_test.cpp
     src/render/debug.cpp

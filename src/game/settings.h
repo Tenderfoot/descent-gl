@@ -17,6 +17,9 @@ struct PlayerSettings {
     float thirdPersonFov = 70.0f;
     bool invertMouseY = false;
     bool muted = false;
+    // Whether a level's scripted tutorial panes are allowed to stop the game.
+    // On by default: a player who has not turned them off has not seen them.
+    bool tutorials = true;
     bool fullscreen = false;
     bool vsync = true;
     int windowWidth = 1600;

@@ -34,20 +34,55 @@ constexpr std::array<ButtonDefinition, 2> kSummaryButtons{{
     {MenuAction::MainMenu, "main menu"},
 }};
 
-constexpr std::array<ButtonDefinition, 12> kSettingsButtons{{
-    {MenuAction::None, "master volume"},
-    {MenuAction::None, "music volume"},
-    {MenuAction::None, "mouse sensitivity"},
-    {MenuAction::None, "1st person fov"},
-    {MenuAction::None, "3rd person fov"},
-    {MenuAction::None, "invert mouse y"},
+// The settings root holds no values, only the way into the screens that do.
+constexpr std::array<ButtonDefinition, 5> kSettingsButtons{{
+    {MenuAction::OpenVideoSettings, "video"},
+    {MenuAction::OpenAudioSettings, "audio"},
+    {MenuAction::OpenGameSettings, "game"},
+    {MenuAction::OpenControls, "controls"},
+    {MenuAction::Back, "back"},
+}};
+
+// The three value screens. Their adjustable rows come first and in the order
+// PlayerMenu::adjustSetting reads them, which is what lets a row index stand
+// for a setting without a table mapping the two.
+//
+// Field of view is video and not game: it is the vertical angle the projection
+// matrix is built from, and it belongs beside the other things that decide what
+// the window shows.
+constexpr std::array<ButtonDefinition, 7> kVideoButtons{{
     {MenuAction::None, "fullscreen"},
     {MenuAction::None, "window size"},
     {MenuAction::None, "vsync"},
-    {MenuAction::OpenControls, "controls"},
+    {MenuAction::None, "1st person fov"},
+    {MenuAction::None, "3rd person fov"},
     {MenuAction::ApplySettings, "apply"},
-    {MenuAction::Back, "cancel"},
+    {MenuAction::Back, "back"},
 }};
+
+constexpr std::array<ButtonDefinition, 4> kAudioButtons{{
+    {MenuAction::None, "master volume"},
+    {MenuAction::None, "music volume"},
+    {MenuAction::ApplySettings, "apply"},
+    {MenuAction::Back, "back"},
+}};
+
+constexpr std::array<ButtonDefinition, 5> kGameButtons{{
+    {MenuAction::None, "mouse sensitivity"},
+    {MenuAction::None, "invert mouse y"},
+    {MenuAction::None, "tutorials"},
+    {MenuAction::ApplySettings, "apply"},
+    {MenuAction::Back, "back"},
+}};
+
+// A tutorial pane has one button, because it has one thing the player can do.
+constexpr std::array<ButtonDefinition, 1> kTutorialButtons{{
+    {MenuAction::AcknowledgeTutorial, "okay"},
+}};
+
+// Where "controls" sits in the root table, so closing that screen can put the
+// cursor back on the row that opened it without counting rows by hand.
+constexpr int kSettingsControlsRow = 3;
 
 constexpr std::array<ButtonDefinition, 2> kDisplayConfirmationButtons{{
     {MenuAction::KeepDisplay, "keep changes"},
@@ -68,6 +103,14 @@ std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
             return {kPauseButtons.data(), static_cast<int>(kPauseButtons.size())};
         case MenuScreen::Settings:
             return {kSettingsButtons.data(), static_cast<int>(kSettingsButtons.size())};
+        case MenuScreen::SettingsVideo:
+            return {kVideoButtons.data(), static_cast<int>(kVideoButtons.size())};
+        case MenuScreen::SettingsAudio:
+            return {kAudioButtons.data(), static_cast<int>(kAudioButtons.size())};
+        case MenuScreen::SettingsGame:
+            return {kGameButtons.data(), static_cast<int>(kGameButtons.size())};
+        case MenuScreen::Tutorial:
+            return {kTutorialButtons.data(), static_cast<int>(kTutorialButtons.size())};
         case MenuScreen::Controls:
             return {nullptr, static_cast<int>(kPlayerActionCount) + 2};
         case MenuScreen::DisplayConfirmation:
@@ -232,9 +275,19 @@ void PlayerMenu::setLevelRecord(const std::string& path, int completions, int be
 void PlayerMenu::hide() {
     screen_ = MenuScreen::Hidden;
     selection_ = 0;
+    // A tutorial's strings belong to the loaded script, which is thrown away
+    // and rebuilt by every restart and every level change. Nothing should be
+    // reading them once the menu is down, and holding them would make that a
+    // dangling pointer rather than an empty pane.
+    tutorialTitle_ = "";
+    tutorialText_ = "";
 }
 
 void PlayerMenu::showMain() {
+    // Leaving a level is the one teardown that does not go through hide(), and
+    // the tutorial strings belong to the script that level loaded. See hide().
+    tutorialTitle_ = "";
+    tutorialText_ = "";
     screen_ = MenuScreen::Main;
     selection_ = 0;
 }
@@ -267,6 +320,12 @@ void PlayerMenu::showDisplayConfirmation(int seconds) {
     confirmationSeconds_ = std::max(seconds, 0);
 }
 
+void PlayerMenu::showSettingsScreen(MenuScreen screen) {
+    if (!editsSettings(screen)) return;
+    screen_ = screen;
+    selection_ = 0;
+}
+
 void PlayerMenu::showControls() {
     screen_ = MenuScreen::Controls;
     controlSelection_ = std::clamp(controlSelection_, 0, static_cast<int>(kPlayerActionCount) + 1);
@@ -276,13 +335,32 @@ void PlayerMenu::showControls() {
 
 void PlayerMenu::closeControls() {
     screen_ = MenuScreen::Settings;
-    selection_ = 9;
+    selection_ = kSettingsControlsRow;
     capturingBinding_ = false;
 }
 
 void PlayerMenu::closeSettings() {
+    // One step at a time. A value screen goes back to the root with the cursor
+    // on the row that opened it, so walking in and out of the three of them
+    // does not put the cursor back at the top each time; the root goes back to
+    // whichever menu opened it.
+    if (editsSettings(screen_)) {
+        const int row = screen_ == MenuScreen::SettingsVideo   ? 0
+                        : screen_ == MenuScreen::SettingsAudio ? 1
+                                                               : 2;
+        screen_ = MenuScreen::Settings;
+        selection_ = row;
+        return;
+    }
     screen_ = settingsParent_;
     selection_ = 0;
+}
+
+void PlayerMenu::showTutorial(const char* title, const char* text) {
+    screen_ = MenuScreen::Tutorial;
+    selection_ = 0;
+    tutorialTitle_ = title ? title : "";
+    tutorialText_ = text ? text : "";
 }
 
 void PlayerMenu::setConfirmationSeconds(int seconds) {
@@ -310,55 +388,87 @@ int PlayerMenu::buttonCount() const {
     return buttonsFor(screen_).second;
 }
 
-void PlayerMenu::adjustSetting(int index, int direction) {
+int PlayerMenu::valueRows(MenuScreen screen) {
+    switch (screen) {
+        case MenuScreen::SettingsVideo: return 5;
+        case MenuScreen::SettingsAudio: return 2;
+        case MenuScreen::SettingsGame: return 3;
+        default: return 0;
+    }
+}
+
+void PlayerMenu::adjustSetting(MenuScreen screen, int index, int direction) {
     if (direction == 0) return;
-    switch (index) {
-        case 0:
-            editedSettings_.masterVolume =
-                std::clamp(editedSettings_.masterVolume + static_cast<float>(direction) * 0.05f,
-                           0.0f, 1.0f);
-            break;
-        case 1:
-            editedSettings_.musicVolume =
-                std::clamp(editedSettings_.musicVolume + static_cast<float>(direction) * 0.05f,
-                           0.0f, 1.0f);
-            break;
-        case 2:
-            editedSettings_.mouseSensitivity =
-                std::clamp(editedSettings_.mouseSensitivity + static_cast<float>(direction) * 0.1f,
-                           0.2f, 3.0f);
-            break;
-        case 3:
-            editedSettings_.firstPersonFov =
-                std::clamp(editedSettings_.firstPersonFov + static_cast<float>(direction) * 5.0f,
-                           kMinVerticalFov, kMaxVerticalFov);
-            break;
-        case 4:
-            editedSettings_.thirdPersonFov =
-                std::clamp(editedSettings_.thirdPersonFov + static_cast<float>(direction) * 5.0f,
-                           kMinVerticalFov, kMaxVerticalFov);
-            break;
-        case 5: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
-        case 6: editedSettings_.fullscreen = !editedSettings_.fullscreen; break;
-        case 7: {
-            int closest = 0;
-            int closestDistance = 1 << 30;
-            for (int i = 0; i < static_cast<int>(kWindowSizes.size()); ++i) {
-                const auto [width, height] = kWindowSizes[static_cast<size_t>(i)];
-                const int distance = std::abs(width - editedSettings_.windowWidth) +
-                                     std::abs(height - editedSettings_.windowHeight);
-                if (distance < closestDistance) {
-                    closest = i;
-                    closestDistance = distance;
+    const auto step = [&](float value, float by, float low, float high) {
+        return std::clamp(value + static_cast<float>(direction) * by, low, high);
+    };
+
+    switch (screen) {
+        case MenuScreen::SettingsVideo:
+            switch (index) {
+                case 0: editedSettings_.fullscreen = !editedSettings_.fullscreen; break;
+                case 1: {
+                    // The authored sizes are a ring rather than a range, so
+                    // this steps to the neighbour of whichever one the current
+                    // size is nearest - which is also how a size loaded from a
+                    // settings file that names no listed size gets onto one.
+                    int closest = 0;
+                    int closestDistance = 1 << 30;
+                    for (int i = 0; i < static_cast<int>(kWindowSizes.size()); ++i) {
+                        const auto [width, height] = kWindowSizes[static_cast<size_t>(i)];
+                        const int distance = std::abs(width - editedSettings_.windowWidth) +
+                                             std::abs(height - editedSettings_.windowHeight);
+                        if (distance < closestDistance) {
+                            closest = i;
+                            closestDistance = distance;
+                        }
+                    }
+                    const int count = static_cast<int>(kWindowSizes.size());
+                    closest = (closest + direction + count) % count;
+                    editedSettings_.windowWidth =
+                        kWindowSizes[static_cast<size_t>(closest)].first;
+                    editedSettings_.windowHeight =
+                        kWindowSizes[static_cast<size_t>(closest)].second;
+                    break;
                 }
+                case 2: editedSettings_.vsync = !editedSettings_.vsync; break;
+                case 3:
+                    editedSettings_.firstPersonFov =
+                        step(editedSettings_.firstPersonFov, 5.0f, kMinVerticalFov,
+                             kMaxVerticalFov);
+                    break;
+                case 4:
+                    editedSettings_.thirdPersonFov =
+                        step(editedSettings_.thirdPersonFov, 5.0f, kMinVerticalFov,
+                             kMaxVerticalFov);
+                    break;
+                default: break;
             }
-            const int count = static_cast<int>(kWindowSizes.size());
-            closest = (closest + direction + count) % count;
-            editedSettings_.windowWidth = kWindowSizes[static_cast<size_t>(closest)].first;
-            editedSettings_.windowHeight = kWindowSizes[static_cast<size_t>(closest)].second;
             break;
-        }
-        case 8: editedSettings_.vsync = !editedSettings_.vsync; break;
+        case MenuScreen::SettingsAudio:
+            switch (index) {
+                case 0:
+                    editedSettings_.masterVolume =
+                        step(editedSettings_.masterVolume, 0.05f, 0.0f, 1.0f);
+                    break;
+                case 1:
+                    editedSettings_.musicVolume =
+                        step(editedSettings_.musicVolume, 0.05f, 0.0f, 1.0f);
+                    break;
+                default: break;
+            }
+            break;
+        case MenuScreen::SettingsGame:
+            switch (index) {
+                case 0:
+                    editedSettings_.mouseSensitivity =
+                        step(editedSettings_.mouseSensitivity, 0.1f, 0.2f, 3.0f);
+                    break;
+                case 1: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
+                case 2: editedSettings_.tutorials = !editedSettings_.tutorials; break;
+                default: break;
+            }
+            break;
         default: break;
     }
 }
@@ -436,9 +546,9 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         }
     }
 
-    if (screen_ == MenuScreen::Settings && selection_ < 9) {
-        if (input.decrease) adjustSetting(selection_, -1);
-        if (input.increase) adjustSetting(selection_, 1);
+    if (selection_ < valueRows(screen_)) {
+        if (input.decrease) adjustSetting(screen_, selection_, -1);
+        if (input.increase) adjustSetting(screen_, selection_, 1);
     }
 
     const MenuView updated = view(width, height);
@@ -466,8 +576,8 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
                 }
                 return MenuAction::None;
             }
-            if (screen_ == MenuScreen::Settings && i < 9) {
-                adjustSetting(i, 1);
+            if (i < valueRows(screen_)) {
+                adjustSetting(screen_, i, 1);
                 return MenuAction::None;
             }
             return button.action;
@@ -489,8 +599,8 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
             }
             return MenuAction::None;
         }
-        if (screen_ == MenuScreen::Settings && selection_ < 9) {
-            adjustSetting(selection_, 1);
+        if (selection_ < valueRows(screen_)) {
+            adjustSetting(screen_, selection_, 1);
             return MenuAction::None;
         }
         const auto [definitions, definitionCount] = buttonsFor(screen_);
@@ -633,7 +743,25 @@ MenuView PlayerMenu::view(int width, int height) const {
             break;
         case MenuScreen::Settings:
             result.title = "settings";
+            result.subtitle = "choose a group";
+            break;
+        case MenuScreen::SettingsVideo:
+            result.title = "video";
             result.subtitle = "left and right adjust";
+            break;
+        case MenuScreen::SettingsAudio:
+            result.title = "audio";
+            result.subtitle = "left and right adjust";
+            break;
+        case MenuScreen::SettingsGame:
+            result.title = "game";
+            result.subtitle = "left and right adjust";
+            break;
+        case MenuScreen::Tutorial:
+            result.title = tutorialTitle_;
+            result.subtitle = "";
+            result.tutorialTitle = tutorialTitle_;
+            result.tutorialText = tutorialText_;
             break;
         case MenuScreen::Controls: return result;
         case MenuScreen::DisplayConfirmation:
@@ -650,7 +778,10 @@ MenuView PlayerMenu::view(int width, int height) const {
 
     const auto [definitions, count] = buttonsFor(screen_);
     result.buttonCount = count;
-    const bool settingsScreen = screen_ == MenuScreen::Settings;
+    // The tighter row spacing is for screens that are a column of values to be
+    // read against each other. The settings root is a signpost with five plain
+    // rows, so it is laid out like the pause menu it came from.
+    const bool settingsScreen = editsSettings(screen_);
     const float settingsTop = screenHeight * 0.30f;
     const float settingsBottom = screenHeight * 0.88f;
     const float settingsHeight = settingsBottom - settingsTop;
@@ -665,7 +796,8 @@ MenuView PlayerMenu::view(int width, int height) const {
     const float blockHeight = count * buttonHeight + (count - 1) * rowGap;
     const float blockCenter = settingsScreen
                                   ? settingsTop + settingsHeight * 0.5f
-                                  : screenHeight *
+                              : screen_ == MenuScreen::Tutorial ? screenHeight * 0.86f
+                                                                : screenHeight *
                                         (screen_ == MenuScreen::Summary ? 0.70f : 0.64f);
     const float top = blockCenter - blockHeight * 0.5f;
 
@@ -675,43 +807,55 @@ MenuView PlayerMenu::view(int width, int height) const {
         button.label = definitions[i].label;
         button.bounds = {left, top + i * (buttonHeight + rowGap), buttonWidth, buttonHeight};
         button.selected = i == selection_;
-        if (screen_ != MenuScreen::Settings) continue;
-        switch (i) {
-            case 0:
-                std::snprintf(button.value.data(), button.value.size(), "%d%%",
-                              static_cast<int>(std::round(editedSettings_.masterVolume * 100.0f)));
+        if (i >= valueRows(screen_)) continue;
+        const auto onOff = [&](bool on) {
+            std::snprintf(button.value.data(), button.value.size(), "%s", on ? "on" : "off");
+        };
+        switch (screen_) {
+            case MenuScreen::SettingsVideo:
+                switch (i) {
+                    case 0: onOff(editedSettings_.fullscreen); break;
+                    case 1:
+                        std::snprintf(button.value.data(), button.value.size(), "%d x %d",
+                                      editedSettings_.windowWidth, editedSettings_.windowHeight);
+                        break;
+                    case 2: onOff(editedSettings_.vsync); break;
+                    case 3:
+                        std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
+                                      editedSettings_.firstPersonFov);
+                        break;
+                    case 4:
+                        std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
+                                      editedSettings_.thirdPersonFov);
+                        break;
+                    default: break;
+                }
                 break;
-            case 1:
-                std::snprintf(button.value.data(), button.value.size(), "%d%%",
-                              static_cast<int>(std::round(editedSettings_.musicVolume * 100.0f)));
+            case MenuScreen::SettingsAudio:
+                switch (i) {
+                    case 0:
+                        std::snprintf(
+                            button.value.data(), button.value.size(), "%d%%",
+                            static_cast<int>(std::round(editedSettings_.masterVolume * 100.0f)));
+                        break;
+                    case 1:
+                        std::snprintf(
+                            button.value.data(), button.value.size(), "%d%%",
+                            static_cast<int>(std::round(editedSettings_.musicVolume * 100.0f)));
+                        break;
+                    default: break;
+                }
                 break;
-            case 2:
-                std::snprintf(button.value.data(), button.value.size(), "%.1fx",
-                              editedSettings_.mouseSensitivity);
-                break;
-            case 3:
-                std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
-                              editedSettings_.firstPersonFov);
-                break;
-            case 4:
-                std::snprintf(button.value.data(), button.value.size(), "%.0f deg",
-                              editedSettings_.thirdPersonFov);
-                break;
-            case 5:
-                std::snprintf(button.value.data(), button.value.size(), "%s",
-                              editedSettings_.invertMouseY ? "on" : "off");
-                break;
-            case 6:
-                std::snprintf(button.value.data(), button.value.size(), "%s",
-                              editedSettings_.fullscreen ? "on" : "off");
-                break;
-            case 7:
-                std::snprintf(button.value.data(), button.value.size(), "%d x %d",
-                              editedSettings_.windowWidth, editedSettings_.windowHeight);
-                break;
-            case 8:
-                std::snprintf(button.value.data(), button.value.size(), "%s",
-                              editedSettings_.vsync ? "on" : "off");
+            case MenuScreen::SettingsGame:
+                switch (i) {
+                    case 0:
+                        std::snprintf(button.value.data(), button.value.size(), "%.1fx",
+                                      editedSettings_.mouseSensitivity);
+                        break;
+                    case 1: onOff(editedSettings_.invertMouseY); break;
+                    case 2: onOff(editedSettings_.tutorials); break;
+                    default: break;
+                }
                 break;
             default: break;
         }

@@ -1,6 +1,7 @@
 {
   "name": "test01",
   "comment": "Hand-editable test mine on a 20-unit grid. 14 segments: a corridor east, a bend to +Z, a bend back to +X, a 2x2 room with a raised ceiling, and a three-segment vertical shaft out of the room's far corner. Segments 1, 4 and 6 are deliberately unlit.",
+  "script": "test01.lua",
   "vertices": [
     [
       0.0,

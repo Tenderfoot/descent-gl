@@ -24,6 +24,11 @@ constexpr size_t kMaxMessageId = 64;
 constexpr size_t kMaxClipName = 64;
 constexpr size_t kMaxSpeaker = 32;
 constexpr size_t kMaxText = 512;
+// A tutorial pane is a page rather than a corner of the HUD, so it is allowed
+// more than a transmission's caption. Still bounded: the pane wraps what it is
+// given and draws what fits, and an unbounded string is unbounded geometry.
+constexpr size_t kMaxTitle = 48;
+constexpr size_t kMaxTutorialText = 1024;
 
 // One optional number out of a declaration table. Absent leaves `out`
 // untouched, which is how a loadout field the script never mentioned keeps
@@ -105,6 +110,7 @@ ScriptHost* ScriptHost::self(lua_State* state) {
 void ScriptHost::clear() {
     draining_ = false;
     requestedMessage_ = -1;
+    requestedTutorial_ = -1;
     requestedShields_ = -1.0f;
     level_ = nullptr;
     if (state_) lua_close(state_);
@@ -117,6 +123,7 @@ void ScriptHost::clear() {
     callbacks_.fill(LUA_NOREF);
     timerCallbacks_.fill(LUA_NOREF);
     messages_.clear();
+    tutorials_.clear();
     callbackErrors_ = 0;
 }
 
@@ -152,6 +159,8 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "trigger", &ScriptHost::declareTrigger);
     expose(state_, this, "timer", &ScriptHost::declareTimer);
     expose(state_, this, "comm", &ScriptHost::startComm);
+    expose(state_, this, "tutorial", &ScriptHost::declareTutorial);
+    expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
     expose(state_, this, "set_shields", &ScriptHost::setShields);
 
     if (luaL_loadfile(state_, level.scriptPath.c_str()) != LUA_OK) {
@@ -168,8 +177,9 @@ void ScriptHost::load(const Level& level) {
                    error ? error : "unknown error");
     }
 
-    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} message(s)", level.scriptPath,
-              triggers_.count, timers_.count, messages_.size());
+    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} message(s), {} tutorial(s)",
+              level.scriptPath, triggers_.count, timers_.count, messages_.size(),
+              tutorials_.size());
 }
 
 int ScriptHost::declareMessage(lua_State* state) {
@@ -199,6 +209,40 @@ int ScriptHost::declareMessage(lua_State* state) {
     if (host->findMessage(id) >= 0) return luaL_error(state, "duplicate message id '%s'", id);
 
     host->messages_.push_back({id, clip, speaker, text, seconds});
+    return 0;
+}
+
+int ScriptHost::declareTutorial(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    const char* id = requiredString(state, 1, "id");
+    const char* clip = requiredString(state, 1, "clip");
+    const char* title = requiredString(state, 1, "title");
+    const char* text = requiredString(state, 1, "text");
+
+    // %d and a cast, not %zu: Lua's own formatter understands a short fixed
+    // set of specifiers and aborts on anything else, complaining about the
+    // format string rather than reporting the level's actual mistake. See the
+    // same trap avoided in optionalNumber above, for %g.
+    if (std::strlen(id) == 0 || std::strlen(id) > kMaxMessageId) {
+        return luaL_error(state, "tutorial id must contain 1..%d characters",
+                          static_cast<int>(kMaxMessageId));
+    }
+    if (std::strlen(clip) == 0 || std::strlen(clip) > kMaxClipName) {
+        return luaL_error(state, "clip must contain 1..%d characters",
+                          static_cast<int>(kMaxClipName));
+    }
+    if (std::strlen(title) == 0 || std::strlen(title) > kMaxTitle) {
+        return luaL_error(state, "tutorial title must contain 1..%d characters",
+                          static_cast<int>(kMaxTitle));
+    }
+    if (std::strlen(text) > kMaxTutorialText) {
+        return luaL_error(state, "tutorial text is longer than %d characters",
+                          static_cast<int>(kMaxTutorialText));
+    }
+    if (host->findTutorial(id) >= 0) return luaL_error(state, "duplicate tutorial id '%s'", id);
+
+    host->tutorials_.push_back({id, clip, title, text});
     return 0;
 }
 
@@ -363,9 +407,40 @@ int ScriptHost::startComm(lua_State* state) {
     return 0;
 }
 
+// The modal counterpart of comm(). Latched for the same reason: Lua runs
+// outside the fixed step, and what this asks for stops the simulation and
+// takes the mouse, which is the game layer's to do and not a script's.
+int ScriptHost::showTutorial(lua_State* state) {
+    ScriptHost* host = self(state);
+    const char* id = luaL_checkstring(state, 1);
+    if (!host->draining_) {
+        return luaL_error(state, "show_tutorial() is only valid inside a callback");
+    }
+    const int index = host->findTutorial(id);
+    if (index < 0) return luaL_error(state, "unknown tutorial id '%s'", id);
+    // First one wins. A second pane in the same drain would replace one the
+    // player has not been shown yet, and silently losing authored content is
+    // worse than saying so.
+    if (host->requestedTutorial_ >= 0) {
+        log::warn("Lua show_tutorial('{}') ignored: a tutorial was already raised this frame",
+                  id);
+        return 0;
+    }
+
+    host->requestedTutorial_ = index;
+    return 0;
+}
+
 int ScriptHost::findMessage(const char* id) const {
     for (size_t i = 0; i < messages_.size(); ++i) {
         if (messages_[i].id == id) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+int ScriptHost::findTutorial(const char* id) const {
+    for (size_t i = 0; i < tutorials_.size(); ++i) {
+        if (tutorials_[i].id == id) return static_cast<int>(i);
     }
     return -1;
 }
@@ -426,16 +501,38 @@ const ScriptMessage* ScriptHost::message(int index) const {
     return &messages_[static_cast<size_t>(index)];
 }
 
+const ScriptTutorial* ScriptHost::tutorial(int index) const {
+    if (index < 0 || static_cast<size_t>(index) >= tutorials_.size()) return nullptr;
+    return &tutorials_[static_cast<size_t>(index)];
+}
+
 int ScriptHost::takeMessage() {
     const int message = requestedMessage_;
     requestedMessage_ = -1;
     return message;
 }
 
+int ScriptHost::takeTutorial() {
+    const int tutorial = requestedTutorial_;
+    requestedTutorial_ = -1;
+    return tutorial;
+}
+
 float ScriptHost::takeShields() {
     const float shields = requestedShields_;
     requestedShields_ = -1.0f;
     return shields;
+}
+
+// What the frame loop does after every drain, and the reason it matters here:
+// the latches are read once and cleared, so a test that never reads them makes
+// one frame's request look like it is still outstanding on the next. A second
+// tutorial would then be refused as a duplicate of a pane that was shown and
+// finished with several triggers ago.
+static void drainRequests(ScriptHost& host) {
+    host.takeMessage();
+    host.takeTutorial();
+    host.takeShields();
 }
 
 static int runOneScriptTest(const std::string& levelPath) {
@@ -466,6 +563,7 @@ static int runOneScriptTest(const std::string& levelPath) {
         }
         ok &= found;
         host.drain(game);
+        drainRequests(host);
 
         // Staying inside is never a second entry. Leaving and returning is a
         // second entry only for a repeatable trigger.
@@ -478,6 +576,7 @@ static int runOneScriptTest(const std::string& levelPath) {
         const bool repeated = game.triggers.pendingCount > 0;
         ok &= repeated == !trigger.once;
         host.drain(game);
+        drainRequests(host);
     }
 
     sim::TriggerState allocationState;

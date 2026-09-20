@@ -34,6 +34,39 @@ constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
 constexpr const char* kCommRoot = "assets/comm";
 
+// Lays `body` out as lines no wider than `width`, breaking on spaces and on
+// the newlines the text itself carries, and draws at most `maxLines` of them
+// from `y` downwards. Returns the y the next line would have been on, so a
+// caller can put something under a block whose height it does not know.
+//
+// Slices rather than strings: this runs every frame a panel is up, and the
+// draw path is one of the two places this project does not allocate in. Long
+// text is cut rather than overflowed - the load-time length limits are what
+// bound the worst case, and this bounds the geometry whatever gets past them.
+float drawWrapped(Hud& hud, std::string_view body, float x, float y, float scale,
+                  const glm::vec4& color, float width, int maxLines, float lineStep) {
+    const int columns =
+        std::max(1, static_cast<int>(width / (static_cast<float>(font::kAdvance) * scale)));
+    size_t first = 0;
+    float lineY = y;
+    for (int line = 0; line < maxLines && first < body.size(); ++line) {
+        while (first < body.size() && body[first] == ' ') ++first;
+        size_t last = std::min(body.size(), first + static_cast<size_t>(columns));
+        const size_t newline = body.find('\n', first);
+        if (newline != std::string_view::npos && newline < last) {
+            last = newline;
+        } else if (last < body.size()) {
+            const size_t space = body.rfind(' ', last);
+            if (space != std::string_view::npos && space > first) last = space;
+        }
+        hud.text(body.substr(first, last - first), x, lineY, scale, color);
+        first = last;
+        if (first < body.size() && body[first] == '\n') ++first;
+        lineY += lineStep;
+    }
+    return lineY;
+}
+
 } // namespace
 
 Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
@@ -621,6 +654,25 @@ void Renderer::buildDoorSigns(const RenderState& rs, const Level& level, const P
     doorSigns_.upload();
 }
 
+int Renderer::commLayer(int clipIndex, int frameIndex) {
+    if (commClips_.clips.empty()) return -1;
+    const CommClipInfo& clip = commClips_.clips[static_cast<size_t>(
+        std::clamp(clipIndex, 0, static_cast<int>(commClips_.clips.size()) - 1))];
+    const int frame = std::clamp(frameIndex, 0, std::max(0, clip.frameCount - 1));
+    if (clip.video >= 0 && clip.video < static_cast<int>(commClips_.videos.size())) {
+        // A decoded clip owns one layer rather than a run of them, so the
+        // picture is fetched and written rather than indexed. The decoder
+        // returns null when the frame has not changed since it was last asked,
+        // which on a 120 Hz loop showing 24 fps is most draws.
+        CommVideo& video = commClips_.videos[static_cast<size_t>(clip.video)];
+        if (const uint8_t* rgba = video.frame(frame)) {
+            commFrames_->updateLayer(clip.baseLayer, rgba);
+        }
+        return clip.baseLayer;
+    }
+    return clip.baseLayer + frame;
+}
+
 void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // Four bands per edge with falling alpha, because Hud::rect is a flat
     // colour and this is cheaper and more predictable than a gradient shader
@@ -725,55 +777,16 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f,
                   panelH + frame * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
-        // `commFrame` counts within the clip the game layer selected; the layer
-        // it lands on is that clip's slice of the shared array. Both indices are
-        // clamped rather than trusted, because HudData is filled by the game
-        // layer and an index that outlived the clip it was chosen for would
-        // otherwise sample another transmission's frames.
-        const CommClipInfo& clip = commClips_.clips[static_cast<size_t>(
-            std::clamp(hud.commClip, 0, static_cast<int>(commClips_.clips.size()) - 1))];
-        int layer =
-            clip.baseLayer + std::clamp(hud.commFrame, 0, std::max(0, clip.frameCount - 1));
-        if (clip.video >= 0 && clip.video < static_cast<int>(commClips_.videos.size())) {
-            // A decoded clip owns one layer rather than a run of them, so the
-            // picture is fetched and written rather than indexed. The decoder
-            // returns null when the frame has not changed since it was last
-            // asked, which on a 120 Hz loop showing 24 fps is most draws.
-            CommVideo& video = commClips_.videos[static_cast<size_t>(clip.video)];
-            if (const uint8_t* rgba = video.frame(hud.commFrame)) {
-                commFrames_->updateLayer(clip.baseLayer, rgba);
-            }
-            layer = clip.baseLayer;
+        // `commFrame` counts within the clip the game layer selected; the
+        // layer it lands on is that clip's slice of the shared array.
+        const int layer = commLayer(hud.commClip, hud.commFrame);
+        if (layer >= 0) {
+            hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         }
-        hud_.image(x, y, panelW, panelH, layer, glm::vec4(1.0f, 1.0f, 1.0f, alpha));
         hud_.rect(x - frame, y - frame, panelW + frame * 2.0f, frame, cyan);
         hud_.text(hud.commSpeaker, x, y + panelH + 3.0f * s, s * 0.62f, cyan);
-
-        // Wrap by taking string_view slices; no temporary strings and no draw-
-        // path allocation. Long messages are clipped to the space below the
-        // portrait, while the load-time limit still bounds worst-case geometry.
-        const std::string_view body(hud.commText ? hud.commText : "");
-        const float bodyScale = s * 0.52f;
-        const int columns = std::max(1, static_cast<int>(panelW /
-            (static_cast<float>(font::kAdvance) * bodyScale)));
-        size_t first = 0;
-        float lineY = y + panelH + 12.0f * s;
-        for (int line = 0; line < 6 && first < body.size(); ++line) {
-            while (first < body.size() && body[first] == ' ') ++first;
-            size_t last = std::min(body.size(), first + static_cast<size_t>(columns));
-            const size_t newline = body.find('\n', first);
-            if (newline != std::string_view::npos && newline < last) {
-                last = newline;
-            } else if (last < body.size()) {
-                const size_t space = body.rfind(' ', last);
-                if (space != std::string_view::npos && space > first) last = space;
-            }
-            hud_.text(body.substr(first, last - first), x, lineY, bodyScale,
-                      glm::vec4(0.78f, 0.94f, 1.0f, alpha));
-            first = last;
-            if (first < body.size() && body[first] == '\n') ++first;
-            lineY += 6.0f * s;
-        }
+        drawWrapped(hud_, hud.commText ? hud.commText : "", x, y + panelH + 12.0f * s,
+                    s * 0.52f, glm::vec4(0.78f, 0.94f, 1.0f, alpha), panelW, 6, 6.0f * s);
     }
 
     // Reticle: a gap in the middle so it frames the target rather than
@@ -1253,16 +1266,80 @@ void Renderer::buildMenu(const MenuView& menu) {
 
     hud_.rect(0.0f, 0.0f, width, height, glm::vec4(0.0f, 0.015f, 0.025f, 0.78f));
 
+    // A tutorial is a page rather than a column of choices, so it gets its own
+    // layout: a heading, the clip it was authored with, and the words beside
+    // it. Only the okay button underneath comes from the shared button loop,
+    // which is why this falls through to it rather than returning.
+    if (menu.screen == MenuScreen::Tutorial) {
+        const float alpha = std::clamp(menu.tutorialAlpha, 0.0f, 1.0f);
+        const glm::vec4 cyan(0.35f, 0.92f, 1.0f, alpha);
+        const glm::vec4 body(0.80f, 0.90f, 0.98f, alpha);
+
+        // Wide enough to sit a readable column of text beside the picture, and
+        // capped so it does not become a wall at 4K.
+        const float paneWidth = std::clamp(width * 0.62f, 420.0f, 940.0f);
+        const float paneLeft = (width - paneWidth) * 0.5f;
+        // Stops short of the okay button below it at every window size the
+        // game supports; see the tutorial case in PlayerMenu::view, which puts
+        // that button at 0.86 of the height.
+        const float paneTop = height * 0.14f;
+        const float paneHeight = height * 0.64f;
+        hud_.rect(paneLeft, paneTop, paneWidth, paneHeight,
+                  glm::vec4(0.02f, 0.05f, 0.07f, alpha * 0.97f));
+        hud_.rect(paneLeft, paneTop, paneWidth, std::max(2.0f, scale * 0.8f), cyan);
+
+        const float pad = std::max(10.0f, scale * 6.0f);
+        const float titleScale = scale * 1.3f;
+        hud_.text(menu.tutorialTitle, paneLeft + pad, paneTop + pad, titleScale,
+                  glm::vec4(0.92f, 0.98f, 1.0f, alpha));
+
+        // The clip's own aspect, so a library authored at another shape is
+        // letterboxed by the layout rather than stretched by it.
+        const float contentTop = paneTop + pad * 2.0f + 7.0f * titleScale;
+        const float videoWidth = paneWidth * 0.46f;
+        const float videoHeight = videoWidth * static_cast<float>(commHeight_) /
+                                  static_cast<float>(std::max(commWidth_, 1));
+        const float videoLeft = paneLeft + pad;
+        const float border = std::max(1.0f, scale * 0.5f);
+        hud_.rect(videoLeft - border, contentTop - border, videoWidth + border * 2.0f,
+                  videoHeight + border * 2.0f, glm::vec4(0.02f, 0.22f, 0.28f, alpha * 0.9f));
+        const int layer = commLayer(menu.tutorialClip, menu.tutorialFrame);
+        if (layer >= 0) {
+            hud_.image(videoLeft, contentTop, videoWidth, videoHeight, layer,
+                       glm::vec4(1.0f, 1.0f, 1.0f, alpha));
+        }
+
+        // Beside the picture while there is room for a column there, and
+        // underneath it once the pane is narrow enough that there is not.
+        const float textLeft = videoLeft + videoWidth + pad;
+        const float textRight = paneLeft + paneWidth - pad;
+        const float bodyScale = scale * 0.72f;
+        const float lineStep = 9.0f * bodyScale;
+        const float sideRoom = textRight - textLeft;
+        const bool beside = sideRoom > paneWidth * 0.28f;
+        const float textWidth = beside ? sideRoom : paneWidth - pad * 2.0f;
+        const float textX = beside ? textLeft : paneLeft + pad;
+        const float textY = beside ? contentTop : contentTop + videoHeight + pad;
+        const float textBottom = paneTop + paneHeight - pad;
+        const int lines = std::max(1, static_cast<int>((textBottom - textY) / lineStep));
+        drawWrapped(hud_, menu.tutorialText, textX, textY, bodyScale, body, textWidth, lines,
+                    lineStep);
+    }
+
     const float panelWidth = std::clamp(width * 0.48f, 360.0f, 680.0f);
     const float panelLeft = (width - panelWidth) * 0.5f;
     const float panelTop = height * 0.12f;
     const float panelHeight = height * 0.78f;
-    hud_.rect(panelLeft, panelTop, panelWidth, panelHeight,
-              glm::vec4(0.025f, 0.045f, 0.06f, 0.96f));
-    hud_.rect(panelLeft, panelTop, panelWidth, std::max(2.0f, scale * 0.8f), accent);
+    if (menu.screen != MenuScreen::Tutorial) {
+        hud_.rect(panelLeft, panelTop, panelWidth, panelHeight,
+                  glm::vec4(0.025f, 0.045f, 0.06f, 0.96f));
+        hud_.rect(panelLeft, panelTop, panelWidth, std::max(2.0f, scale * 0.8f), accent);
+    }
 
     // The main menu is topped with the wordmark; every other screen keeps its
-    // title text, because "paused" is a label rather than a brand.
+    // title text, because "paused" is a label rather than a brand. A tutorial
+    // gets neither: its heading is drawn inside the pane, above the picture it
+    // belongs to, and a second copy up here would only repeat it.
     if (menu.screen == MenuScreen::Main && menuLogo_) {
         // Sized by the screen and by the panel it sits over, whichever is
         // tighter: height is what governs at a wide aspect ratio and width at a
@@ -1275,7 +1352,7 @@ void Renderer::buildMenu(const MenuView& menu) {
         // everything below it keep their places.
         hud_.logo((width - logoWidth) * 0.5f, height * 0.225f - logoHeight * 0.5f, logoWidth,
                   logoHeight, glm::vec4(1.0f));
-    } else {
+    } else if (menu.screen != MenuScreen::Tutorial) {
         const float titleScale = scale * 2.4f;
         const float titleWidth = hud_.textWidth(menu.title, titleScale);
         hud_.text(menu.title, (width - titleWidth) * 0.5f, height * 0.20f, titleScale, white);
@@ -1306,7 +1383,10 @@ void Renderer::buildMenu(const MenuView& menu) {
         hud_.textWidth(subtitle, subtitleScale) +
         (elided ? hud_.textWidth(kEllipsis, subtitleScale) : 0.0f);
     const float subtitleLeft = (width - subtitleWidth) * 0.5f;
-    const float subtitleY = height * (menu.screen == MenuScreen::Settings ? 0.27f : 0.30f);
+    // The value screens start their rows at 0.30, so their subtitle sits above
+    // that; the settings root is a short column like the pause menu and keeps
+    // the ordinary spacing.
+    const float subtitleY = height * (editsSettings(menu.screen) ? 0.27f : 0.30f);
     hud_.text(subtitle, subtitleLeft, subtitleY, subtitleScale, dim);
     if (elided) {
         hud_.text(kEllipsis, subtitleLeft + hud_.textWidth(subtitle, subtitleScale),

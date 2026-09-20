@@ -47,6 +47,10 @@ void CommDirector::enterLevel() {
 }
 
 void CommDirector::leaveLevel() {
+    stop();
+}
+
+void CommDirector::stop() {
     activeMessage_ = -1;
     activeClip_ = 0;
     player_.stop();

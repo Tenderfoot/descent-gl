@@ -333,13 +333,23 @@ bool verifyPlayerMenu() {
     menu.showPause();
     menu.showSettings(settings);
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 11,
-                 "settings open from the pause menu");
-    ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%",
-                 "settings show their current values");
-    ok &= expect(std::string_view(view.buttons[2].value.data()) == "70 deg" &&
-                     std::string_view(view.buttons[3].value.data()) == "70 deg",
-                 "settings show first and third person field of view");
+    ok &= expect(view.screen == MenuScreen::Settings && view.buttonCount == 5,
+                 "settings open from the pause menu on the group list");
+    ok &= expect(menu.update(confirm, 1600, 900) == MenuAction::OpenVideoSettings,
+                 "the first settings group is video");
+
+    menu.showSettingsScreen(MenuScreen::SettingsVideo);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::SettingsVideo && view.buttonCount == 7,
+                 "video settings carry five values, apply and back");
+    ok &= expect(std::string_view(view.buttons[1].value.data()) == "1600 x 900" &&
+                     std::string_view(view.buttons[2].value.data()) == "on",
+                 "video settings show their current values");
+    ok &= expect(std::string_view(view.buttons[3].value.data()) == "70 deg" &&
+                     std::string_view(view.buttons[4].value.data()) == "70 deg",
+                 "field of view is a video setting, first and third person");
+
+    // The tallest of the four, so it is the one the panel has to hold.
     view = menu.view(640, 360);
     bool settingsFit = true;
     for (int i = 0; i < view.buttonCount; ++i) {
@@ -356,20 +366,46 @@ bool verifyPlayerMenu() {
     }
     ok &= expect(settingsClearHeader,
                  "settings stay below the header and inside the panel at 1440p");
+
+    MenuInput nextSetting;
+    nextSetting.next = true;
+    MenuInput increase;
+    increase.increase = true;
+    for (int i = 0; i < 3; ++i) menu.update(nextSetting, 1600, 900);
+    menu.update(increase, 1600, 900);
+    ok &= expect(menu.editedSettings().firstPersonFov == 75.0f,
+                 "field of view adjusts in five degree steps");
+
+    menu.showSettingsScreen(MenuScreen::SettingsAudio);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::SettingsAudio && view.buttonCount == 4,
+                 "audio settings carry two values, apply and back");
+    ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%" &&
+                     std::string_view(view.buttons[1].value.data()) == "45%",
+                 "audio settings show their current values");
     MenuInput decrease;
     decrease.decrease = true;
     menu.update(decrease, 1600, 900);
     ok &= expect(menu.editedSettings().masterVolume == 0.75f,
                  "left adjusts the selected setting");
-    MenuInput nextSetting;
-    nextSetting.next = true;
-    menu.update(nextSetting, 1600, 900);
-    menu.update(nextSetting, 1600, 900);
-    MenuInput increase;
-    increase.increase = true;
+
+    menu.showSettingsScreen(MenuScreen::SettingsGame);
+    view = menu.view(1600, 900);
+    ok &= expect(view.screen == MenuScreen::SettingsGame && view.buttonCount == 5,
+                 "game settings carry three values, apply and back");
+    ok &= expect(std::string_view(view.buttons[0].value.data()) == "1.0x" &&
+                     std::string_view(view.buttons[2].value.data()) == "on",
+                 "game settings show mouse sensitivity and the tutorial toggle");
+    for (int i = 0; i < 2; ++i) menu.update(nextSetting, 1600, 900);
     menu.update(increase, 1600, 900);
-    ok &= expect(menu.editedSettings().firstPersonFov == 75.0f,
-                 "field of view adjusts in five degree steps");
+    ok &= expect(!menu.editedSettings().tutorials, "the tutorial toggle turns off");
+
+    // Back out of each group in turn: the cursor lands on the row that opened
+    // it rather than at the top, so walking the three of them does not start
+    // over each time.
+    menu.closeSettings();
+    ok &= expect(menu.screen() == MenuScreen::Settings,
+                 "closing a settings group returns to the group list");
 
     menu.showControls();
     view = menu.view(1600, 900);

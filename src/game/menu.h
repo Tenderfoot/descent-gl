@@ -16,17 +16,39 @@ enum class MenuScreen {
     Main,
     LevelSelect,
     Pause,
+    // The settings root is a signpost and holds no values of its own; the
+    // three below are where they live. They are split because one flat screen
+    // of twelve rows was a list to be read rather than a menu to be used.
     Settings,
+    SettingsVideo,
+    SettingsAudio,
+    SettingsGame,
     Controls,
     DisplayConfirmation,
     Summary,
+    // A level's scripted tutorial, with the game stopped behind it.
+    Tutorial,
 };
+
+// Whether this screen edits settings values, which is what makes leaving it an
+// apply. The root is not one of them: there is nothing on it to change.
+inline bool editsSettings(MenuScreen screen) {
+    return screen == MenuScreen::SettingsVideo || screen == MenuScreen::SettingsAudio ||
+           screen == MenuScreen::SettingsGame;
+}
 
 enum class MenuAction {
     None,
     ChooseLevel,   // main menu "play": open the level list
     OpenSettings,
+    OpenVideoSettings,
+    OpenAudioSettings,
+    OpenGameSettings,
     OpenControls,
+    // Apply and stay, so a display change can be seen and adjusted again
+    // without walking back in. Leaving a settings screen applies too - see
+    // MenuAction::Back - so this is the discoverable half of that, not the
+    // only way to commit.
     ApplySettings,
     KeepDisplay,
     RevertDisplay,
@@ -36,6 +58,8 @@ enum class MenuAction {
     Restart,
     MainMenu,
     Quit,
+    // The okay button on a tutorial pane: the one thing that takes it down.
+    AcknowledgeTutorial,
 };
 
 struct MenuInput {
@@ -87,9 +111,10 @@ struct MenuButtonView {
 // rows plus "back" is what fits at the sizes this game is played at; a longer
 // list shows a window of that size and a pair of scroll arrows beside it.
 inline constexpr int kMaxLevelRows = 8;
-// The settings screen is the longest fixed menu, at twelve. The scrolling
-// lists come to eleven: eight level rows, "back", and the two arrows.
-inline constexpr int kMaxMenuButtons = 12;
+// The scrolling lists are the longest screens now that settings has been split
+// three ways: eight level rows, "back", and the two arrows. The widest fixed
+// menu is video, at seven.
+inline constexpr int kMaxMenuButtons = 11;
 
 struct MenuView {
     MenuScreen screen = MenuScreen::Hidden;
@@ -112,6 +137,18 @@ struct MenuView {
     int controlCount = 0;
     int firstControlShown = 0;
     int controlsShown = 0;
+
+    // Tutorial only. The strings come from the level's script and live as long
+    // as it is loaded, like the level names above. The clip and the frame do
+    // not come from the menu at all: the pane's clock is the application's and
+    // the menu has no access to it, so whoever drives the frame loop fills
+    // these in after asking for the view. They are ignored on every other
+    // screen.
+    const char* tutorialTitle = "";
+    const char* tutorialText = "";
+    int tutorialClip = 0;
+    int tutorialFrame = 0;
+    float tutorialAlpha = 0.0f;
 };
 
 class PlayerMenu {
@@ -132,10 +169,16 @@ public:
     void showLevelSelect();
     void showPause();
     void showSettings(const PlayerSettings& settings);
+    // One of the three value screens, reached from the settings root. The
+    // working copy is already seeded by showSettings, so these only navigate.
+    void showSettingsScreen(MenuScreen screen);
     void showControls();
     void closeControls();
     void showDisplayConfirmation(int seconds);
+    // Back out of a value screen to the settings root, or off the root to
+    // whichever menu opened it.
     void closeSettings();
+    void showTutorial(const char* title, const char* text);
     void setConfirmationSeconds(int seconds);
     void showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
                      int robotsTotal, const char* recordNote = "");
@@ -148,7 +191,11 @@ public:
 
 private:
     int buttonCount() const;
-    void adjustSetting(int index, int direction);
+    // How many of this screen's rows carry a value that left and right adjust.
+    // They are always the first rows, so a row index below this is a value and
+    // anything at or above it is a button.
+    static int valueRows(MenuScreen screen);
+    void adjustSetting(MenuScreen screen, int index, int direction);
 
     MenuScreen screen_ = MenuScreen::Hidden;
     int selection_ = 0;
@@ -172,6 +219,8 @@ private:
     int robotsTotal_ = 0;
     MenuScreen settingsParent_ = MenuScreen::Main;
     PlayerSettings editedSettings_;
+    const char* tutorialTitle_ = "";
+    const char* tutorialText_ = "";
     int confirmationSeconds_ = 0;
     bool capturingBinding_ = false;
 };

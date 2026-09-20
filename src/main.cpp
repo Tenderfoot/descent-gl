@@ -16,6 +16,7 @@
 #include "game/level_load.h"
 #include "game/level_switch_test.h"
 #include "game/state.h"
+#include "game/tutorial.h"
 #include "game/visibility.h"
 #include "game/collision_test.h"
 #include "game/light_test.h"
@@ -218,6 +219,7 @@ int main(int argc, char** argv) {
         dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
     }
 
+    dvk::TutorialPane tutorial(renderer, audio);
     dvk::ScriptHost script;
     dvk::LevelSession session;
     session.load(level, robotConfig, opts.startSegment);
@@ -244,6 +246,7 @@ int main(int argc, char** argv) {
                             session,
                             script,
                             comm,
+                            tutorial,
                             contacts,
                             automap,
                             automapZoomTarget,
@@ -305,8 +308,14 @@ int main(int argc, char** argv) {
     const bool commandLineRun =
         argc > 1 && !opts.startMenu && !opts.levelSelect && !opts.levelSwitchTest &&
         !opts.settingsMenu && !opts.controlsMenu;
-    const bool recordsProgress = !commandLineRun && !opts.levelSwitchTest && opts.frames < 0 &&
-                                 opts.screenshot.empty() && !opts.resizeTest;
+    // A run somebody is actually playing, as opposed to one the command line is
+    // driving. Two things hang off it and both need the same answer: a
+    // screenshot pass must not write a run into the player's records, and it
+    // must not be stopped dead by a tutorial pane either - it has nobody to
+    // click the button. `commandLineRun` alone will not do, because it
+    // deliberately excludes the checks that drive the menus themselves.
+    const bool playerSession = !commandLineRun && !opts.levelSwitchTest && opts.frames < 0 &&
+                               opts.screenshot.empty() && !opts.resizeTest;
     openingScreen(opts, commandLineRun, shell, session, comm);
 
     // Rebuilt every step and never resized, so the sim step still allocates
@@ -452,7 +461,8 @@ int main(int argc, char** argv) {
         const bool menuEscape = input.pressed(GLFW_KEY_ESCAPE);
         const bool bindingCaptureActive = shell.capturingBinding();
         {
-            const dvk::ShellEffect effect = shell.handlePauseKeys(pausePressed, menuEscape);
+            const dvk::ShellEffect effect =
+                shell.handlePauseKeys(pausePressed, menuEscape, now);
             if (effect.resetAccumulator) accumulator = 0.0;
             if (effect.resyncPrevious) prev = cur;
         }
@@ -700,6 +710,17 @@ int main(int argc, char** argv) {
                 comm.play(requested, *message, now);
             }
         }
+        // A pane stops the simulation, so this has to happen before the
+        // accumulator is read for the interpolation below - and the shell's
+        // effect is what clears the time the stopped simulation is no longer
+        // going to owe anyone.
+        if (const int requested = script.takeTutorial(); requested >= 0 && playerSession) {
+            if (const dvk::ScriptTutorial* authored = script.tutorial(requested)) {
+                const dvk::ShellEffect effect = shell.showTutorial(*authored, now);
+                if (effect.resetAccumulator) accumulator = 0.0;
+                if (effect.resyncPrevious) prev = cur;
+            }
+        }
 
         const dvk::CommFrame commFrame = comm.frame(now);
 
@@ -710,7 +731,7 @@ int main(int argc, char** argv) {
                               shell.settings().musicVolume, static_cast<float>(elapsed),
                               musicMarqueeTime);
 
-        if (runFinished) shell.finishRun(cur.game, recordsProgress);
+        if (runFinished) shell.finishRun(cur.game, playerSession);
 
         const auto alpha = static_cast<float>(accumulator / kSimStep);
         dvk::FramePrepareContext frameContext{
@@ -751,6 +772,17 @@ int main(int argc, char** argv) {
         const dvk::gl::HudData hud = dvk::buildHud(hudContext, hudScratch);
 
         dvk::MenuView menuView = shell.menu().view(fb.x, fb.y);
+        // The pane's picture runs on the application clock, which the menu has
+        // no access to, so the frame it should be showing is filled in here.
+        // Deliberately after view(): everything else about the screen is a pure
+        // function of the menu's own state, and this is the one part that is
+        // a function of the time.
+        if (menuView.screen == dvk::MenuScreen::Tutorial) {
+            const dvk::TutorialFrame pane = tutorial.frame(now);
+            menuView.tutorialClip = tutorial.clip();
+            menuView.tutorialFrame = pane.frame;
+            menuView.tutorialAlpha = pane.alpha;
+        }
         if (opts.noUi) menuView.screen = dvk::MenuScreen::Hidden;
 
         if (automap.open) {

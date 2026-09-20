@@ -9,6 +9,7 @@ struct ScriptLoadout;
 class CommDirector;
 class LevelSession;
 class ScriptHost;
+class TutorialPane;
 
 namespace gl {
 class Renderer;
@@ -39,6 +40,7 @@ struct LoadedLevel {
     LevelSession& session;
     ScriptHost& script;
     CommDirector& comm;
+    TutorialPane& tutorial;
     sim::ContactLog& contacts;
     gl::AutomapData& automap;
     float& automapZoomTarget;
@@ -52,10 +54,10 @@ struct LoadedLevel {
     bool headlight;
 };
 
-// Loads the level's Lua declarations and checks that every clip a message names
-// is one the library actually has. Fatal if it is not: a level that asks for
-// pictures nobody shipped is a content bug, and finding it at load beats
-// finding it when the trigger fires.
+// Loads the level's Lua declarations and checks that every clip a message or a
+// tutorial names is one the library actually has. Fatal if it is not: a level
+// that asks for pictures nobody shipped is a content bug, and finding it at
+// load beats finding it when the trigger fires.
 void loadLevelScript(ScriptHost& script, const Level& level, const CommDirector& comm);
 
 // Copies what the level's script says the player starts with onto the session.
