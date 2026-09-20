@@ -81,6 +81,117 @@ std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
     return {nullptr, 0};
 }
 
+// Both scrolling lists - the levels and the controls - are a window of rows
+// with one or two fixed rows pinned under it, and a strip of scroll arrows
+// beside the window once the list is longer than it. Where all of that sits is
+// worked out here rather than inside view(), because update() needs the same
+// numbers: the cursor and the window have to agree on what is on screen.
+struct ListSpec {
+    int count = 0;           // rows the list can scroll through
+    int fixedRows = 1;       // rows pinned under the window
+    int maxWindow = 1;       // most list rows to put on screen
+    int minWindow = 0;       // fewest, once the screen has had its say
+    float bottom = 0.90f;    // fraction of the screen height the list stops at
+    float gap = 0.0f;
+    float fitRow = 30.0f;    // the row height the fit is measured in
+    float rowMin = 30.0f;
+    float rowMax = 58.0f;
+};
+
+struct ListLayout {
+    int shown = 0;
+    int rows = 0;            // those plus the fixed ones
+    int page = 1;            // rows one press of a scroll arrow moves
+    float top = 0.0f;
+    float left = 0.0f;
+    float fullWidth = 0.0f;  // a fixed row spans the whole column
+    float rowWidth = 0.0f;   // a list row gives up the strip's width
+    float rowHeight = 0.0f;
+    float gap = 0.0f;
+    float stripLeft = 0.0f;
+    float stripWidth = 0.0f;
+    bool scrollable = false;
+};
+
+ListLayout layoutList(const ListSpec& spec, int width, int height) {
+    const float screenWidth = static_cast<float>(std::max(width, 1));
+    const float screenHeight = static_cast<float>(std::max(height, 1));
+    ListLayout layout;
+    layout.gap = spec.gap;
+    layout.fullWidth = std::clamp(screenWidth * 0.32f, 260.0f, 600.0f);
+    layout.rowWidth = layout.fullWidth;
+    layout.left = (screenWidth - layout.fullWidth) * 0.5f;
+    layout.top = screenHeight * 0.36f;
+    // Rows shrink to fit before the window does, and the window shrinks before
+    // anything is allowed to spill off the panel buildMenu draws.
+    const float listHeight = std::max(screenHeight * spec.bottom - layout.top, 1.0f);
+    const int fits =
+        std::max(static_cast<int>((listHeight + layout.gap) / (spec.fitRow + layout.gap)),
+                 spec.fixedRows + 1);
+    layout.shown = std::clamp(std::min(spec.count, spec.maxWindow), spec.minWindow,
+                              fits - spec.fixedRows);
+    layout.rows = layout.shown + spec.fixedRows;
+    layout.rowHeight =
+        std::clamp((listHeight - layout.gap * static_cast<float>(layout.rows - 1)) /
+                       static_cast<float>(layout.rows),
+                   spec.rowMin, spec.rowMax);
+    layout.scrollable = layout.shown > 0 && spec.count > layout.shown;
+    // A press moves by a window less one row, so the row a reader stopped on
+    // is still there after the jump.
+    layout.page = std::max(layout.shown - 1, 1);
+    if (layout.scrollable) {
+        layout.stripWidth = std::clamp(layout.fullWidth * 0.11f, 28.0f, 48.0f);
+        layout.rowWidth = layout.fullWidth - layout.stripWidth - layout.gap * 0.5f;
+        layout.stripLeft = layout.left + layout.fullWidth - layout.stripWidth;
+    }
+    return layout;
+}
+
+ListLayout levelListLayout(int count, int width, int height) {
+    ListSpec spec;
+    spec.count = count;
+    spec.fixedRows = 1;   // back
+    spec.maxWindow = kMaxLevelRows;
+    spec.minWindow = 0;   // an empty directory is a list of nothing
+    spec.bottom = 0.90f;
+    spec.gap = std::clamp(static_cast<float>(std::max(height, 1)) * 0.018f, 10.0f, 18.0f);
+    spec.rowMin = 30.0f;
+    spec.rowMax = 58.0f;
+    return layoutList(spec, width, height);
+}
+
+ListLayout controlListLayout(int count, int width, int height) {
+    ListSpec spec;
+    spec.count = count;
+    spec.fixedRows = 2;   // reset defaults, back
+    spec.maxWindow = 7;
+    spec.minWindow = 1;
+    spec.bottom = 0.895f;
+    spec.gap = std::clamp(static_cast<float>(std::max(height, 1)) * 0.008f, 3.0f, 10.0f);
+    spec.rowMin = 18.0f;
+    spec.rowMax = 52.0f;
+    return layoutList(spec, width, height);
+}
+
+// The strip beside a scrolling list: an up arrow over the top half of the
+// window and a down arrow over the bottom half. Two targets that large are
+// what makes a long list navigable with a mouse alone; they move the window
+// without moving the cursor, so nothing shifts under the pointer.
+void addScrollArrows(MenuView& result, const ListLayout& layout, int first, int count) {
+    if (!layout.scrollable) return;
+    const float span = static_cast<float>(layout.shown - 1) * (layout.rowHeight + layout.gap) +
+                       layout.rowHeight;
+    const float half = (span - layout.gap * 0.5f) * 0.5f;
+    MenuButtonView& up = result.buttons[static_cast<size_t>(result.buttonCount++)];
+    up.scrollRows = -layout.page;
+    up.enabled = first > 0;
+    up.bounds = {layout.stripLeft, layout.top, layout.stripWidth, half};
+    MenuButtonView& down = result.buttons[static_cast<size_t>(result.buttonCount++)];
+    down.scrollRows = layout.page;
+    down.enabled = first + layout.shown < count;
+    down.bounds = {layout.stripLeft, layout.top + span - half, layout.stripWidth, half};
+}
+
 }
 
 void PlayerMenu::setLevels(std::vector<LevelEntry> levels) {
@@ -95,6 +206,7 @@ void PlayerMenu::setLevels(std::vector<LevelEntry> levels) {
     }
     const int count = static_cast<int>(levels_.size());
     levelSelection_ = std::clamp(levelSelection_, 0, count);
+    levelScroll_ = std::clamp(levelScroll_, 0, std::max(count - 1, 0));
     chosenLevel_ = count == 0 ? -1 : std::clamp(chosenLevel_, 0, count - 1);
 }
 
@@ -106,6 +218,7 @@ void PlayerMenu::setSelectedLevel(int index) {
     }
     chosenLevel_ = std::clamp(index, 0, static_cast<int>(levels_.size()) - 1);
     levelSelection_ = chosenLevel_;
+    levelScroll_ = chosenLevel_;
 }
 
 void PlayerMenu::setLevelRecord(const std::string& path, int completions, int bestSeconds) {
@@ -130,8 +243,10 @@ void PlayerMenu::showLevelSelect() {
     screen_ = MenuScreen::LevelSelect;
     // Not reset: the cursor stays on the level that was last picked, so
     // backing out of a run and coming here again does not start over at the
-    // top of the list.
+    // top of the list. The window opens on that level - view() clamps it to
+    // the end of the list, and how many rows fit is not known here.
     levelSelection_ = std::clamp(levelSelection_, 0, static_cast<int>(levels_.size()));
+    levelScroll_ = std::min(levelSelection_, std::max(static_cast<int>(levels_.size()) - 1, 0));
 }
 
 void PlayerMenu::showPause() {
@@ -155,6 +270,7 @@ void PlayerMenu::showDisplayConfirmation(int seconds) {
 void PlayerMenu::showControls() {
     screen_ = MenuScreen::Controls;
     controlSelection_ = std::clamp(controlSelection_, 0, static_cast<int>(kPlayerActionCount) + 1);
+    controlScroll_ = std::min(controlSelection_, static_cast<int>(kPlayerActionCount) - 1);
     capturingBinding_ = false;
 }
 
@@ -266,9 +382,30 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     const bool controlList = screen_ == MenuScreen::Controls;
     int& cursor = levelList ? levelSelection_ : (controlList ? controlSelection_ : selection_);
 
+    // A scrolling list keeps its window and its cursor apart. Hovering a row
+    // moves the cursor; the wheel and the arrows move the window. Whichever
+    // moved last is the one that wins when the two disagree, so a row never
+    // slides out from under the pointer that is pointing at it.
+    const int listCount = levelList  ? static_cast<int>(levels_.size())
+                          : controlList ? static_cast<int>(kPlayerActionCount)
+                                        : 0;
+    int* const scroll = levelList ? &levelScroll_ : (controlList ? &controlScroll_ : nullptr);
+    const int shown = !scroll ? 0
+                      : levelList ? levelListLayout(listCount, width, height).shown
+                                  : controlListLayout(listCount, width, height).shown;
+    const int maxScroll = std::max(listCount - shown, 0);
+    bool windowMoved = false;
+    if (scroll && input.scroll != 0.0f) {
+        *scroll = std::clamp(*scroll - static_cast<int>(std::lround(input.scroll)), 0, maxScroll);
+        windowMoved = true;
+    }
+
     const MenuView current = view(width, height);
     for (int i = 0; i < current.buttonCount; ++i) {
         const MenuButtonView& button = current.buttons[static_cast<size_t>(i)];
+        // A scroll arrow indexes nothing: pointing at one must not change what
+        // is selected, or the list would pick a row on the way to scrolling.
+        if (button.scrollRows != 0) continue;
         if (!button.bounds.contains(input.pointer)) continue;
         // On the level list a button is not its own index: the rows show a
         // window into the list, and "back" sits past the end of it.
@@ -277,8 +414,27 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         else cursor = i;
     }
 
-    if (input.previous) cursor = (cursor + count - 1) % count;
-    if (input.next) cursor = (cursor + 1) % count;
+    if (input.previous) {
+        cursor = (cursor + count - 1) % count;
+        windowMoved = false;
+    }
+    if (input.next) {
+        cursor = (cursor + 1) % count;
+        windowMoved = false;
+    }
+
+    if (scroll && shown > 0 && listCount > 0) {
+        if (windowMoved) {
+            // Scrolling carries the cursor along, so what is highlighted is
+            // always a row the list is showing. The fixed rows underneath keep
+            // the cursor wherever the window goes.
+            if (cursor < listCount) cursor = std::clamp(cursor, *scroll, *scroll + shown - 1);
+        } else if (cursor < listCount) {
+            // The keyboard drags the window, and only far enough to bring the
+            // row it moved to back on screen.
+            *scroll = std::clamp(std::clamp(*scroll, cursor - shown + 1, cursor), 0, maxScroll);
+        }
+    }
 
     if (screen_ == MenuScreen::Settings && selection_ < 9) {
         if (input.decrease) adjustSetting(selection_, -1);
@@ -290,6 +446,15 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         for (int i = 0; i < updated.buttonCount; ++i) {
             const MenuButtonView& button = updated.buttons[static_cast<size_t>(i)];
             if (!button.bounds.contains(input.pointer)) continue;
+            if (button.scrollRows != 0) {
+                if (scroll) {
+                    *scroll = std::clamp(*scroll + button.scrollRows, 0, maxScroll);
+                    if (shown > 0 && cursor < listCount) {
+                        cursor = std::clamp(cursor, *scroll, *scroll + shown - 1);
+                    }
+                }
+                return MenuAction::None;
+            }
             if (button.levelIndex >= 0) chosenLevel_ = button.levelIndex;
             if (controlList) {
                 if (button.actionIndex < static_cast<int>(kPlayerActionCount)) {
@@ -365,26 +530,13 @@ MenuView PlayerMenu::view(int width, int height) const {
         }
 
         // The list lives between the subtitle and the bottom of the panel
-        // buildMenu draws. Rows shrink to fit before the window does, and the
-        // window shrinks before anything is allowed to spill off the panel.
-        const float listTop = screenHeight * 0.36f;
-        const float listHeight = std::max(screenHeight * 0.90f - listTop, 1.0f);
-        constexpr float kRowMin = 30.0f;
-        constexpr float kRowMax = 58.0f;
-        const int fits = std::max(static_cast<int>((listHeight + gap) / (kRowMin + gap)), 2);
-        const int shown = std::clamp(std::min(levelCount, kMaxLevelRows), 0, fits - 1);
-        const int rows = shown + 1;   // + back
-        const float rowHeight =
-            std::clamp((listHeight - gap * static_cast<float>(rows - 1)) /
-                           static_cast<float>(rows),
-                       kRowMin, kRowMax);
-
-        // Centred on the cursor rather than scrolled by it, so the window is a
-        // function of the selection alone and the view stays pure.
-        int first = 0;
-        if (levelCount > shown) {
-            first = std::clamp(levelSelection_ - (shown - 1) / 2, 0, levelCount - shown);
-        }
+        // buildMenu draws.
+        const ListLayout layout = levelListLayout(levelCount, width, height);
+        const int shown = layout.shown;
+        // The window follows levelScroll_, which nothing but the keyboard, the
+        // wheel and the arrows moves. Clamped rather than corrected, so the
+        // view stays a pure function of the state.
+        const int first = std::clamp(levelScroll_, 0, std::max(levelCount - shown, 0));
         result.firstLevelShown = first;
         result.levelsShown = shown;
 
@@ -403,17 +555,20 @@ MenuView PlayerMenu::view(int width, int height) const {
                 }
             }
             button.levelIndex = index;
-            button.bounds = {left, listTop + static_cast<float>(i) * (rowHeight + gap),
-                             buttonWidth, rowHeight};
+            button.bounds = {layout.left,
+                             layout.top + static_cast<float>(i) * (layout.rowHeight + layout.gap),
+                             layout.rowWidth, layout.rowHeight};
             button.selected = index == levelSelection_;
         }
         MenuButtonView& back = result.buttons[static_cast<size_t>(shown)];
         back.action = MenuAction::Back;
         back.label = "back";
-        back.bounds = {left, listTop + static_cast<float>(shown) * (rowHeight + gap), buttonWidth,
-                       rowHeight};
+        back.bounds = {layout.left,
+                       layout.top + static_cast<float>(shown) * (layout.rowHeight + layout.gap),
+                       layout.fullWidth, layout.rowHeight};
         back.selected = levelSelection_ >= levelCount;
-        result.buttonCount = rows;
+        result.buttonCount = layout.rows;
+        addScrollArrows(result, layout, first, levelCount);
         return result;
     }
 
@@ -424,21 +579,9 @@ MenuView PlayerMenu::view(int width, int height) const {
                                             : "choose an action to rebind";
         result.controlCount = actionCount;
 
-        const float listTop = screenHeight * 0.36f;
-        const float listHeight = std::max(screenHeight * 0.895f - listTop, 1.0f);
-        const float rowGap = std::clamp(screenHeight * 0.008f, 3.0f, 10.0f);
-        const int fits = std::max(static_cast<int>((listHeight + rowGap) / (30.0f + rowGap)), 3);
-        const int shown = std::clamp(std::min(actionCount, 7), 1, fits - 2);
-        const int rows = shown + 2;
-        const float rowHeight =
-            std::clamp((listHeight - rowGap * static_cast<float>(rows - 1)) /
-                           static_cast<float>(rows),
-                       18.0f, 52.0f);
-        int first = 0;
-        if (actionCount > shown) {
-            const int focus = std::min(controlSelection_, actionCount - 1);
-            first = std::clamp(focus - (shown - 1) / 2, 0, actionCount - shown);
-        }
+        const ListLayout layout = controlListLayout(actionCount, width, height);
+        const int shown = layout.shown;
+        const int first = std::clamp(controlScroll_, 0, std::max(actionCount - shown, 0));
         result.firstControlShown = first;
         result.controlsShown = shown;
 
@@ -448,8 +591,9 @@ MenuView PlayerMenu::view(int width, int height) const {
             MenuButtonView& button = result.buttons[static_cast<size_t>(i)];
             button.label = playerActionLabel(action);
             button.actionIndex = actionIndex;
-            button.bounds = {left, listTop + static_cast<float>(i) * (rowHeight + rowGap),
-                             buttonWidth, rowHeight};
+            button.bounds = {layout.left,
+                             layout.top + static_cast<float>(i) * (layout.rowHeight + layout.gap),
+                             layout.rowWidth, layout.rowHeight};
             button.selected = actionIndex == controlSelection_;
             if (button.selected && capturingBinding_) {
                 std::snprintf(button.value.data(), button.value.size(), "%s", "press input");
@@ -461,17 +605,20 @@ MenuView PlayerMenu::view(int width, int height) const {
         MenuButtonView& reset = result.buttons[static_cast<size_t>(shown)];
         reset.label = "reset defaults";
         reset.actionIndex = actionCount;
-        reset.bounds = {left, listTop + static_cast<float>(shown) * (rowHeight + rowGap),
-                        buttonWidth, rowHeight};
+        reset.bounds = {layout.left,
+                        layout.top + static_cast<float>(shown) * (layout.rowHeight + layout.gap),
+                        layout.fullWidth, layout.rowHeight};
         reset.selected = controlSelection_ == actionCount;
 
         MenuButtonView& back = result.buttons[static_cast<size_t>(shown + 1)];
         back.label = "back";
         back.actionIndex = actionCount + 1;
-        back.bounds = {left, listTop + static_cast<float>(shown + 1) * (rowHeight + rowGap),
-                       buttonWidth, rowHeight};
+        back.bounds = {layout.left,
+                       layout.top + static_cast<float>(shown + 1) * (layout.rowHeight + layout.gap),
+                       layout.fullWidth, layout.rowHeight};
         back.selected = controlSelection_ == actionCount + 1;
-        result.buttonCount = rows;
+        result.buttonCount = layout.rows;
+        addScrollArrows(result, layout, first, actionCount);
         return result;
     }
 

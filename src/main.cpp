@@ -670,6 +670,13 @@ int main(int argc, char** argv) {
             static_cast<float>(menuFramebuffer.x) / static_cast<float>(std::max(menuWindow.x, 1)),
             static_cast<float>(menuFramebuffer.y) / static_cast<float>(std::max(menuWindow.y, 1)));
         dvk::MenuInput menuInput = dvk::readMenuInput(input, input.cursorPosition() * pointerScale);
+        // The wheel scrolls the two lists that are longer than the screen, and
+        // is taken only while one of them is up: the automap and the debug
+        // panels want it the rest of the time.
+        if (menu.screen() == dvk::MenuScreen::LevelSelect ||
+            menu.screen() == dvk::MenuScreen::Controls) {
+            menuInput.scroll = input.consumeScroll();
+        }
         if (opts.levelSwitchTest) {
             // The script drives the cursor, so the pointer is parked off every
             // button: under a window manager the mouse sits wherever it was

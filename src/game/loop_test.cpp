@@ -258,7 +258,8 @@ bool verifyLevelSelect() {
     many.setSelectedLevel(19);
     many.showLevelSelect();
     view = many.view(kWidth, kHeight);
-    ok &= expect(view.buttonCount == kMaxLevelRows + 1, "a long list shows a window of rows");
+    ok &= expect(view.buttonCount == kMaxLevelRows + 3,
+                 "a long list shows a window of rows, back, and a pair of scroll arrows");
     ok &= expect(view.levelsShown == kMaxLevelRows && view.levelCount == 20,
                  "the window reports which slice of the list it is");
     ok &= expect(view.firstLevelShown + view.levelsShown == 20,
@@ -372,7 +373,7 @@ bool verifyPlayerMenu() {
 
     menu.showControls();
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::Controls && view.buttonCount == 9 &&
+    ok &= expect(view.screen == MenuScreen::Controls && view.buttonCount == 11 &&
                      view.controlCount == static_cast<int>(kPlayerActionCount),
                  "controls show a scrolling window of player actions");
     MenuInput beginCapture;

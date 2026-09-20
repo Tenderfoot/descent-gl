@@ -49,6 +49,9 @@ struct MenuInput {
     bool bindingPressed = false;
     InputBinding binding;
     glm::vec2 pointer{0.0f};
+    // Wheel notches this frame, positive away from the player. A scrolling
+    // list moves its window by it; every other screen ignores it.
+    float scroll = 0.0f;
 };
 
 struct MenuRect {
@@ -71,13 +74,21 @@ struct MenuButtonView {
     // >= 0 on a level row: which level of the menu's list it starts.
     int levelIndex = -1;
     int actionIndex = -1;
+    // Non-zero on a scroll arrow: rows it moves the list's window by, negative
+    // for up. Such a button is mouse-only - it indexes nothing, and the
+    // keyboard cursor never lands on it.
+    int scrollRows = 0;
+    // False on a scroll arrow with nothing left to scroll. The arrow stays
+    // where it is so the strip does not jump; it just does nothing.
+    bool enabled = true;
 };
 
 // The level list is as long as the directory is, and a screen is not. Eight
 // rows plus "back" is what fits at the sizes this game is played at; a longer
-// list scrolls a window of that size around the selection.
+// list shows a window of that size and a pair of scroll arrows beside it.
 inline constexpr int kMaxLevelRows = 8;
-// The settings screen is currently the longest fixed menu.
+// The settings screen is the longest fixed menu, at twelve. The scrolling
+// lists come to eleven: eight level rows, "back", and the two arrows.
 inline constexpr int kMaxMenuButtons = 12;
 
 struct MenuView {
@@ -146,6 +157,12 @@ private:
     // the cursor on the level that was picked rather than on the first row.
     int levelSelection_ = 0;
     int controlSelection_ = 0;
+    // The first row of each list's window. Kept apart from the cursor, so a
+    // row under the pointer cannot pull the list out from under the pointer:
+    // hovering moves the cursor, and only the keyboard, the wheel and the
+    // arrows move the window.
+    int levelScroll_ = 0;
+    int controlScroll_ = 0;
     int chosenLevel_ = -1;
     bool won_ = false;
     const char* reason_ = "";
