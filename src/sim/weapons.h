@@ -97,6 +97,33 @@ constexpr WeaponFire weaponFire(int weaponId) {
     return WeaponFire::Projectile;
 }
 
+// Whether a shot leaves carrying the ship's own velocity. Structural like
+// weaponFire, and written out per weapon for the same reason.
+//
+// The guns inherit. At 140 and 220 units/s a ship doing 20 is a rounding error
+// on the bolt, and inheriting is what keeps a burst looking like it left the
+// ship rather than being spat out beside it.
+//
+// The missiles do not. At 55 units/s the ship's own velocity is a third of the
+// missile's: it swung the world speed from 35 to 75 and the range with it, and
+// on a full strafe it tilted the missile some twenty degrees off the crosshair.
+// A weapon that commits you for two thirds of a second and detonates twelve
+// units wide has to go where the reticle is and arrive when it always arrives.
+constexpr bool weaponInheritsVelocity(int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponConcussion:
+        case WeaponHoming:
+            return false;
+        case WeaponLaser:
+        case WeaponVulcan:
+        case WeaponRailgun:
+        case WeaponLightning:
+        case WeaponCount:
+            break;
+    }
+    return true;
+}
+
 // Laser has four upgrade levels. Each changes damage and colour, and the colour
 // is the readable part: in a mine with no ambient light, what your own fire
 // looks like is most of what you see.

@@ -584,7 +584,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         Projectile& p = state.projectiles.items[static_cast<size_t>(slot)];
         p.kind = projectileFor(weaponId);
         p.position = origin;
-        p.velocity = spreadDirection(forward, right, up, def.spread) * def.speed + ship.velocity;
+        p.velocity = spreadDirection(forward, right, up, def.spread) * def.speed;
+        if (weaponInheritsVelocity(weaponId)) p.velocity += ship.velocity;
         p.color = color;
         p.segment = ship.segment;
         p.radius = def.radius;
