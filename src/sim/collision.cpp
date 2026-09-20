@@ -294,19 +294,37 @@ bool separateFromObjects(const Level& level, BodyEntry& entry, float skin,
     for (size_t i = 0; i < level.objectProxies.size(); ++i) {
         // A robot's spawn entry, or something already shot to pieces.
         if (!solid->solid(i)) continue;
-        // Same segment only. Deliberately narrower than the body-body rule
-        // above: an object sits where a level author put it, which is in the
-        // middle of a room rather than against a portal, and widening this to
-        // neighbours would let a pillar standing against a wall push a body in
-        // the room on the other side of it. The cost is that a body straddling
-        // a portal does not collide with a pillar planted right beside that
-        // portal; no shipped level does that.
-        if (level.objects[i].segment != body.segment) continue;
+        const PlacedProxy& proxy = level.objectProxies[i];
+
+        // Geometry decides this, not the segment graph.
+        //
+        // This used to require the object and the body to be in the SAME
+        // segment, on the grounds that a pillar standing against a wall would
+        // otherwise push a body in the room on the other side of it. That
+        // cannot happen. Every system resolves its own bodies against the mine
+        // before this runs, so the body's sphere is already clear of the mine's
+        // surface - and a sphere that does not cross a wall cannot reach
+        // anything beyond it. If a proxy overlaps the body at all, the proxy is
+        // in the body's room, whatever the segment graph says about its origin.
+        //
+        // And it says plenty. `LevelObject::segment` is one number taken from
+        // the object's origin while the proxy is a volume, so the two disagree
+        // as soon as an object is big: mine01's reactor straddles the portal
+        // plane into segment 31, and MineEntrance's columns stand 39 units up
+        // through the ceiling portal into the room above. Every part of them
+        // outside their own segment was intangible, while gunfire - which never
+        // filtered by segment - hit all of it. You could shoot a column you had
+        // just flown through.
+        //
+        // What replaces it is the broad phase the sight rays already use: a
+        // conservative reject in front of an exact test, so a bound that is too
+        // wide costs a few needless narrow-phase calls and never an answer.
+        const glm::vec3 apart = proxy.centre - body.position;
+        const float reach = proxy.boundingRadius() + body.radius;
+        if (glm::dot(apart, apart) > reach * reach) continue;
 
         ProxyContact contact;
-        if (!proxySphereContact(level.objectProxies[i], body.position, body.radius, contact)) {
-            continue;
-        }
+        if (!proxySphereContact(proxy, body.position, body.radius, contact)) continue;
         body.position += contact.normal * (contact.depth + skin);
         reflect(body, contact.normal, entry.restitution);
         touched = true;
