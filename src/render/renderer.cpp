@@ -1171,6 +1171,38 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         }
     }
 
+    // Warnings, centred in the band between the ship and the weapon strip: the
+    // two states that stop the ship doing what the player is asking of it.
+    //
+    // Low enough to clear the chase camera's ship, which sits around the middle
+    // of the window and would otherwise be written over, and well clear of the
+    // reticle above it - these arrive at the moments the player is most likely
+    // to be shooting at something. They pulse on the same clock as the damage
+    // vignette, so the edges of the screen and the words in the middle beat
+    // together rather than against each other.
+    //
+    // Nothing here while the run is over: a dead ship is disabled and out of
+    // energy by definition, and neither is news next to the card saying so.
+    if (hud.phase < 2) {
+        const float warnScale = s * 1.1f;
+        const float pulse = 0.55f + 0.45f * std::sin(hud.elapsed * 5.5f);
+        float warnY = cy + 52.0f * s;
+        const auto warn = [&](const char* text, const glm::vec4& color) {
+            hud_.text(text, cx - hud_.textWidth(text, warnScale) * 0.5f, warnY, warnScale,
+                      glm::vec4(color.r, color.g, color.b, color.a * pulse));
+            warnY += 11.0f * s;
+        };
+        // A ship that cannot fly is a worse problem than a gun that cannot
+        // fire, so it takes the upper line - and keeps it, rather than the two
+        // swapping places as they come and go.
+        if (hud.shipDisabled) {
+            warn("field generator disabled", glm::vec4(1.0f, 0.35f, 0.3f, 1.0f));
+        }
+        if (hud.energyDepleted) {
+            warn("energy depleted", glm::vec4(1.0f, 0.8f, 0.3f, 1.0f));
+        }
+    }
+
     // The countdown, large and centred, because it is the only number that
     // matters once it is running.
     if (hud.countdown >= 0.0f) {
