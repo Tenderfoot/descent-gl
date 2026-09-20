@@ -21,6 +21,13 @@ enum WeaponId : int {
 inline constexpr std::array<const char*, WeaponCount> kWeaponNames{
     "laser", "vulcan", "concussion", "homing", "railgun", "lightning"};
 
+// The same weapons, named short enough to fit a cell of the HUD's weapon strip,
+// where "concussion" does not. Same order and same length as kWeaponNames,
+// because both are indexed by WeaponId and a second order would be one more
+// thing to keep in step.
+inline constexpr std::array<const char*, WeaponCount> kWeaponShortNames{
+    "laser", "vulcan", "conc", "homg", "rail", "ltng"};
+
 // Which trigger a weapon answers to. Written out per weapon rather than
 // inferred from the enum's order: "id <= WeaponVulcan" happened to be true
 // while the guns were declared guns-first, and would silently reclassify every

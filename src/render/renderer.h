@@ -109,6 +109,10 @@ struct HudData {
     static constexpr int kSecondarySlots = 2;
     HudWeaponSlot primaries[kPrimarySlots];
     HudWeaponSlot secondaries[kSecondarySlots];
+    // What throwing a flare is bound to. Flares are not a weapon and have no
+    // slot of their own, but the chip that counts them sits on the same strip
+    // and names its key the same way the cells do.
+    char flareKey[8] = "";
 
     // The loadout as the text readout states it. Superseded by the slots above
     // and still what the bottom-right text draws from; fill both while both are

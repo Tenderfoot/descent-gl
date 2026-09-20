@@ -7,6 +7,7 @@
 #include "core/window.h"
 #include "game/asset_check.h"
 #include "game/bindings.h"
+#include "game/hud_slots.h"
 #include "game/level.h"
 #include "game/level_list.h"
 #include "game/state.h"
@@ -1122,6 +1123,8 @@ int main(int argc, char** argv) {
                                 ? cur.combat.player.homingAmmo
                                 : cur.combat.player.concussionAmmo;
         hud.flares = cur.combat.player.flares;
+        dvk::fillWeaponSlots(cur.combat.player, weapons, settings.bindings,
+                             static_cast<float>(kSimStep), hud);
         for (int k = 0; k < 3; ++k) hud.keys[k] = cur.game.keys[static_cast<size_t>(k)];
         hud.countdown = cur.game.phase == dvk::sim::GamePhase::Countdown ? cur.game.countdown
                                                                         : -1.0f;

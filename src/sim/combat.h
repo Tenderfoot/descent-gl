@@ -289,6 +289,24 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
                          const CombatTraceParams& params = {}, const SolidDoors* doors = nullptr,
                          const PropState* props = nullptr);
 
+// The count a weapon spends, or null when it runs on energy instead. One
+// mapping rather than two: the gun and the readout that reports the gun agree
+// by construction, instead of agreeing until the day a weapon changes which
+// pool it draws on.
+int* weaponAmmoPool(PlayerState& player, int weaponId);
+const int* weaponAmmoPool(const PlayerState& player, int weaponId);
+
+// Whether the player could fire this weapon right now: the count it costs is
+// there and the energy it costs is there.
+//
+// The fire interval is deliberately not part of the answer. A gun between shots
+// is not an empty gun, and a readout that folded the cooldown in would blink at
+// the rate of fire and say the wrong thing while it did.
+//
+// `dt` is the step a continuous weapon would be metered over, because that one
+// spends per second rather than per shot; everything else ignores it.
+bool weaponReady(const PlayerState& player, const WeaponConfig& cfg, int weaponId, float dt);
+
 // Sets up object health from the level's objects. An object whose type names
 // a robot definition is not scenery: the simulation owns it as a robot, so it
 // is marked dead here and never acts as a target. Before this, every robot's

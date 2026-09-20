@@ -309,6 +309,34 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
     return haveBody ? body : hit;
 }
 
+int* weaponAmmoPool(PlayerState& player, int weaponId) {
+    switch (static_cast<WeaponId>(weaponId)) {
+        case WeaponVulcan: return &player.vulcanAmmo;
+        case WeaponConcussion: return &player.concussionAmmo;
+        case WeaponHoming: return &player.homingAmmo;
+        case WeaponLaser:
+        case WeaponRailgun:
+        case WeaponLightning:
+        case WeaponCount:
+            break;
+    }
+    return nullptr;
+}
+
+const int* weaponAmmoPool(const PlayerState& player, int weaponId) {
+    return weaponAmmoPool(const_cast<PlayerState&>(player), weaponId);
+}
+
+bool weaponReady(const PlayerState& player, const WeaponConfig& cfg, int weaponId, float dt) {
+    if (weaponId < 0 || weaponId >= WeaponCount) return false;
+    const WeaponDef& def = cfg.weapons[static_cast<size_t>(weaponId)];
+    const float meter = weaponFire(weaponId) == WeaponFire::Continuous ? dt : 1.0f;
+    if (def.energyCost > 0.0f && player.energy < def.energyCost * meter) return false;
+    const int* ammo = weaponAmmoPool(player, weaponId);
+    if (def.ammoCost > 0 && ammo && *ammo < def.ammoCost) return false;
+    return true;
+}
+
 void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::quat& shipOrientation, const WeaponConfig& cfg,
                 const FireControls& controls, float dt, RobotState* robots,
@@ -399,17 +427,11 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             emitLocal(events, Cue::WeaponEmpty);
         };
         const float energyCost = def.energyCost * meter;
-        if (def.energyCost > 0.0f) {
-            if (player.energy < energyCost) {
-                click();
-                return;
-            }
-        }
-        int* ammo = nullptr;
-        if (weaponId == WeaponVulcan) ammo = &player.vulcanAmmo;
-        if (weaponId == WeaponConcussion) ammo = &player.concussionAmmo;
-        if (weaponId == WeaponHoming) ammo = &player.homingAmmo;
-        if (def.ammoCost > 0 && ammo && *ammo < def.ammoCost) {
+        int* ammo = weaponAmmoPool(player, weaponId);
+        // Asked through the shared predicate rather than checked here, so that
+        // the strip on the HUD reporting a gun as empty and the gun refusing to
+        // fire are the same judgement and not two that agree by habit.
+        if (!weaponReady(player, cfg, weaponId, dt)) {
             click();
             return;
         }
