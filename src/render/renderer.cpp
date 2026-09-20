@@ -1171,20 +1171,22 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         }
     }
 
-    // Warnings, centred under the reticle: the two states that stop the ship
-    // doing what the player is asking of it.
+    // Warnings, centred in the band between the ship and the weapon strip: the
+    // two states that stop the ship doing what the player is asking of it.
     //
-    // Under the reticle and not over it, because these arrive at the moments
-    // the player is most likely to be shooting at something. They pulse on the
-    // same clock as the damage vignette, so the edges of the screen and the
-    // words in the middle beat together rather than against each other.
+    // Low enough to clear the chase camera's ship, which sits around the middle
+    // of the window and would otherwise be written over, and well clear of the
+    // reticle above it - these arrive at the moments the player is most likely
+    // to be shooting at something. They pulse on the same clock as the damage
+    // vignette, so the edges of the screen and the words in the middle beat
+    // together rather than against each other.
     //
     // Nothing here while the run is over: a dead ship is disabled and out of
     // energy by definition, and neither is news next to the card saying so.
     if (hud.phase < 2) {
         const float warnScale = s * 1.1f;
         const float pulse = 0.55f + 0.45f * std::sin(hud.elapsed * 5.5f);
-        float warnY = cy + 26.0f * s;
+        float warnY = cy + 52.0f * s;
         const auto warn = [&](const char* text, const glm::vec4& color) {
             hud_.text(text, cx - hud_.textWidth(text, warnScale) * 0.5f, warnY, warnScale,
                       glm::vec4(color.r, color.g, color.b, color.a * pulse));
