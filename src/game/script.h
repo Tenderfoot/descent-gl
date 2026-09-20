@@ -27,6 +27,22 @@ struct ScriptMessage {
     float seconds = 4.5f;
 };
 
+// A tutorial pane: a looping clip, a heading and a body, shown with the game
+// stopped until the player acknowledges it.
+//
+// Deliberately not a ScriptMessage with a flag on it. A transmission has a
+// display time and retires itself; a tutorial has neither, because what ends
+// it is the player rather than the clock. They also arrive on different
+// surfaces - one is a corner of the HUD the player flies past, the other is a
+// modal that takes the mouse - and a field that is meaningless on one of them
+// is a field somebody will eventually set.
+struct ScriptTutorial {
+    std::string id;
+    std::string clip;
+    std::string title;
+    std::string text;
+};
+
 // What the player is carrying the moment the level starts, as the script
 // declares it.
 //
@@ -73,9 +89,16 @@ public:
     const sim::TriggerSet& triggers() const { return triggers_; }
     const sim::TimerSet& timers() const { return timers_; }
     const std::vector<ScriptMessage>& messages() const { return messages_; }
+    const std::vector<ScriptTutorial>& tutorials() const { return tutorials_; }
     const ScriptLoadout& loadout() const { return loadout_; }
     const ScriptMessage* message(int index) const;
+    const ScriptTutorial* tutorial(int index) const;
     int takeMessage();
+    // The tutorial a callback asked for this frame, or -1. Read once and
+    // cleared, exactly like takeMessage(). Only one can be latched per drain:
+    // two panes in one frame would mean the second replaced a pane the player
+    // never saw, so the first one wins and the second is logged.
+    int takeTutorial();
     // The shields a callback asked for this frame, or negative if none did.
     // Read once and cleared, exactly like takeMessage().
     float takeShields();
@@ -95,10 +118,13 @@ private:
     static int declareTrigger(lua_State* state);
     static int declareTimer(lua_State* state);
     static int startComm(lua_State* state);
+    static int declareTutorial(lua_State* state);
+    static int showTutorial(lua_State* state);
     static int setShields(lua_State* state);
 
     static ScriptHost* self(lua_State* state);
     int findMessage(const char* id) const;
+    int findTutorial(const char* id) const;
     bool call(int functionRef, const char* context);
 
     lua_State* state_ = nullptr;
@@ -106,6 +132,7 @@ private:
     const Level* level_ = nullptr;
     bool draining_ = false;
     int requestedMessage_ = -1;
+    int requestedTutorial_ = -1;
     float requestedShields_ = -1.0f;
     ScriptLoadout loadout_;
     bool loadoutDeclared_ = false;
@@ -114,6 +141,7 @@ private:
     std::array<int, sim::kMaxTriggers> callbacks_{};
     std::array<int, sim::kMaxTimers> timerCallbacks_{};
     std::vector<ScriptMessage> messages_;
+    std::vector<ScriptTutorial> tutorials_;
     int callbackErrors_ = 0;
 };
 

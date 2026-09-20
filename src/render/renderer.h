@@ -413,6 +413,13 @@ private:
     void buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildHud(const HudData& hud, const glm::mat4& viewProj);
     void buildMenu(const MenuView& menu);
+    // Which layer of the shared comm array holds `frameIndex` of `clipIndex`,
+    // or -1 when the library is empty. Not a query: a decoded clip owns one
+    // scratch layer rather than a run of them, so asking for a frame of one is
+    // what uploads that frame. Both indices are clamped rather than trusted,
+    // because they are filled in by the game layer and an index that outlived
+    // the clip it was chosen for would otherwise sample another clip's frames.
+    int commLayer(int clipIndex, int frameIndex);
     void hudPass();
     void buildAutomapLines(const AutomapData& map, const Level& level);
 

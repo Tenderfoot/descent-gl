@@ -12,6 +12,7 @@ class Input;
 class LevelSession;
 class Window;
 struct LoadedLevel;
+struct ScriptTutorial;
 
 namespace audio {
 class Audio;
@@ -85,11 +86,26 @@ public:
     void tickDisplayConfirmation(double now);
 
     // Escape, and whatever the player bound pause to. Backs out of the nested
-    // screens one at a time before it reaches the pause menu itself.
-    ShellEffect handlePauseKeys(bool pausePressed, bool escapePressed);
+    // screens one at a time before it reaches the pause menu itself, applying
+    // the edits on the way out of any screen that has some - leaving a
+    // settings screen commits it, whichever way you leave.
+    //
+    // `now` is the application clock, needed because backing out of the video
+    // screen can start the display-change countdown.
+    ShellEffect handlePauseKeys(bool pausePressed, bool escapePressed, double now);
 
     // Whatever the menu decided this frame.
     ShellEffect applyMenuAction(MenuAction action, double now);
+
+    // A level's script asked for a tutorial pane. Stops the simulation, hands
+    // the cursor back and puts the pane up; does nothing if the player has
+    // turned tutorials off, or if there is no run to stop.
+    //
+    // Whether the run is one a tutorial belongs in at all is the frame loop's
+    // question rather than this one's - a screenshot pass has a perfectly
+    // valid session and still must not be stopped by one - so that guard lives
+    // with the caller and this one only knows about the setting.
+    ShellEffect showTutorial(const ScriptTutorial& tutorial, double now);
 
     // Mute keeps the device open and the ambient channels running, so unmuting
     // is instant and does not restart the engine mid-note. Persisted at once:
@@ -102,6 +118,11 @@ public:
 
 private:
     void finishDisplayConfirmation(bool keep);
+    // Commits the menu's working copy to the live settings and to disk, and
+    // returns whether a display change put the confirmation countdown up. It
+    // navigates nowhere: every caller has its own idea of where to go next,
+    // and a confirmation screen has already gone somewhere.
+    bool applySettingsEdits(double now);
 
     Window& window_;
     Input& input_;

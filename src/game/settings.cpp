@@ -102,6 +102,7 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         readIf(source, "thirdPersonFov", settings.thirdPersonFov);
         readIf(source, "invertMouseY", settings.invertMouseY);
         readIf(source, "muted", settings.muted);
+        readIf(source, "tutorials", settings.tutorials);
         readIf(source, "fullscreen", settings.fullscreen);
         readIf(source, "vsync", settings.vsync);
         readIf(source, "windowWidth", settings.windowWidth);
@@ -157,6 +158,7 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"thirdPersonFov", settings.thirdPersonFov},
         {"invertMouseY", settings.invertMouseY},
         {"muted", settings.muted},
+        {"tutorials", settings.tutorials},
         {"fullscreen", settings.fullscreen},
         {"vsync", settings.vsync},
         {"windowWidth", settings.windowWidth},
@@ -214,6 +216,8 @@ int runSettingsTest() {
     written.thirdPersonFov = 95.0f;
     written.invertMouseY = true;
     written.muted = true;
+    // The default is on, so only false proves the field made the round trip.
+    written.tutorials = false;
     written.fullscreen = true;
     written.vsync = false;
     written.windowWidth = 1920;
@@ -227,7 +231,7 @@ int runSettingsTest() {
                      loaded.mouseSensitivity == written.mouseSensitivity && loaded.invertMouseY &&
                      loaded.firstPersonFov == written.firstPersonFov &&
                      loaded.thirdPersonFov == written.thirdPersonFov &&
-                     loaded.muted && loaded.fullscreen && !loaded.vsync &&
+                     loaded.muted && !loaded.tutorials && loaded.fullscreen && !loaded.vsync &&
                      loaded.windowWidth == 1920 && loaded.windowHeight == 1080,
                  "saved values round trip");
     ok &= expect(loaded.bindings[PlayerAction::Forward] ==

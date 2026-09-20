@@ -5,6 +5,7 @@
 #include "game/level.h"
 #include "game/script.h"
 #include "game/session.h"
+#include "game/tutorial.h"
 #include "render/renderer.h"
 #include "sim/collision.h"
 #include "sim/robots.h"
@@ -16,6 +17,16 @@ void loadLevelScript(ScriptHost& script, const Level& level, const CommDirector&
     for (const ScriptMessage& message : script.messages()) {
         if (!comm.knows(message.clip)) {
             log::fatal("Lua message '{}' names unknown comm clip '{}'", message.id, message.clip);
+        }
+    }
+    // Tutorials draw from the same library, so the same check answers for
+    // them. Asked of the comm director rather than of the pane because it is
+    // the same question about the same library, and a second copy of it would
+    // only be a second thing to keep in step.
+    for (const ScriptTutorial& tutorial : script.tutorials()) {
+        if (!comm.knows(tutorial.clip)) {
+            log::fatal("Lua tutorial '{}' names unknown comm clip '{}'", tutorial.id,
+                       tutorial.clip);
         }
     }
 }
@@ -43,6 +54,7 @@ void loadLevelFile(LoadedLevel& loaded, const std::string& path) {
     loadLevelScript(loaded.script, loaded.level, loaded.comm);
     applySessionLoadout(loaded.session, loaded.script.loadout());
     loaded.comm.leaveLevel();
+    loaded.tutorial.clear();
     if (loaded.headlight) setSessionHeadlight(loaded.session, true);
 
     loaded.contacts.clear();
