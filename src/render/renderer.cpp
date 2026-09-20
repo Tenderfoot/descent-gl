@@ -531,11 +531,22 @@ KeyStyle keyStyle(KeyColor key) {
     }
 }
 
+// An emergency hatch's lower plate. Hazard amber rather than a key colour,
+// because what it wants is not something the player can go and fetch.
+constexpr glm::vec4 kHatchPlate{0.98f, 0.55f, 0.06f, 1.0f};
+
+// Both strings stay inside the kSignQuadsPerPlate letter budget reserved in
+// the constructor. A longer one would grow the sign buffer mid-frame, which
+// is a heap allocation in the draw path and shows up in the frame report.
+KeyStyle hatchStyle(bool reactorGone) {
+    return {kHatchPlate, reactorGone ? "EMERGENCY HATCH" : "REACTOR ONLINE - SEALED"};
+}
+
 }   // namespace
 
-// The signage on the keyed doors: a strip saying whether the door in front of
-// the player is going to open, and under it one in the key's own colour saying
-// which key it wants. Without them a locked door is a striped panel that looks
+// The signage on the locked doors: a strip saying whether the door in front of
+// the player is going to open, and under it one naming what it is waiting for
+// - a key, in the key's own colour, or the reactor, for an emergency hatch. Without them a locked door is a striped panel that looks
 // exactly like a door the player can already open, and the only feedback for
 // the difference is a refusal noise after flying into it.
 //
@@ -550,7 +561,11 @@ void Renderer::buildDoorSigns(const RenderState& rs, const Level& level, const P
     for (size_t di = 0; di < count; ++di) {
         const Door& door = level.doors[di];
         const int key = static_cast<int>(door.key);
-        if (key < 0 || key >= static_cast<int>(rs.keys.size())) continue;
+        const bool keyed = key >= 0 && key < static_cast<int>(rs.keys.size());
+        // A door with neither lock is just a door and says nothing. One with
+        // either gets signage, and one carrying both is described by its key,
+        // since that is the half the player can do something about carrying.
+        if (!keyed && !door.requiresReactor) continue;
         if (!walk.isVisible(door.segment) && !walk.isVisible(door.neighbour)) continue;
 
         const DoorFrame frame = doorFrame(door);
@@ -558,8 +573,12 @@ void Renderer::buildDoorSigns(const RenderState& rs, const Level& level, const P
         const float openness =
             di < static_cast<size_t>(rs.doorCount) ? rs.doorOpenness[di] : 0.0f;
 
-        const bool have = rs.keys[static_cast<size_t>(key)];
-        const KeyStyle style = keyStyle(door.key);
+        // What the door would actually do if the player flew at it now, which
+        // is both locks together and not just the one the plate names.
+        const bool haveKey = !keyed || rs.keys[static_cast<size_t>(key)];
+        const bool unsealed = !door.requiresReactor || rs.exitOpen;
+        const bool have = haveKey && unsealed;
+        const KeyStyle style = keyed ? keyStyle(door.key) : hatchStyle(rs.exitOpen);
 
         const float halfWidth = frame.width * kSignHalfWidth;
         const float statusHalfH = frame.height * kStatusHalfHeight;

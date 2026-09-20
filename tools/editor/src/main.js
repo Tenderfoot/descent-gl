@@ -11,8 +11,8 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import {
     addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
-    ceilingAnchor, ENTITY_LISTS, entityFacing, entityList, moveEntities, moveEntity, removeEntity,
-    segmentCentre, setExit,
+    ceilingAnchor, ENTITY_LISTS, entityFacing, entityList, hasReactor, moveEntities, moveEntity,
+    removeEntity, segmentCentre, setExit,
 } from './entities.js';
 import {
     KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
@@ -790,11 +790,25 @@ function renderEntityTools(container, button, hint) {
                                (level) => addDoor(level, segment, side, key)));
                 el.disabled = !has;
             }
+            // Offered apart from the keys rather than as a fifth one, because
+            // it is not a key: it is the other lock, and it stacks with them.
+            // Gated on there being a reactor for the same reason a key door is
+            // gated on the key existing - without one the hatch never opens.
+            {
+                const reactor = hasReactor(app.level);
+                const el = button('Add emergency hatch',
+                    reactor ? 'sealed until the reactor is destroyed'
+                            : 'this level has no reactor, so a hatch could never open',
+                    () => edit(`hatch on ${segment} ${SIDE_NAMES[side]}`,
+                               (level) => addDoor(level, segment, side, -1, true)));
+                el.disabled = !reactor;
+            }
             return;
         }
         if (sd.door >= 0) {
             const door = app.level.doors[sd.door];
-            row(`door ${sd.door}, key ${door.key < 0 ? 'none' : KEY_NAMES[door.key]}`);
+            const lock = door.key < 0 ? 'none' : KEY_NAMES[door.key];
+            row(`door ${sd.door}, key ${lock}${door.hatch ? ', emergency hatch' : ''}`);
             button('Delete door', '', () => edit(`delete door ${sd.door}`,
                                                  (level) => removeEntity(level, 'door', sd.door)));
             return;

@@ -3,12 +3,14 @@
 #include "core/log.h"
 #include "core/alloc_count.h"
 #include "game/level.h"
+#include "sim/combat.h"
 #include "sim/gameflow.h"
 
 #include <lua.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -22,6 +24,30 @@ constexpr size_t kMaxMessageId = 64;
 constexpr size_t kMaxClipName = 64;
 constexpr size_t kMaxSpeaker = 32;
 constexpr size_t kMaxText = 512;
+
+// One optional number out of a declaration table. Absent leaves `out`
+// untouched, which is how a loadout field the script never mentioned keeps
+// the PlayerState default rather than being zeroed.
+bool optionalNumber(lua_State* state, int table, const char* field, const char* what, double low,
+                    double high, double& out) {
+    lua_getfield(state, table, field);
+    const bool present = !lua_isnil(state, -1);
+    if (present) {
+        const double value = luaL_checknumber(state, -1);
+        if (!std::isfinite(value) || value < low || value > high) {
+            lua_pop(state, 1);
+            // Formatted here rather than by luaL_error: Lua's own formatter
+            // has no %g, and handing it one aborts with a complaint about the
+            // format string instead of reporting the level's actual mistake.
+            char range[64];
+            std::snprintf(range, sizeof(range), "%g and %g", low, high);
+            luaL_error(state, "loadout %s must be between %s", what, range);
+        }
+        out = value;
+    }
+    lua_pop(state, 1);
+    return present;
+}
 
 const char* requiredString(lua_State* state, int table, const char* field) {
     lua_getfield(state, table, field);
@@ -45,6 +71,7 @@ void expose(lua_State* state, ScriptHost* host, const char* name, lua_CFunction 
 
 ScriptHost::ScriptHost() {
     callbacks_.fill(LUA_NOREF);
+    timerCallbacks_.fill(LUA_NOREF);
 }
 
 ScriptHost::~ScriptHost() {
@@ -78,12 +105,17 @@ ScriptHost* ScriptHost::self(lua_State* state) {
 void ScriptHost::clear() {
     draining_ = false;
     requestedMessage_ = -1;
+    requestedShields_ = -1.0f;
     level_ = nullptr;
     if (state_) lua_close(state_);
     state_ = nullptr;
     memory_.used = 0;
+    loadout_ = ScriptLoadout{};
+    loadoutDeclared_ = false;
     triggers_ = sim::TriggerSet{};
+    timers_ = sim::TimerSet{};
     callbacks_.fill(LUA_NOREF);
+    timerCallbacks_.fill(LUA_NOREF);
     messages_.clear();
     callbackErrors_ = 0;
 }
@@ -115,9 +147,12 @@ void ScriptHost::load(const Level& level) {
     removeGlobal(state_, "load");
     removeGlobal(state_, "loadfile");
 
+    expose(state_, this, "loadout", &ScriptHost::declareLoadout);
     expose(state_, this, "message", &ScriptHost::declareMessage);
     expose(state_, this, "trigger", &ScriptHost::declareTrigger);
+    expose(state_, this, "timer", &ScriptHost::declareTimer);
     expose(state_, this, "comm", &ScriptHost::startComm);
+    expose(state_, this, "set_shields", &ScriptHost::setShields);
 
     if (luaL_loadfile(state_, level.scriptPath.c_str()) != LUA_OK) {
         const char* error = lua_tostring(state_, -1);
@@ -133,8 +168,8 @@ void ScriptHost::load(const Level& level) {
                    error ? error : "unknown error");
     }
 
-    log::info("Lua script '{}': {} trigger(s), {} message(s)", level.scriptPath,
-              triggers_.count, messages_.size());
+    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} message(s)", level.scriptPath,
+              triggers_.count, timers_.count, messages_.size());
 }
 
 int ScriptHost::declareMessage(lua_State* state) {
@@ -164,6 +199,40 @@ int ScriptHost::declareMessage(lua_State* state) {
     if (host->findMessage(id) >= 0) return luaL_error(state, "duplicate message id '%s'", id);
 
     host->messages_.push_back({id, clip, speaker, text, seconds});
+    return 0;
+}
+
+int ScriptHost::declareLoadout(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->loadoutDeclared_) return luaL_error(state, "a level declares at most one loadout");
+
+    // Shields are the one field with no zero: at zero the level is already
+    // lost, and a level that starts lost is a level file bug rather than an
+    // authoring choice. Everything between there and the disabled threshold
+    // is legitimate - that band is how a level starts the ship crippled.
+    double value = 0.0;
+    if (optionalNumber(state, 1, "shields", "shields", 0.01,
+                       static_cast<double>(sim::kPlayerMaxShields), value)) {
+        host->loadout_.shields = static_cast<float>(value);
+    }
+    if (optionalNumber(state, 1, "energy", "energy", 0.0, 100.0, value)) {
+        host->loadout_.energy = static_cast<float>(value);
+    }
+    if (optionalNumber(state, 1, "vulcan", "vulcan ammo", 0.0, 50'000.0, value)) {
+        host->loadout_.vulcanAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "concussion", "concussion ammo", 0.0, 999.0, value)) {
+        host->loadout_.concussionAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "homing", "homing ammo", 0.0, 999.0, value)) {
+        host->loadout_.homingAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {
+        host->loadout_.flares = static_cast<int>(value);
+    }
+
+    host->loadoutDeclared_ = true;
     return 0;
 }
 
@@ -231,6 +300,58 @@ int ScriptHost::declareTrigger(lua_State* state) {
     return 0;
 }
 
+int ScriptHost::declareTimer(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->timers_.count >= sim::kMaxTimers) {
+        return luaL_error(state, "level exceeds the limit of %d timers", sim::kMaxTimers);
+    }
+
+    sim::TimerEvent timer;
+    lua_getfield(state, 1, "at");
+    timer.at = static_cast<float>(luaL_checknumber(state, -1));
+    lua_pop(state, 1);
+    // The floor is not fussiness. A timer at zero would be due on the level's
+    // very first step, before the player has seen a frame, and a period of
+    // zero would make a repeating timer due again on every step forever.
+    if (!std::isfinite(timer.at) || timer.at < 0.05f || timer.at > 3600.0f) {
+        return luaL_error(state, "timer at must be finite and between 0.05 and 3600 seconds");
+    }
+
+    lua_getfield(state, 1, "once");
+    if (!lua_isnil(state, -1)) timer.once = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+
+    lua_getfield(state, 1, "on_fire");
+    if (!lua_isfunction(state, -1)) return luaL_error(state, "timer on_fire must be a function");
+    const int callback = luaL_ref(state, LUA_REGISTRYINDEX);
+
+    const int index = host->timers_.count++;
+    host->timers_.items[static_cast<size_t>(index)] = timer;
+    host->timerCallbacks_[static_cast<size_t>(index)] = callback;
+    return 0;
+}
+
+// Hands the ship back, or takes it away. The one thing a script can change
+// about the player mid-level, and the reason the intro can start the ship
+// disabled and repair it on a cue.
+//
+// Latched rather than written, for the same reason comm() is: Lua runs
+// outside the fixed step and must not reach into simulation state. Whoever
+// drains the callbacks reads this and applies it. See takeShields().
+int ScriptHost::setShields(lua_State* state) {
+    ScriptHost* host = self(state);
+    const double value = luaL_checknumber(state, 1);
+    if (!host->draining_) return luaL_error(state, "set_shields() is only valid inside a callback");
+    if (!std::isfinite(value) || value < 0.0 ||
+        value > static_cast<double>(sim::kPlayerMaxShields)) {
+        return luaL_error(state, "set_shields expects a value between zero and full shields");
+    }
+
+    host->requestedShields_ = static_cast<float>(value);
+    return 0;
+}
+
 int ScriptHost::startComm(lua_State* state) {
     ScriptHost* host = self(state);
     const char* id = luaL_checkstring(state, 1);
@@ -267,6 +388,7 @@ bool ScriptHost::call(int functionRef, const char* context) {
 void ScriptHost::drain(sim::GameState& game) {
     if (!state_) {
         game.triggers.clearPending();
+        game.timers.clearPending();
         return;
     }
 
@@ -281,8 +403,22 @@ void ScriptHost::drain(sim::GameState& game) {
             callback = LUA_NOREF;
         }
     }
+
+    // Timers after volumes, so that within one frame a place the player has
+    // just flown into is heard from before a moment that merely came round.
+    const int timerCount = game.timers.pendingCount;
+    for (int i = 0; i < timerCount; ++i) {
+        const int timer = game.timers.pending[static_cast<size_t>(i)];
+        int& callback = timerCallbacks_[static_cast<size_t>(timer)];
+        if (callback == LUA_NOREF) continue;
+        if (!call(callback, "timer callback")) {
+            luaL_unref(state_, LUA_REGISTRYINDEX, callback);
+            callback = LUA_NOREF;
+        }
+    }
     draining_ = false;
     game.triggers.clearPending();
+    game.timers.clearPending();
 }
 
 const ScriptMessage* ScriptHost::message(int index) const {
@@ -294,6 +430,12 @@ int ScriptHost::takeMessage() {
     const int message = requestedMessage_;
     requestedMessage_ = -1;
     return message;
+}
+
+float ScriptHost::takeShields() {
+    const float shields = requestedShields_;
+    requestedShields_ = -1.0f;
+    return shields;
 }
 
 static int runOneScriptTest(const std::string& levelPath) {
@@ -356,6 +498,15 @@ static int runOneScriptTest(const std::string& levelPath) {
     log::info("script-test: {} trigger(s), callbacks healthy, 10000 evaluations and {} allocation(s): passed",
               host.triggers().count, allocationCount);
     return 0;
+}
+
+void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player) {
+    if (loadout.shields >= 0.0f) player.shields = loadout.shields;
+    if (loadout.energy >= 0.0f) player.energy = loadout.energy;
+    if (loadout.vulcanAmmo >= 0) player.vulcanAmmo = loadout.vulcanAmmo;
+    if (loadout.concussionAmmo >= 0) player.concussionAmmo = loadout.concussionAmmo;
+    if (loadout.homingAmmo >= 0) player.homingAmmo = loadout.homingAmmo;
+    if (loadout.flares >= 0) player.flares = loadout.flares;
 }
 
 int runScriptTest(const std::string& levelPath) {

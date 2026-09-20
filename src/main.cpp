@@ -314,6 +314,17 @@ int main(int argc, char** argv) {
     session.load(level, robotConfig, opts.startSegment);
     dvk::SimState& prev = session.previous();
     dvk::SimState& cur = session.current();
+    // What the level's script says the player starts with. On `initial()` for
+    // the same reason the headlight below is: that is the state every start
+    // and every restart is copied from, and the live states are only written
+    // here as well so a run that never calls start() - a screenshot, a
+    // frame-limited pass - still shows the loadout the level asked for.
+    const auto applySessionLoadout = [&] {
+        dvk::applyLoadout(script.loadout(), session.initial().combat.player);
+        dvk::applyLoadout(script.loadout(), prev.combat.player);
+        dvk::applyLoadout(script.loadout(), cur.combat.player);
+    };
+    applySessionLoadout();
     // The headlight is off at the start, so a frame-limited run has no way to
     // show it without someone pressing H. Both states have to be screenshot-
     // able for the retune to be checkable at all. Set on the initial state
@@ -394,8 +405,12 @@ int main(int argc, char** argv) {
     // still hear all three.
     dvk::sim::EventQueue soundEvents;
 
-    dvk::CameraMode camera =
-        opts.chase ? dvk::CameraMode::Chase : dvk::CameraMode::FirstPerson;
+    // Chase is the view the game opens in. --chase asked for exactly this
+    // back when first person was the default, so it is now a no-op rather
+    // than a removal: a command line or a habit that still passes it keeps
+    // working and simply gets what it would have got anyway. F1 is how you
+    // get to first person, and still is.
+    dvk::CameraMode camera = dvk::CameraMode::Chase;
 
     // F3 brings the debug panels back. Off by default, because from M7 the HUD
     // is what the player reads and the panels are for tuning.
@@ -460,6 +475,7 @@ int main(int argc, char** argv) {
         renderer.setLevel(level);
         session.load(level, robotConfig, opts.startSegment);
         loadScript();
+        applySessionLoadout();
         activeCommMessage = -1;
         activeCommClip = 0;
         commPlayer.stop();
@@ -963,7 +979,7 @@ int main(int argc, char** argv) {
                                                 &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
-                               &script.triggers());
+                               &script.triggers(), &script.timers());
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -991,6 +1007,15 @@ int main(int argc, char** argv) {
         // this rendered frame has already latched its trigger ids into POD
         // state; callbacks may allocate without compromising sim determinism.
         script.drain(cur.game);
+        // A callback asking for the ship back. Applied to the live state only:
+        // this is something that happened during the run, not a condition the
+        // run begins from, and writing it to initial() would carry it across a
+        // restart and skip the opening it belongs to. The disabled flag is
+        // recomputed from shields at the top of every step, so the ship flies
+        // again on the next one with nothing else to do.
+        if (const float shields = script.takeShields(); shields >= 0.0f) {
+            cur.combat.player.shields = shields;
+        }
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 activeCommMessage = requested;

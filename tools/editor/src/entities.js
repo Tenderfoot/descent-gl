@@ -176,7 +176,11 @@ function normalise(v, fallback) {
 // A door fills a portal. The game is fatal on a door anywhere else - there
 // would be nothing for it to open into - so this refuses rather than letting
 // the author find out from the validator.
-export function addDoor(level, segment, side, key = -1) {
+//
+// `hatch` is the second, independent lock: an emergency hatch stays shut
+// until the reactor is destroyed, whatever keys the player is carrying. A
+// door may carry both, in which case it wants the key and the reactor.
+export function addDoor(level, segment, side, key = -1, hatch = false) {
     const sd = level.segments[segment].sides[side];
     if (sd.neighbour < 0) {
         throw new Error(`segment ${segment} ${SIDE_NAMES[side]} is a solid wall. A door has to be ` +
@@ -190,6 +194,7 @@ export function addDoor(level, segment, side, key = -1) {
         segment,
         side,
         key,
+        hatch,
         openDistance: DEFAULTS.doorOpenDistance,
         openTime: DEFAULTS.doorOpenTime,
         closeDelay: DEFAULTS.doorCloseDelay,
@@ -348,6 +353,17 @@ export function rewireDoors(level) {
 }
 
 // --- validation helpers the UI uses ----------------------------------------
+
+// Is there a reactor to destroy? An emergency hatch in a level without one
+// can never open, which is the same trap as a key that is never placed, so
+// the door editor asks this before offering a hatch.
+//
+// By robot type name, because that is all a level file says: the reactor is
+// an object whose type the robot config marks isReactor, and 'reactor' is
+// what that type is called.
+export function hasReactor(level) {
+    return level.objects.some((object) => object.type === 'reactor');
+}
 
 // Which key colours are collectable in this level, so the door editor cannot
 // offer a key that does not exist and gate the mine shut forever.

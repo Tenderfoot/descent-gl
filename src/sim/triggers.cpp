@@ -32,4 +32,26 @@ void stepTriggers(TriggerState& state, const Body& player, const TriggerSet* tri
     }
 }
 
+void stepTimers(TimerState& state, float elapsed, const TimerSet* timers) {
+    if (!timers) return;
+
+    const int count = std::clamp(timers->count, 0, kMaxTimers);
+    for (int i = 0; i < count; ++i) {
+        const TimerEvent& timer = timers->items[static_cast<size_t>(i)];
+        const size_t ti = static_cast<size_t>(i);
+        if (state.consumed[ti] != 0 || state.latched[ti] != 0) continue;
+
+        // A repeating timer's nth firing is due at n periods, counted from the
+        // level's start rather than from the last firing. Accumulating a delta
+        // instead would let a timer drift by however long a frame hitched.
+        const float due = timer.at * static_cast<float>(state.fired[ti] + 1);
+        if (elapsed < due) continue;
+
+        if (state.fired[ti] < 0xFFFFu) ++state.fired[ti];
+        state.latched[ti] = 1;
+        state.pending[static_cast<size_t>(state.pendingCount++)] = static_cast<uint8_t>(i);
+        if (timer.once) state.consumed[ti] = 1;
+    }
+}
+
 } // namespace dvk::sim
