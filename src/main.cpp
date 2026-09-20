@@ -1109,19 +1109,6 @@ int main(int argc, char** argv) {
                    session.mode() != dvk::AppMode::RunSummary;
         hud.shields = cur.combat.player.shields;
         hud.energy = cur.combat.player.energy;
-        hud.primaryWeaponName = dvk::sim::kWeaponNames[
-            static_cast<size_t>(cur.combat.player.primaryWeapon)];
-        hud.primaryLaserLevel = cur.combat.player.primaryWeapon == dvk::sim::WeaponLaser
-                                    ? cur.combat.player.laserLevel
-                                    : 0;
-        hud.primaryAmmo = cur.combat.player.primaryWeapon == dvk::sim::WeaponVulcan
-                              ? cur.combat.player.vulcanAmmo
-                              : -1;
-        hud.secondaryWeaponName = dvk::sim::kWeaponNames[
-            static_cast<size_t>(cur.combat.player.secondaryWeapon)];
-        hud.secondaryAmmo = cur.combat.player.secondaryWeapon == dvk::sim::WeaponHoming
-                                ? cur.combat.player.homingAmmo
-                                : cur.combat.player.concussionAmmo;
         hud.flares = cur.combat.player.flares;
         dvk::fillWeaponSlots(cur.combat.player, weapons, settings.bindings,
                              static_cast<float>(kSimStep), hud);

@@ -15,9 +15,11 @@ void fillSlot(gl::HudWeaponSlot& slot, sim::WeaponId weapon, PlayerAction key,
     // and the whole of what a change to that would have to rewrite.
     slot.available = true;
 
-    // A cell for a weapon the player is not carrying keeps its place in the row
-    // and goes nameless, which is what the strip draws as an empty mount.
-    slot.name = slot.available ? sim::kWeaponShortNames[static_cast<size_t>(weapon)] : "";
+    // Named whether or not it is carried: the strip sizes the cell from the
+    // name, so a mount that lost its name would collapse and take the rest of
+    // the row sideways with it. `available` is what decides whether the name is
+    // drawn.
+    slot.name = sim::kWeaponShortNames[static_cast<size_t>(weapon)];
     const int* ammo = sim::weaponAmmoPool(player, weapon);
     slot.ammo = ammo ? *ammo : -1;
     slot.level = weapon == sim::WeaponLaser ? player.laserLevel : 0;

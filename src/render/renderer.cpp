@@ -18,6 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -860,31 +861,217 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
                   barH + 3.0f * s, glm::vec4(0.85f, 0.9f, 1.0f, 0.65f));
     }
 
-    // Primary and secondary loadout, bottom right.
+    // What the soundtrack marquee takes out of the bottom right, computed here
+    // because the strip has to be laid out around it and is laid out first.
+    // Reaching the other way - fitting the marquee into whatever the strip left
+    // over - would let the least important readout on the HUD decide where one
+    // of the most important ones goes.
+    const float musicPlateW = std::min(w * 0.30f, 74.0f * s);
+
+    // The weapon strip, bottom centre: one cell per gun, drawn from the row the
+    // game layer filled. The renderer never asks what a weapon is - only how
+    // wide its name is and which of four states its cell is in.
+    //
+    // Every cell is sized for its name plus a four-digit count rather than for
+    // the count it happens to be showing, so a number falling from 1000 to 999
+    // cannot shuffle the row sideways while the player is reading it. The same
+    // property is what lets a weapon the player is not carrying hold its place
+    // as an empty mount.
     {
-        std::string primary = "primary  ";
-        primary += hud.primaryWeaponName;
-        if (hud.primaryLaserLevel > 0 && std::string_view(hud.primaryWeaponName) == "laser") {
-            primary += " " + std::to_string(hud.primaryLaserLevel);
+        const float capScale = s * 0.5f;
+        const float keyScale = s * 0.55f;
+        const float nameScale = s * 0.75f;
+        const float pad = 3.0f * s;
+        const float cellPad = 2.5f * s;
+        const float groupGap = 6.0f * s;
+        const float rule = std::max(1.0f, 0.8f * s);
+        const float space = static_cast<float>(font::kAdvance) * nameScale;
+        const float countW = hud_.textWidth("0000", nameScale);
+
+        const glm::vec4 accent(0.35f, 0.92f, 1.0f, 0.85f);
+        const glm::vec4 caption(0.62f, 0.72f, 0.82f, 0.85f);
+        // Four states, told apart by brightness rather than by shape: the gun in
+        // hand, one ready to be chosen, one that cannot fire for want of ammo or
+        // energy, and a mount with nothing in it. A cell is never removed - the
+        // player learns where each gun sits and the row has to keep it there.
+        const glm::vec4 held(0.88f, 0.93f, 1.0f, 0.95f);
+        const glm::vec4 ready(0.55f, 0.66f, 0.78f, 0.78f);
+        const glm::vec4 spent(0.55f, 0.66f, 0.78f, 0.32f);
+        const glm::vec4 bare(0.45f, 0.55f, 0.66f, 0.22f);
+
+        const float capH = 7.0f * capScale;
+        const float keyH = 7.0f * keyScale;
+        const float nameH = 7.0f * nameScale;
+        const float capY = pad;
+        const float keyY = capY + capH + 2.0f * s;
+        const float nameY = keyY + keyH + 1.5f * s;
+        const float underY = nameY + nameH + 1.5f * s;
+        const float rowH = underY + rule + pad;
+
+        // Into a buffer rather than into a string: this is the draw path, and
+        // the loadout text this replaced allocated once a frame doing it.
+        const auto digits = [](int value, char* out, size_t size) -> const char* {
+            const std::to_chars_result result = std::to_chars(out, out + size - 1, value);
+            if (result.ec != std::errc()) {
+                out[0] = '\0';
+                return out;
+            }
+            *result.ptr = '\0';
+            return out;
+        };
+        // "(1)", "(G)". The font runs 32..90 and stops at 'Z', so there are no
+        // brackets to put a key in and it wears parentheses instead.
+        const auto parens = [](const char* key, char* out, size_t size) -> const char* {
+            size_t n = 0;
+            if (key && key[0] && size >= 3) {
+                out[n++] = '(';
+                for (const char* c = key; *c && n + 2 < size; ++c) out[n++] = *c;
+                out[n++] = ')';
+            }
+            out[n] = '\0';
+            return out;
+        };
+
+        // Which cells ever show a number at all: the laser its level, the three
+        // that spend a count their count. The railgun and the lightning gun run
+        // on energy and show none, so they are not padded for one.
+        const auto counted = [](const HudWeaponSlot& slot) {
+            return slot.ammo >= 0 || slot.level > 0;
+        };
+        const auto cellWidth = [&](const HudWeaponSlot& slot) {
+            return cellPad * 2.0f + hud_.textWidth(slot.name, nameScale) +
+                   (counted(slot) ? space + countW : 0.0f);
+        };
+
+        const auto drawCell = [&](const HudWeaponSlot& slot, float x, float top, float cw,
+                                  bool showKey) {
+            const glm::vec4 color = !slot.available ? bare
+                                    : slot.selected ? held
+                                    : !slot.usable  ? spent
+                                                    : ready;
+            if (showKey) {
+                char keyBuf[16];
+                const char* key = parens(slot.key, keyBuf, sizeof(keyBuf));
+                hud_.text(key, x + (cw - hud_.textWidth(key, keyScale)) * 0.5f, top + keyY,
+                          keyScale, color);
+            }
+            // An empty mount is its key and nothing else. The player can see
+            // there is a gun missing and which key would reach for it.
+            if (!slot.available) return;
+
+            char countBuf[12];
+            const char* count = "";
+            if (counted(slot)) {
+                count = digits(slot.level > 0 ? slot.level : slot.ammo, countBuf,
+                               sizeof(countBuf));
+            }
+            const float nameW = hud_.textWidth(slot.name, nameScale);
+            const float countTextW = count[0] ? space + hud_.textWidth(count, nameScale) : 0.0f;
+            const float textX = x + (cw - nameW - countTextW) * 0.5f;
+            hud_.text(slot.name, textX, top + nameY, nameScale, color);
+            if (count[0]) {
+                hud_.text(count, textX + nameW + space, top + nameY, nameScale, color);
+            }
+            if (slot.selected) {
+                hud_.rect(x + cellPad, top + underY, cw - cellPad * 2.0f, rule, accent);
+            }
+        };
+
+        const auto groupWidth = [&](const HudWeaponSlot* cells, int count) {
+            float total = 0.0f;
+            for (int i = 0; i < count; ++i) total += cellWidth(cells[i]);
+            return total;
+        };
+
+        // A group whose weapons share one key says it once, centred over the
+        // pair, and its cells carry none of their own. Both missiles answer to
+        // the same key, and a row with it printed twice reads as a mistake
+        // rather than as one control over two guns.
+        const auto drawGroup = [&](const char* label, const char* groupKey,
+                                   const HudWeaponSlot* cells, int count, float x, float top) {
+            const bool shared = groupKey && groupKey[0];
+            hud_.text(label, x + cellPad, top + capY, capScale, caption);
+            if (shared) {
+                char keyBuf[16];
+                const char* key = parens(groupKey, keyBuf, sizeof(keyBuf));
+                hud_.text(key, x + (groupWidth(cells, count) - hud_.textWidth(key, keyScale)) * 0.5f,
+                          top + keyY, keyScale, accent);
+            }
+            float cellX = x;
+            for (int i = 0; i < count; ++i) {
+                const float cw = cellWidth(cells[i]);
+                if (i > 0) {
+                    hud_.rect(cellX, top + keyY - 1.0f * s, std::max(1.0f, s * 0.35f),
+                              nameY + nameH - keyY + 2.0f * s,
+                              glm::vec4(0.55f, 0.66f, 0.78f, 0.22f));
+                }
+                drawCell(cells[i], cellX, top, cw, !shared);
+                cellX += cw;
+            }
+        };
+
+        // Flares are not a weapon and get no cell in either group: they are a
+        // throw, not a selection, and the strip says so by standing them apart.
+        char flareKeyBuf[16];
+        const char* flareKey = parens(hud.flareKey, flareKeyBuf, sizeof(flareKeyBuf));
+        const float chipW =
+            cellPad * 2.0f + std::max({hud_.textWidth(flareKey, keyScale), countW,
+                                       hud_.textWidth("flare", capScale)});
+        const auto drawChip = [&](float x, float top) {
+            const glm::vec4 color = hud.flares > 0 ? ready : spent;
+            hud_.text("flare", x + cellPad, top + capY, capScale, caption);
+            hud_.text(flareKey, x + (chipW - hud_.textWidth(flareKey, keyScale)) * 0.5f,
+                      top + keyY, keyScale, color);
+            char countBuf[12];
+            const char* count = digits(hud.flares, countBuf, sizeof(countBuf));
+            hud_.text(count, x + (chipW - hud_.textWidth(count, nameScale)) * 0.5f, top + nameY,
+                      nameScale, color);
+        };
+
+        const float primaryW = groupWidth(hud.primaries, HudData::kPrimarySlots);
+        const float missileW = groupWidth(hud.secondaries, HudData::kSecondarySlots);
+        const float tail = missileW + groupGap + chipW;
+        const float oneRow = pad * 2.0f + primaryW + groupGap + tail;
+
+        // One row, centred on the bottom edge, with the gauges holding the left
+        // corner and the marquee the right. It folds to two rows only when a
+        // single one would reach into one of them: the strip is the same number
+        // of pixels at every window size and the window is not, so at some
+        // width it has to fold rather than shrink - the font is a bitmap and
+        // stops being readable well before it stops being small.
+        const float leftCorner = left + barW + 6.0f * s;
+        const float rightCorner = (hud.musicShow ? musicPlateW : 0.0f) + 6.0f * s;
+        const bool wrapped = oneRow > w - leftCorner - rightCorner;
+        const float plateW =
+            wrapped ? pad * 2.0f + std::max(primaryW, tail) : oneRow;
+        const float plateH = wrapped ? rowH * 2.0f - pad : rowH;
+        const float plateX = cx - plateW * 0.5f;
+        const float plateY = h - 8.0f * s - plateH;
+        const float rightEdge = plateX + plateW - pad;
+
+        hud_.rect(plateX, plateY, plateW, plateH, glm::vec4(0.015f, 0.025f, 0.04f, 0.72f));
+        hud_.rect(plateX, plateY, plateW, rule, glm::vec4(accent.r, accent.g, accent.b, 0.55f));
+
+        if (wrapped) {
+            const float second = plateY + rowH - pad;
+            drawGroup("primary", nullptr, hud.primaries, HudData::kPrimarySlots,
+                      rightEdge - primaryW, plateY);
+            drawGroup("missile", hud.secondaries[0].key, hud.secondaries,
+                      HudData::kSecondarySlots, rightEdge - tail, second);
+            drawChip(rightEdge - chipW, second);
+        } else {
+            drawGroup("primary", nullptr, hud.primaries, HudData::kPrimarySlots,
+                      rightEdge - primaryW - groupGap - tail, plateY);
+            drawGroup("missile", hud.secondaries[0].key, hud.secondaries,
+                      HudData::kSecondarySlots, rightEdge - tail, plateY);
+            drawChip(rightEdge - chipW, plateY);
         }
-        if (hud.primaryAmmo >= 0) primary += "  " + std::to_string(hud.primaryAmmo);
-        const float primaryW = hud_.textWidth(primary, s * 0.8f);
-        hud_.text(primary, w - left - primaryW, h - 8.0f * s - 7.0f * s, s * 0.8f, white);
-
-        std::string secondary = "secondary  ";
-        secondary += hud.secondaryWeaponName;
-        if (hud.secondaryAmmo >= 0) secondary += "  " + std::to_string(hud.secondaryAmmo);
-        const float secondaryW = hud_.textWidth(secondary, s * 0.8f);
-        hud_.text(secondary, w - left - secondaryW, h - 8.0f * s - 17.0f * s,
-                  s * 0.8f, white);
-
-        const std::string flares = "flares " + std::to_string(hud.flares);
-        const float fw = hud_.textWidth(flares, s * 0.7f);
-        hud_.text(flares, w - left - fw, h - 8.0f * s - 27.0f * s, s * 0.7f, dim);
     }
 
-    // The soundtrack, bottom centre, between the two corners the bars and the
-    // loadout already hold. A marquee because the plate has to be small - this
+    // The soundtrack, bottom right. It held the middle of this edge until the
+    // weapon strip took it, which is the right way round: what the player checks
+    // mid-fight belongs where they are already looking, and the name of a song
+    // belongs in the corner. A marquee because the plate has to be small - this
     // is the least important thing on the HUD and must not compete with the
     // gauges - and a track's name will not always fit in something that small.
     //
@@ -892,9 +1079,9 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // under them. The caption is what makes the name a soundtrack rather than
     // an unexplained line of text at the bottom of the screen.
     if (hud.musicShow) {
-        const float plateW = std::min(w * 0.30f, 74.0f * s);
+        const float plateW = musicPlateW;
         const float plateH = 17.0f * s;
-        const float x = cx - plateW * 0.5f;
+        const float x = w - left - plateW;
         const float y = h - 8.0f * s - plateH;
         const float pad = 3.0f * s;
         const float captionScale = s * 0.5f;

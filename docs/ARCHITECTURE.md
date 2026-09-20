@@ -1566,10 +1566,48 @@ alongside ImGui. It is axis-aligned and gains nothing from multisampling, so
 resolving first costs nothing and keeps the HUD out of the shadow and lighting
 passes entirely.
 
-`HudData` is a **flat struct of values the game layer fills in** — bars, weapon
-name, ammo, keys, countdown, phase, message. The renderer never reaches into
+`HudData` is a **flat struct of values the game layer fills in** — bars, the
+weapon strip, keys, countdown, phase, message. The renderer never reaches into
 `GameState` or `CombatState` to draw the HUD, which is what keeps `src/render`
 free of simulation types.
+
+### The weapon strip is a row of cells, not a pair of weapon names
+
+The loadout along the bottom centre is drawn from `HudData::primaries` and
+`HudData::secondaries`, fixed arrays of `HudWeaponSlot`: a key label, a short
+name, a count, and flags for selected, carried and firable. `fillWeaponSlots`
+(`src/game/hud_slots.h`) writes them.
+
+The renderer never learns what a weapon is. Which guns exist, what order they
+sit in and which key each answers to are the game layer's, because it is the
+only place that knows both the `WeaponId` enum and the player's current
+bindings: the primaries follow `kWeaponSelectActions` and the missiles
+`kSecondaryWeapons`, and neither order is the enum's. Two `static_assert`s tie
+the row's length to those two lists.
+
+Three properties are load-bearing rather than cosmetic:
+
+- **Cells are sized for a four-digit count, not for the count they are
+  showing.** A number falling from 1000 to 999 would otherwise shuffle the row
+  sideways while the player is reading it.
+- **`available` is separate from `name`.** Every gun is carried from the first
+  frame today, so it is always true; a cell drawn without it keeps its place and
+  its key and shows an empty mount. Should weapons become something to find, the
+  change is to the game layer and `src/render` is not touched.
+- **`usable` comes from `sim::weaponReady`, the same predicate `stepCombat`
+  refuses a shot with.** A cell dimmed for want of ammo or energy and a trigger
+  that will not fire are one judgement, not two that agree by habit. The fire
+  interval is deliberately outside it: a gun between shots is not an empty gun,
+  and a cell that folded the cooldown in would blink at the rate of fire.
+
+Counts are formatted with `std::to_chars` into stack buffers. The text readout
+this replaced concatenated `std::string`s and allocated in the draw path for it.
+
+The soundtrack marquee sits in the bottom right rather than the bottom centre,
+which is the strip's now: what the player checks mid-fight belongs where they
+are already looking. The strip is laid out first and the marquee's width is
+computed before both, so the least important readout on the HUD cannot decide
+where the most important one goes.
 
 ### The reticle follows the guns, not the window
 

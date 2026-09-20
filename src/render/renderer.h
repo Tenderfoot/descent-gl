@@ -79,6 +79,10 @@ struct HudWeaponSlot {
     // Short enough to fit a cell: the strip has no room for "concussion". Points
     // at static storage, so naming a weapon costs no allocation in the draw
     // path.
+    //
+    // Set whether or not the weapon is carried, because the cell is sized from
+    // it either way: a name that vanished with the gun would collapse the cell
+    // and move every cell after it.
     const char* name = "";
     int ammo = -1;          // -1 when the weapon runs on energy rather than a count
     int level = 0;          // laser's upgrade level; 0 for every other weapon
@@ -86,7 +90,8 @@ struct HudWeaponSlot {
     // Whether the weapon is carried at all. Always true today, because every gun
     // is available from the first frame. It is a field rather than an assumption
     // so that the strip already has somewhere to read the answer from if that
-    // ever stops being true.
+    // ever stops being true - false draws the cell as an empty mount, keeping
+    // its place and its key and showing neither name nor count.
     bool available = true;
     // Whether it could fire this instant: a count that is not zero, or energy
     // that covers a shot. False is a dimmer cell, never a hidden one - a player
@@ -114,14 +119,8 @@ struct HudData {
     // and names its key the same way the cells do.
     char flareKey[8] = "";
 
-    // The loadout as the text readout states it. Superseded by the slots above
-    // and still what the bottom-right text draws from; fill both while both are
-    // read, or the two will disagree.
-    const char* primaryWeaponName = "laser";
-    int primaryLaserLevel = 1;
-    int primaryAmmo = -1;          // -1 when the weapon runs on energy
-    const char* secondaryWeaponName = "concussion";
-    int secondaryAmmo = 0;
+    // Flares have no slot of their own: they are a throw rather than a
+    // selection, and the strip stands their count apart from the two groups.
     int flares = 0;
     bool keys[3] = {false, false, false};
     float countdown = -1.0f;   // < 0 when the reactor is still standing
