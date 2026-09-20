@@ -1362,6 +1362,29 @@ void Renderer::buildMenu(const MenuView& menu) {
             hud_.rect(button.bounds.x, button.bounds.y, std::max(3.0f, scale),
                       button.bounds.height, accent);
         }
+        if (button.scrollRows != 0) {
+            // A scroll arrow is drawn rather than written: the font stops at
+            // 'Z' and has no such glyph. Rows of a triangle, dimmed once the
+            // list has nothing left to scroll that way.
+            const glm::vec4 ink =
+                button.enabled ? white : glm::vec4(dim.x, dim.y, dim.z, 0.30f);
+            const bool up = button.scrollRows < 0;
+            const float size =
+                std::min(button.bounds.width * 0.52f, button.bounds.height * 0.40f);
+            const float centerX = button.bounds.x + button.bounds.width * 0.5f;
+            const float arrowTop = button.bounds.y + (button.bounds.height - size) * 0.5f;
+            constexpr int kArrowRows = 5;
+            const float arrowRow = size / static_cast<float>(kArrowRows);
+            for (int row = 0; row < kArrowRows; ++row) {
+                // Widest at the base, a single row at the tip.
+                const float half = size * 0.5f * static_cast<float>(row + 1) /
+                                   static_cast<float>(kArrowRows);
+                const float y = up ? arrowTop + static_cast<float>(row) * arrowRow
+                                   : arrowTop + size - static_cast<float>(row + 1) * arrowRow;
+                hud_.rect(centerX - half, y, half * 2.0f, arrowRow, ink);
+            }
+            continue;
+        }
         const float labelScale = scale * 0.9f;
         const bool hasValue = button.value[0] != '\0';
         const float labelWidth = hud_.textWidth(button.label, labelScale);
