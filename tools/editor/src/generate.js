@@ -17,7 +17,7 @@
 
 import { addDoor, addLight, addObject, addPickup, segmentCentre, setExit } from './entities.js';
 import { newLevel } from './create.js';
-import { SIDE_VERTICES } from './format.js';
+import { SIDE_VERTICES, WALL_TILE_NAMES } from './format.js';
 import { add, insideSegment, scale } from './geometry.js';
 import { extrudeSide, joinSides, moveVertices, setTexture } from './ops.js';
 import { validateLevel } from './validate.js';
@@ -49,10 +49,15 @@ const ROOM = CELL[0];
 // Which pitch a side extrudes along. left/right x, top/bottom y, back/front z.
 const SIDE_PITCH = [CELL[0], CELL[1], CELL[0], CELL[1], CELL[2], CELL[2]];
 
-// Wall tiles, from src/render/procedural.h.
-const WALL_ROCK = 0;
-const WALL_PANEL = 1;
-const WALL_GRATE = 3;
+// Wall tiles by name rather than by index. The set is assets/textures/tiles.json
+// now, so which layer 'grate' is depends on what the manifest lists; the
+// generator asks for a material and lets the set answer. The fallback is the
+// shipped index, for the tests, which run this module with no server to read
+// the manifest from.
+const tileLayer = (name, shipped) => {
+    const layer = WALL_TILE_NAMES.indexOf(name);
+    return layer < 0 ? shipped : layer;
+};
 
 // Pickup kinds, from src/game/level.h: shield, energy, laser, concussion,
 // homing, flares, then the three keys.
@@ -452,6 +457,10 @@ function roughen(level, rng, segmentOf, rock, roughness, options) {
 // Rock takes the rock tile. Built rooms alternate panel and grate by run, so a
 // built stretch is one material rather than a chequerboard.
 function paint(level, rng, segmentOf, rock) {
+    const WALL_ROCK = tileLayer('rock', 0);
+    const WALL_PANEL = tileLayer('panel', 1);
+    const WALL_GRATE = tileLayer('grate', 3);
+
     let builtTile = rng() < 0.5 ? WALL_PANEL : WALL_GRATE;
     let left = 0;
     for (let cell = 0; cell < segmentOf.length; ++cell) {

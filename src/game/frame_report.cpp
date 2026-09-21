@@ -74,15 +74,15 @@ void reportGpu(const gl::GpuTimers& timers) {
         return;
     }
     const float total = timers.pass(gl::GpuTimers::Prepass) + timers.pass(gl::GpuTimers::Lights) +
-                        timers.pass(gl::GpuTimers::Unlit);
+                        timers.pass(gl::GpuTimers::Emissive) + timers.pass(gl::GpuTimers::Unlit);
     log::info(
-        "gpu (last frame): prepass {:.3f} ms, all lights {:.3f}, unlit {:.3f}, total "
-        "{:.3f} ms over {} light(s); first {} slots: stencil {:.3f}, lighting {:.3f}; "
+        "gpu (last frame): prepass {:.3f} ms, all lights {:.3f}, emissive {:.3f}, unlit {:.3f}, "
+        "total {:.3f} ms over {} light(s); first {} slots: stencil {:.3f}, lighting {:.3f}; "
         "worst timed light {} at {:.3f} ms",
         timers.pass(gl::GpuTimers::Prepass), timers.pass(gl::GpuTimers::Lights),
-        timers.pass(gl::GpuTimers::Unlit), total, timers.lightCount(), timers.timedLightCount(),
-        timers.stencilTotal(), timers.lightingTotal(), timers.worstLight(),
-        timers.worstLightMs());
+        timers.pass(gl::GpuTimers::Emissive), timers.pass(gl::GpuTimers::Unlit), total,
+        timers.lightCount(), timers.timedLightCount(), timers.stencilTotal(),
+        timers.lightingTotal(), timers.worstLight(), timers.worstLightMs());
 }
 
 } // namespace dvk

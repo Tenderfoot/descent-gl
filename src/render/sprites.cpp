@@ -9,10 +9,7 @@
 #include <utility>
 
 namespace dvk::gl {
-namespace {
 
-// Area-average `src` (srcSize square, RGBA) down to `dstSize` square.
-//
 // The sprites are authored far larger than they are ever drawn - a pickup is a
 // hundred pixels on screen at most - so they are resampled once at load rather
 // than costing twenty times the VRAM and the mip chain to match. A box filter
@@ -44,6 +41,8 @@ std::vector<uint8_t> downsample(const uint8_t* src, int srcSize, int dstSize) {
     }
     return dst;
 }
+
+namespace {
 
 // Carries the colour of the opaque pixels outward into the transparent ones,
 // a ring at a time, leaving the alpha channel alone.

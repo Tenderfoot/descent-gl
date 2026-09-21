@@ -136,6 +136,7 @@ void drawDebugUi(DebugUiContext& ctx) {
             } else {
                 const float total = gt.pass(dvk::gl::GpuTimers::Prepass) +
                                     gt.pass(dvk::gl::GpuTimers::Lights) +
+                                    gt.pass(dvk::gl::GpuTimers::Emissive) +
                                     gt.pass(dvk::gl::GpuTimers::Unlit);
                 ImGui::Text("depth prepass %6.3f ms", gt.pass(dvk::gl::GpuTimers::Prepass));
                 ImGui::Text("all lights    %6.3f ms   (%d drawn)",
@@ -144,6 +145,7 @@ void drawDebugUi(DebugUiContext& ctx) {
                             gt.timedLightCount());
                 ImGui::Text("  lighting    %6.3f ms   (first %d slots)", gt.lightingTotal(),
                             gt.timedLightCount());
+                ImGui::Text("emissive      %6.3f ms", gt.pass(dvk::gl::GpuTimers::Emissive));
                 ImGui::Text("unlit         %6.3f ms", gt.pass(dvk::gl::GpuTimers::Unlit));
                 ImGui::Separator();
                 ImGui::Text("gpu total     %6.3f ms", total);

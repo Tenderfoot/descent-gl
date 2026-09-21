@@ -16,6 +16,7 @@ import {
 } from './entities.js';
 import {
     KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
+    setWallTileNames,
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkLevelName, checkName, newLevel } from './create.js';
@@ -23,9 +24,10 @@ import { GENERATED_MARK, generateMine } from './generate.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
+import { add, scale, sideCorners } from './geometry.js';
 import {
-    deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setTexture,
-    splitPortal,
+    deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setEmissive,
+    setTexture, splitPortal,
 } from './ops.js';
 import {
     centroid, groupTransform, IDENTITY_QUAT, transformPoints,
@@ -324,6 +326,21 @@ function replaceLevel(next) {
 
 // --- loading and saving -----------------------------------------------------
 
+// The tile names the game would load, so the picker offers what the manifest
+// has rather than what this file was last told about. A set that will not load
+// is not worth stopping the editor over - the names in format.js still let
+// every existing level be edited - so this reports and carries on.
+async function loadTileNames() {
+    try {
+        const response = await fetch('/api/textures');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const { tiles } = await response.json();
+        setWallTileNames(tiles);
+    } catch (e) {
+        console.warn(`could not read assets/textures/tiles.json (${e.message}); using the built-in tile names`);
+    }
+}
+
 async function listLevels() {
     const response = await fetch('/api/levels');
     if (!response.ok) throw new Error(`could not list levels (${response.status})`);
@@ -599,6 +616,41 @@ function renderTools() {
             textures.appendChild(el);
         });
         container.appendChild(textures);
+
+        // How brightly the side emits on top of the light that reaches it.
+        const emits = document.createElement('label');
+        emits.className = 'field';
+        emits.append('emits');
+        emits.title = 'Brightness the side adds on its own. 0 is an ordinary wall; ' +
+                      'around 1 reads as lit, higher for lava.';
+        const input = document.createElement('input');
+        Object.assign(input, { type: 'number', min: 0, max: 8, step: 0.1 });
+        input.value = sd.emissive ?? 0;
+        input.onchange = () => edit(`emissive ${input.value} on ${segment} ${SIDE_NAMES[side]}`,
+                                    (level) => setEmissive(level, segment, side, Number(input.value)));
+        emits.appendChild(input);
+        container.appendChild(emits);
+
+        // An emitting side is bright, and lights nothing. The renderer has no
+        // area lights, so the room around a lava pool stays as black as it was
+        // unless something in the segment actually casts. Offering the light
+        // here is the difference between the feature looking broken and looking
+        // like what the author meant; it is the same pairing as a lamp and its
+        // fixture.
+        if (sd.emissive > 0 && !app.level.lights.some((l) => l.segment === segment)) {
+            button('Light this room too',
+                   'Drops a point light at the middle of this side, tinted like the glow. ' +
+                   'An emitting side is bright but casts nothing on its own.',
+                   () => edit(`light for the glow in ${segment}`, (level) => {
+                       const c = sideCorners(level, segment, side);
+                       const middle = c.reduce((a, b) => add(a, b)).map((v) => v / 4);
+                       // Off the surface rather than on it: a light exactly in
+                       // the plane of the wall it is meant to light grazes it
+                       // and lights nothing. sd.normal points into the segment.
+                       const inward = scale(level.segments[segment].sides[side].normal, 3);
+                       addLight(level, add(middle, inward), segment);
+                   }));
+        }
         return;
     }
 
@@ -1661,6 +1713,7 @@ guard(async () => {
     const [{ levels, binary }, modelList] = await Promise.all([
         listLevels(),
         fetch('/api/models').then((r) => (r.ok ? r.json() : { models: [] })).catch(() => ({ models: [] })),
+        loadTileNames(),
     ]);
     app.models = modelList.models ?? [];
     await models.loadAll(app.models);

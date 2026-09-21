@@ -169,7 +169,8 @@ is no use to a shift+click meant to gather a group. They are clickable now.
 | **Join** | Makes two walls that are already in the same place into one portal, by rewriting one segment's four vertex indices to the other's. It does not move geometry: if the corners are not already coincident it refuses and says how far off they are. |
 | **Split portal** | Turns a portal back into two walls. |
 | **Delete segment** | Seals the neighbours, reindexes the graph, the doors and every entity, and takes the lights, pickups and objects inside it with it. The player start and the exit are not furniture and are left pointing at nothing, loudly. |
-| **Texture** | Per wall, from the five tiles in `procedural.h`. |
+| **Texture** | Per wall, from the set in `assets/textures/tiles.json`, fetched at startup via `/api/textures`. A tile added to the manifest appears in the picker with no change here. |
+| **Emits** | Per wall, how brightly the side glows on its own, on top of the light reaching it. Shown in the view as a self-lit material. An emitting side casts nothing, so where the room has no light of its own the panel offers to drop one at the side's middle. |
 | **Vertex drag** | Moves the selected vertices; every segment referencing one deforms together, which is the shared vertex array doing its job. Optional grid snap, off by default. |
 
 **Grid snap** works on the position of a single point and on the *step* a group

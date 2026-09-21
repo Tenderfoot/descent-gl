@@ -174,6 +174,12 @@ struct RenderState {
     bool shipDisabled = false;
     float shipDisabledTime = 0.0f;
 
+    // Seconds since the level started, straight from the fixed-step
+    // simulation. Anything that animates in a shader phases off this rather
+    // than a wall clock, so a run of --frames N renders the same pictures every
+    // time and a screenshot still compares against an earlier one.
+    float elapsed = 0.0f;
+
     // Chase camera only, and meaningless in first person.
     //
     // How far along kChaseOffset the eye actually ended up once the mine had
@@ -325,6 +331,7 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
 
     r.shipDisabled = b.ship.disabled;
     r.shipDisabledTime = b.game.elapsed;
+    r.elapsed = b.game.elapsed;
     r.objectCount = b.combat.objects.count;
     for (int i = 0; i < r.objectCount; ++i) {
         r.objectAlive[static_cast<size_t>(i)] = b.combat.objects.alive[static_cast<size_t>(i)];

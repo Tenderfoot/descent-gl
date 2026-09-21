@@ -10,8 +10,8 @@
 #include "render/camera.h"
 #include "render/comm_clip.h"
 #include "render/font.h"
-#include "render/procedural.h"
 #include "render/sprites.h"
+#include "render/wall_tiles.h"
 
 #include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <string>
 #include <string_view>
 
 namespace dvk::gl {
@@ -30,9 +31,9 @@ namespace {
 
 constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
-constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
 constexpr const char* kCommRoot = "assets/comm";
+constexpr const char* kWallTileManifest = "assets/textures/tiles.json";
 
 // Lays `body` out as lines no wider than `width`, breaking on spaces and on
 // the newlines the text itself carries, and draws at most `maxLines` of them
@@ -102,6 +103,8 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
 
     depthShader_ = std::make_unique<Shader>("shaders/depth.vert", "shaders/depth.frag");
     wallShader_ = std::make_unique<Shader>("shaders/wall.vert", "shaders/wall.frag");
+    emissiveShader_ =
+        std::make_unique<Shader>("shaders/wall_emissive.vert", "shaders/wall_emissive.frag");
     unlitShader_ = std::make_unique<Shader>("shaders/unlit.vert", "shaders/unlit.frag");
     shadowShader_ = std::make_unique<Shader>("shaders/shadow.vert", "shaders/shadow.frag");
     fullscreenShader_ =
@@ -146,7 +149,27 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     constexpr size_t kSignQuadsPerPlate = 2 + 24;
     doorSigns_.reserveQuads(static_cast<size_t>(sim::kMaxDoors) * 2 * 2 * 2 * kSignQuadsPerPlate);
 
-    walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
+    {
+        // The pixels go straight into the array and are not wanted again; the
+        // handful of layer indices the renderer chooses for itself are, so
+        // those outlive the load and the rest goes out of scope here.
+        const WallTiles tiles = loadWallTiles(kWallTileManifest);
+        walls_ = std::make_unique<TextureArray>(tiles.size, tiles.layers, "walls");
+        wallTiles_ = tiles.index;
+
+        // Uniform rather than per-draw state: which tiles move is a property of
+        // the set, fixed from here to the end of the run, so it is written once
+        // and the pass only ever sets the clock.
+        emissiveShader_->bind();
+        for (int i = 0; i < kMaxWallTiles; ++i) {
+            const TileAnim a = i < static_cast<int>(tiles.anim.size())
+                                   ? tiles.anim[static_cast<size_t>(i)]
+                                   : TileAnim{};
+            const std::string name = "uTileAnim[" + std::to_string(i) + "]";
+            emissiveShader_->setVec4(name.c_str(),
+                                     glm::vec4(a.scrollU, a.scrollV, a.turbulence, 0.0f));
+        }
+    }
     // Clamped rather than repeating: a sprite is a picture with an edge, and
     // the art is authored far larger than kPickupSpriteSize, so it is resampled
     // once here instead of carrying twenty times the pixels for a quad that is
@@ -278,7 +301,7 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
         RobotType type;
         type.mesh = &propMeshes_.at(def.model);
         type.occluder = &propOccluders_.at(def.model);
-        type.textureLayer = WallPanel;
+        type.textureLayer = wallTiles_.panel;
         robotTypes_.push_back(type);
     }
 
@@ -311,7 +334,7 @@ void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
         prop.occluderMesh = &propOccluders_.at(obj.type);
         prop.segment = obj.segment;
         prop.objectIndex = static_cast<int>(oi);
-        prop.textureLayer = obj.type == "pillar" ? WallRock : WallPanel;
+        prop.textureLayer = obj.type == "pillar" ? wallTiles_.rock : wallTiles_.panel;
         prop.model = glm::translate(glm::mat4(1.0f), obj.position) *
                      glm::mat4_cast(obj.orientation) * glm::scale(glm::mat4(1.0f), glm::vec3(obj.scale));
         // Static, so the world-space positions and planes are computed once.
@@ -2071,7 +2094,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
                 std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentA) ||
                 std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentB);
             if (!reached) continue;
-            wallShader_->setInt("uLayerOverride", WallHazard);
+            wallShader_->setInt("uLayerOverride", wallTiles_.hazard);
             wallShader_->setMat4("uModel", slab.model);
             slabMesh_->draw();
         }
@@ -2080,7 +2103,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         // attribute, so the override selects its tile from the same array.
         if (rs.drawShip && walk.isVisible(rs.shipSegment) &&
             std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
-            wallShader_->setInt("uLayerOverride", WallHull);
+            wallShader_->setInt("uLayerOverride", wallTiles_.hull);
             wallShader_->setVec3("uAlbedoTint",
                                  rs.shipDisabled ? disabledTint(rs.shipDisabledTime)
                                                  : glm::vec3(1.0f));
@@ -2115,6 +2138,40 @@ void Renderer::visualiseStencil() {
 
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
+}
+
+void Renderer::emissivePass(const RenderState& rs, const PortalWalk& walk) {
+    if (!levelMesh_->anyEmissive()) return;
+
+    // The same depth contract as a light pass: shade exactly the fragments the
+    // prepass decided are visible, write no depth, add to what is there.
+    //
+    // The stencil is off, and that is the point rather than an omission. A
+    // light pass is masked by the shadow volumes of everything between the
+    // light and the wall; this surface IS the source, so there is nothing
+    // between it and itself to cast.
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_EQUAL);
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    glEnable(GL_CULL_FACE);
+
+    emissiveShader_->bind();
+    walls_->bind(0);
+    emissiveShader_->setFloat("uTime", rs.elapsed);
+    emissiveShader_->setMat4("uModel", glm::mat4(1.0f));
+
+    levelMesh_->bind();
+    // The same list the prepass walked, so every fragment this pass shades is
+    // one the prepass wrote depth for and GL_EQUAL has something to match.
+    for (int segment : walk.visible()) {
+        levelMesh_->drawSegmentEmissive(segment);
+    }
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_GEQUAL);
 }
 
 void Renderer::unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk) {
@@ -2230,6 +2287,9 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     timers_.passBegin(GpuTimers::Lights);
     lightPasses(rs, walk);
     timers_.passEnd(GpuTimers::Lights);
+    timers_.passBegin(GpuTimers::Emissive);
+    emissivePass(rs, walk);
+    timers_.passEnd(GpuTimers::Emissive);
     timers_.passBegin(GpuTimers::Unlit);
     unlitPass(rs, level, walk);
     timers_.passEnd(GpuTimers::Unlit);

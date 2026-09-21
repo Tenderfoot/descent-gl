@@ -19,6 +19,16 @@ import { lightSegments, portalFaces, portalFacing, sideCorners } from './geometr
 // is a diagram of a mine, and reading it as a screenshot would be a mistake.
 const TILE_COLORS = [0x8a7f72, 0x6d7f8f, 0xa8873f, 0x6f7a63, 0x9aa0a6];
 
+// The set is a manifest now, so there is no last tile to author a colour for.
+// Past the authored ones the hue steps by the golden angle, which keeps
+// neighbouring indices far apart in hue however many there are, at the same
+// muted saturation as the list above.
+function tileColor(tile) {
+    if (TILE_COLORS[tile] !== undefined) return TILE_COLORS[tile];
+    const hue = ((tile - TILE_COLORS.length) * 137.508) % 360;
+    return new THREE.Color().setHSL(hue / 360, 0.22, 0.52).getHex();
+}
+
 const PICKUP_COLOR = 0x6ad0e0;
 const KEY_COLORS = [0x4a7dff, 0xf2d43a, 0xe04a3a];
 const OBJECT_COLOR = 0xc06a4a;
@@ -150,16 +160,25 @@ export class LevelView {
         return box;
     }
 
-    // One BufferGeometry per texture index, so the mine draws in five meshes
-    // and a level with a few thousand triangles still pans smoothly.
+    // One BufferGeometry per texture index, and a second per index for the sides
+    // that emit, so the mine draws in a handful of meshes and a level with a few
+    // thousand triangles still pans smoothly.
     buildWalls(level) {
         const byTile = new Map();
         this.triangleSegment = [];
 
         for (const wall of level.walls) {
-            const tile = level.segments[wall.segment].sides[wall.side].texture;
-            if (!byTile.has(tile)) byTile.set(tile, { positions: [], normals: [], faces: [] });
-            const bucket = byTile.get(tile);
+            const sd = level.segments[wall.segment].sides[wall.side];
+            const tile = sd.texture;
+            // Emitting sides are their own bucket so the diagram can show them
+            // glowing. Quantised to a flag rather than keyed on the value: this
+            // is a picture of which walls emit, not of how much.
+            const glow = sd.emissive > 0;
+            const key = `${tile}:${glow ? 1 : 0}`;
+            if (!byTile.has(key)) {
+                byTile.set(key, { tile, glow, positions: [], normals: [], faces: [] });
+            }
+            const bucket = byTile.get(key);
             for (const p of wall.p) {
                 bucket.positions.push(p[0], p[1], p[2]);
                 bucket.normals.push(wall.normal[0], wall.normal[1], wall.normal[2]);
@@ -169,7 +188,7 @@ export class LevelView {
             bucket.faces.push({ segment: wall.segment, side: wall.side });
         }
 
-        for (const [tile, bucket] of byTile) {
+        for (const { tile, glow, ...bucket } of byTile.values()) {
             const geometry = this.track(new THREE.BufferGeometry());
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normals, 3));
@@ -180,7 +199,12 @@ export class LevelView {
             // and FrontSide would render the whole level invisible until the
             // camera was in it.
             const material = this.track(new THREE.MeshLambertMaterial({
-                color: TILE_COLORS[tile] ?? 0xff00ff,
+                color: tileColor(tile),
+                // An emitting side carries its own light in the game, so it
+                // carries its own light here too - otherwise the one property
+                // the author just set is the one the diagram does not show.
+                emissive: glow ? tileColor(tile) : 0x000000,
+                emissiveIntensity: glow ? 0.9 : 0,
                 side: THREE.DoubleSide,
                 flatShading: true,
             }));
@@ -188,7 +212,7 @@ export class LevelView {
             this.wallMaterials.push(material);
 
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.name = `walls:${WALL_TILE_NAMES[tile] ?? tile}`;
+            mesh.name = `walls:${WALL_TILE_NAMES[tile] ?? tile}${glow ? ':emissive' : ''}`;
             mesh.userData.faces = bucket.faces;
             this.groups.walls.add(mesh);
         }

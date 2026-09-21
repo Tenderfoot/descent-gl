@@ -54,7 +54,7 @@ function pushVertex(level, position) {
     return level.vertices.length - 1;
 }
 
-const wall = (texture = 0) => ({ neighbour: -1, door: -1, texture, uv: null });
+const wall = (texture = 0) => ({ neighbour: -1, door: -1, texture, emissive: 0, uv: null });
 
 // A side's outward direction. sd.normal points INTO the segment, because the
 // mine is a space you are inside.
@@ -122,10 +122,10 @@ export function extrudeSide(level, si, side, depth = null) {
     const created = level.segments.length;
     const sides = [];
     for (let s = 0; s < SIDE_COUNT; ++s) sides.push(wall(seg.sides[side].texture));
-    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, texture: 0, uv: null };
+    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, texture: 0, emissive: 0, uv: null };
 
     level.segments.push({ verts, sides, keyOrder: null });
-    seg.sides[side] = { neighbour: created, door: -1, texture: 0, uv: null };
+    seg.sides[side] = { neighbour: created, door: -1, texture: 0, emissive: 0, uv: null };
 
     rebuildDerived(level);
     return created;
@@ -315,6 +315,19 @@ export function setTexture(level, si, side, texture) {
     const sd = level.segments[si].sides[side];
     if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
     sd.texture = texture;
+}
+
+// How brightly a side emits on top of the light that reaches it. 0 is an
+// ordinary wall.
+//
+// This does not light the room. The renderer has no area lights, so a pool that
+// should also lay light on what is around it wants a Light in the segment as
+// well - which is why the side panel offers to drop one.
+export function setEmissive(level, si, side, emissive) {
+    const sd = level.segments[si].sides[side];
+    if (sd.neighbour >= 0) throw new Error('a portal has no surface to emit from');
+    if (!(emissive >= 0)) throw new Error(`emissive must be zero or more, got ${emissive}`);
+    sd.emissive = emissive;
 }
 
 // Turns a portal back into a pair of walls. The segments keep sharing their

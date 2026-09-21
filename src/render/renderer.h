@@ -14,6 +14,7 @@
 #include "render/signs.h"
 #include "render/target.h"
 #include "render/texture_array.h"
+#include "render/wall_tiles.h"
 
 #include <glm/mat4x4.hpp>
 #include <array>
@@ -414,6 +415,10 @@ private:
     void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
     void lightPasses(const RenderState& rs, const PortalWalk& walk);
+    // Every emitting side the portal walk can see, once for the frame. Between
+    // the light passes and the unlit pass because it is neither: it reads the
+    // prepass depth the way a light does, and carries no light of its own.
+    void emissivePass(const RenderState& rs, const PortalWalk& walk);
     void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildDoors(const RenderState& rs, const Level& level);
     void buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk);
@@ -434,12 +439,18 @@ private:
 
     std::unique_ptr<Shader> depthShader_;
     std::unique_ptr<Shader> wallShader_;
+    std::unique_ptr<Shader> emissiveShader_;
     std::unique_ptr<Shader> unlitShader_;
     std::unique_ptr<Shader> shadowShader_;
     std::unique_ptr<Shader> fullscreenShader_;
     std::unique_ptr<Shader> debugLineShader_;
 
     std::unique_ptr<TextureArray> walls_;
+    // The layers in walls_ that the renderer selects itself rather than a
+    // level's `texture` field choosing them. Resolved by name when the set is
+    // loaded, so adding or reordering tiles in the manifest cannot silently
+    // put the ship's hull on a door.
+    WallTileIndex wallTiles_;
     std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<TextureArray> commFrames_;
     // One layer, its own shape: the wordmark the main menu is topped with.
