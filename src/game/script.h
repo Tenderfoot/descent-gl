@@ -90,6 +90,7 @@ public:
 
     const sim::TriggerSet& triggers() const { return triggers_; }
     const sim::TimerSet& timers() const { return timers_; }
+    const sim::PickupHookSet& pickupHooks() const { return pickupHooks_; }
     const std::vector<ScriptMessage>& messages() const { return messages_; }
     const std::vector<ScriptTutorial>& tutorials() const { return tutorials_; }
     const ScriptLoadout& loadout() const { return loadout_; }
@@ -119,6 +120,7 @@ private:
     static int declareLoadout(lua_State* state);
     static int declareTrigger(lua_State* state);
     static int declareTimer(lua_State* state);
+    static int declarePickup(lua_State* state);
     static int startComm(lua_State* state);
     static int declareTutorial(lua_State* state);
     static int showTutorial(lua_State* state);
@@ -127,7 +129,10 @@ private:
     static ScriptHost* self(lua_State* state);
     int findMessage(const char* id) const;
     int findTutorial(const char* id) const;
-    bool call(int functionRef, const char* context);
+    // `argument`, when given, is pushed as the callback's one parameter. It is
+    // how a pickup hook is told which kind was taken; a trigger or a timer has
+    // nothing to say and passes nullptr.
+    bool call(int functionRef, const char* context, const char* argument = nullptr);
 
     lua_State* state_ = nullptr;
     MemoryBudget memory_;
@@ -140,8 +145,10 @@ private:
     bool loadoutDeclared_ = false;
     sim::TriggerSet triggers_;
     sim::TimerSet timers_;
+    sim::PickupHookSet pickupHooks_;
     std::array<int, sim::kMaxTriggers> callbacks_{};
     std::array<int, sim::kMaxTimers> timerCallbacks_{};
+    std::array<int, sim::kMaxPickupHooks> pickupCallbacks_{};
     std::vector<ScriptMessage> messages_;
     std::vector<ScriptTutorial> tutorials_;
     int callbackErrors_ = 0;

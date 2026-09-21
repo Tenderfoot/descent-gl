@@ -77,6 +77,7 @@ void expose(lua_State* state, ScriptHost* host, const char* name, lua_CFunction 
 ScriptHost::ScriptHost() {
     callbacks_.fill(LUA_NOREF);
     timerCallbacks_.fill(LUA_NOREF);
+    pickupCallbacks_.fill(LUA_NOREF);
 }
 
 ScriptHost::~ScriptHost() {
@@ -120,8 +121,10 @@ void ScriptHost::clear() {
     loadoutDeclared_ = false;
     triggers_ = sim::TriggerSet{};
     timers_ = sim::TimerSet{};
+    pickupHooks_ = sim::PickupHookSet{};
     callbacks_.fill(LUA_NOREF);
     timerCallbacks_.fill(LUA_NOREF);
+    pickupCallbacks_.fill(LUA_NOREF);
     messages_.clear();
     tutorials_.clear();
     callbackErrors_ = 0;
@@ -158,6 +161,7 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "message", &ScriptHost::declareMessage);
     expose(state_, this, "trigger", &ScriptHost::declareTrigger);
     expose(state_, this, "timer", &ScriptHost::declareTimer);
+    expose(state_, this, "pickup", &ScriptHost::declarePickup);
     expose(state_, this, "comm", &ScriptHost::startComm);
     expose(state_, this, "tutorial", &ScriptHost::declareTutorial);
     expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
@@ -177,9 +181,10 @@ void ScriptHost::load(const Level& level) {
                    error ? error : "unknown error");
     }
 
-    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} message(s), {} tutorial(s)",
-              level.scriptPath, triggers_.count, timers_.count, messages_.size(),
-              tutorials_.size());
+    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} pickup hook(s), {} message(s), "
+              "{} tutorial(s)",
+              level.scriptPath, triggers_.count, timers_.count, pickupHooks_.count,
+              messages_.size(), tutorials_.size());
 }
 
 int ScriptHost::declareMessage(lua_State* state) {
@@ -382,6 +387,67 @@ int ScriptHost::declareTimer(lua_State* state) {
     return 0;
 }
 
+// A response to the player collecting something. `kind` names one of the
+// pickups a level can hold - the same names a level file uses, so what the
+// editor wrote is what the script matches on - or "any" for all of them.
+//
+// The callback is handed the kind that raised it as a string. A hook on one
+// kind already knows, but an "any" hook is the reason the argument exists, and
+// passing it always beats two callback shapes to remember.
+int ScriptHost::declarePickup(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->pickupHooks_.count >= sim::kMaxPickupHooks) {
+        return luaL_error(state, "level exceeds the limit of %d pickup hooks",
+                          sim::kMaxPickupHooks);
+    }
+
+    sim::PickupHook hook;
+    const char* kind = requiredString(state, 1, "kind");
+    if (std::strcmp(kind, "any") != 0) {
+        int matched = -1;
+        for (size_t k = 0; k < kPickupNames.size(); ++k) {
+            if (std::strcmp(kind, kPickupNames[k]) == 0) matched = static_cast<int>(k);
+        }
+        if (matched < 0) return luaL_error(state, "unknown pickup kind '%s'", kind);
+        hook.kind = matched;
+
+        // A level that holds none of what the hook is waiting for is not a
+        // broken script - a key can be moved out of a mine while the script
+        // that talks about it is still being edited - but it is always a
+        // mistake worth hearing about, because nothing else about it will
+        // ever look wrong.
+        bool present = false;
+        for (const Pickup& pickup : host->level_->pickups) {
+            present |= static_cast<int>(pickup.kind) == hook.kind;
+        }
+        if (!present) {
+            log::warn("Lua pickup hook on '{}' will never fire: '{}' holds no such pickup", kind,
+                      host->level_->name);
+        }
+    }
+
+    // Unlike a trigger, whose volume the player can leave and fly back into, a
+    // hook that is not `once` is answering a different pickup every time: the
+    // second shield orb, the third box of flares. Both readings are useful, so
+    // the default matches trigger and timer rather than inventing a third
+    // answer to the same word.
+    lua_getfield(state, 1, "once");
+    if (!lua_isnil(state, -1)) hook.once = lua_toboolean(state, -1) != 0;
+    lua_pop(state, 1);
+
+    lua_getfield(state, 1, "on_pickup");
+    if (!lua_isfunction(state, -1)) {
+        return luaL_error(state, "pickup on_pickup must be a function");
+    }
+    const int callback = luaL_ref(state, LUA_REGISTRYINDEX);
+
+    const int index = host->pickupHooks_.count++;
+    host->pickupHooks_.items[static_cast<size_t>(index)] = hook;
+    host->pickupCallbacks_[static_cast<size_t>(index)] = callback;
+    return 0;
+}
+
 // Hands the ship back, or takes it away. The one thing a script can change
 // about the player mid-level, and the reason the intro can start the ship
 // disabled and repair it on a cue.
@@ -451,10 +517,12 @@ int ScriptHost::findTutorial(const char* id) const {
     return -1;
 }
 
-bool ScriptHost::call(int functionRef, const char* context) {
+bool ScriptHost::call(int functionRef, const char* context, const char* argument) {
     lua_rawgeti(state_, LUA_REGISTRYINDEX, functionRef);
+    const int args = argument ? 1 : 0;
+    if (argument) lua_pushstring(state_, argument);
     lua_sethook(state_, &ScriptHost::instructionLimit, LUA_MASKCOUNT, kInstructionBudget);
-    const int status = lua_pcall(state_, 0, 0, 0);
+    const int status = lua_pcall(state_, args, 0, 0);
     lua_sethook(state_, nullptr, 0, 0);
     if (status == LUA_OK) return true;
 
@@ -470,6 +538,7 @@ void ScriptHost::drain(sim::GameState& game) {
     if (!state_) {
         game.triggers.clearPending();
         game.timers.clearPending();
+        game.pickupHooks.clearPending();
         return;
     }
 
@@ -480,6 +549,25 @@ void ScriptHost::drain(sim::GameState& game) {
         int& callback = callbacks_[static_cast<size_t>(trigger)];
         if (callback == LUA_NOREF) continue;
         if (!call(callback, "trigger callback")) {
+            luaL_unref(state_, LUA_REGISTRYINDEX, callback);
+            callback = LUA_NOREF;
+        }
+    }
+
+    // Pickups after volumes and before timers: within one frame, what the
+    // player flew into, then what the player took, then what merely came
+    // round on the clock. The two things the player did are heard from in the
+    // order the mine put them in front of them.
+    const int pickupCount = game.pickupHooks.pendingCount;
+    for (int i = 0; i < pickupCount; ++i) {
+        const sim::PickupFire& fire = game.pickupHooks.pending[static_cast<size_t>(i)];
+        int& callback = pickupCallbacks_[static_cast<size_t>(fire.hook)];
+        if (callback == LUA_NOREF) continue;
+        // Always a real kind, since only a collected pickup queues one; the
+        // bound is here because the index arrives as a byte out of sim state.
+        const size_t kind = fire.kind;
+        if (!call(callback, "pickup callback",
+                  kind < kPickupNames.size() ? kPickupNames[kind] : "unknown")) {
             luaL_unref(state_, LUA_REGISTRYINDEX, callback);
             callback = LUA_NOREF;
         }
@@ -500,6 +588,7 @@ void ScriptHost::drain(sim::GameState& game) {
     draining_ = false;
     game.triggers.clearPending();
     game.timers.clearPending();
+    game.pickupHooks.clearPending();
 }
 
 const ScriptMessage* ScriptHost::message(int index) const {

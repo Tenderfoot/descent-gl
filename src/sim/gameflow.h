@@ -105,6 +105,10 @@ struct GameState {
     // The level's scripted clock. Here rather than in the script host so that
     // a restart rewinds it with everything else and the intro plays again.
     TimerState timers;
+    // Scripted responses to what the player has picked up, here for the same
+    // reason: a one-shot hook spent on the blue key is unspent again the
+    // moment the level is restarted and the key is back on the floor.
+    PickupHookState pickupHooks;
 };
 
 struct GameConfig {
@@ -125,7 +129,7 @@ void initGame(const Level& level, const RobotState& robots, GameState& out);
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
               EventQueue* events = nullptr, const TriggerSet* triggers = nullptr,
-              const TimerSet* timers = nullptr);
+              const TimerSet* timers = nullptr, const PickupHookSet* pickupHooks = nullptr);
 
 // True if a body may pass from `segment` through `side`. Doors that are not
 // nearly open are not passable.

@@ -54,4 +54,21 @@ void stepTimers(TimerState& state, float elapsed, const TimerSet* timers) {
     }
 }
 
+void notePickup(PickupHookState& state, int kind, const PickupHookSet* hooks) {
+    if (!hooks) return;
+
+    const int count = std::clamp(hooks->count, 0, kMaxPickupHooks);
+    for (int i = 0; i < count; ++i) {
+        const PickupHook& hook = hooks->items[static_cast<size_t>(i)];
+        const size_t hi = static_cast<size_t>(i);
+        if (state.consumed[hi] != 0) continue;
+        if (hook.kind != kAnyPickup && hook.kind != kind) continue;
+        if (state.pendingCount >= kMaxPickupFires) return;
+
+        state.pending[static_cast<size_t>(state.pendingCount++)] = {
+            static_cast<uint8_t>(i), static_cast<uint8_t>(kind)};
+        if (hook.once) state.consumed[hi] = 1;
+    }
+}
+
 } // namespace dvk::sim
