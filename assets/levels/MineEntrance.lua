@@ -52,6 +52,22 @@ message {
   seconds = 10,
 }
 
+message {
+  id = "last_key_mine_1",
+  clip = "last_key_mine_1",
+  speaker = "???",
+  text = "That should be the last key for this mine. Now you just need to find and destroy the reactor.",
+  seconds = 7,
+}
+
+message {
+  id = "reactorsblown",
+  clip = "reactorsblown",
+  speaker = "???",
+  text = "That's the reactor!\nThe whole place is coming down.\nGet to the exit - move!",
+  seconds = 5.0,
+}
+
 trigger {
   segment = 2,
   once = true,
@@ -89,5 +105,19 @@ pickup {
   on_pickup = function()
     comm("firstbluekeypickup")
     after(10, function() show_tutorial("automapinfo") end)
+  end,
+}
+
+pickup {
+  kind = "key_red",
+  on_pickup = function()
+    comm("last_key_mine_1")
+  end,
+}
+
+event {
+  kind = "reactor_destroyed",
+  on_event = function()
+    comm("reactorsblown")
   end,
 }
