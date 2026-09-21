@@ -208,6 +208,9 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             case PickupKind::LightningAmmo:
                 p.lightningAmmo += cfg.lightningPickup;
                 break;
+            case PickupKind::VulcanAmmo:
+                p.vulcanAmmo += cfg.vulcanPickup;
+                break;
             case PickupKind::Flares:
                 p.flares += cfg.flarePickup;
                 break;

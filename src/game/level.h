@@ -175,13 +175,13 @@ struct Door {
 // it, so inserting here does not invalidate a level file.
 enum class PickupKind : int {
     Shield = 0, Energy, LaserUpgrade, Concussion, Homing, Flares,
-    RailgunAmmo, LightningAmmo,
+    RailgunAmmo, LightningAmmo, VulcanAmmo,
     KeyBlue, KeyYellow, KeyRed, Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)> kPickupNames{
     "shield", "energy", "laser", "concussion", "homing", "flares",
-    "railgun", "lightning",
+    "railgun", "lightning", "vulcan",
     "key_blue", "key_yellow", "key_red"};
 
 struct Pickup {

@@ -15,6 +15,12 @@ namespace dvk::gl {
 enum PickupSprite : int {
     SpriteHealth = 0,
     SpriteEnergy,
+    SpriteLaser,
+    SpriteConcussion,
+    SpriteHoming,
+    SpriteVulcan,
+    SpriteRailgun,
+    SpriteLightning,
     SpriteKey,      // a white template, tinted per key colour at draw time
     PickupSpriteCount,
 };
