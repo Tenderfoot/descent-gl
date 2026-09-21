@@ -1,11 +1,26 @@
 {
-  "comment": "The mine's wall tile set. A tile's position in this list is the layer index a level file's `texture: N` selects, so append rather than insert: renumbering re-textures every level that is already authored. `file` is optional and defaults to <name>.png. Four names are load-bearing because the renderer asks for them by name rather than the level author choosing them - rock (pillar props), panel (robots and other props), hazard (door slabs) and hull (the ship) - and the game will not start without them. Every other tile is yours.",
-  "size": 256,
+  "comment": "The mine's wall tile set. A tile's position in this list is the layer index a level file's `texture: N` selects, so append rather than insert: renumbering re-textures every level that is already authored. `file` is optional and defaults to <name>.png. Four names are load-bearing because the renderer asks for them by name rather than a level choosing them - rock (pillar props), panel (robots and other props), hazard (door slabs) and hull (the ship) - and the game will not start without them. Every other tile is yours.",
+  "size": 1024,
   "tiles": [
     { "name": "rock" },
     { "name": "panel" },
     { "name": "hazard" },
     { "name": "grate" },
-    { "name": "hull" }
+    { "name": "hull" },
+
+    { "name": "vein-rock" },
+    { "name": "cut-rock" },
+
+    { "name": "bulkhead" },
+    { "name": "tread-floor" },
+
+    { "name": "conduit" },
+    { "name": "louvre" },
+    { "name": "perforated-plate" },
+
+    { "name": "circuit-wall" },
+    { "name": "reactor-plate" },
+
+    { "name": "rust-panel" }
   ]
 }

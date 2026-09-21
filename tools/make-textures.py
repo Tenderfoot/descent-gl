@@ -9,6 +9,11 @@ diffed rather than being opaque binaries nobody can reproduce:
     tools/make-textures.py                  # rewrite every generated tile
     tools/make-textures.py --only rock      # rewrite one, leave the rest alone
 
+It writes at the size assets/textures/tiles.json declares, so a regenerated
+tile always matches the set. Every generator is written against the tile rather
+than against a pixel count, so --size changes the resolution and not the
+picture.
+
 Any of these files may be replaced with painted or downloaded art;
 src/render/wall_tiles.cpp loads whatever PNG the manifest names and resamples
 it, so nothing has to match what is written here. The manifest is the
@@ -50,9 +55,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TEXTURES = ROOT / "assets" / "textures"
 
-# One tile is this many pixels square. src/render/renderer.cpp: kWallTileSize.
-# A replacement may be any square size; the loader resamples it to this.
-SIZE = 256
+# Fallback if the manifest cannot be read. The size that matters is the one in
+# tiles.json, because a tile smaller than the set the manifest declares is a
+# fatal error at load.
+FALLBACK_SIZE = 256
+
+
+def manifest_size():
+    try:
+        with open(TEXTURES / "tiles.json", encoding="utf-8") as f:
+            return int(json.load(f)["size"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return FALLBACK_SIZE
 
 # ------------------------------------------------------------ single precision
 
@@ -182,12 +196,18 @@ def make_panel(size):
 def make_hazard(size):
     tile = Tile(size)
     stripe = max(1, size // 8)
+    # The wear noise is the one term in this file that was written against a
+    # pixel count rather than against the tile, so at 1024 it would come out
+    # four times finer than the tile it was tuned for. Dividing by the size it
+    # was written at makes --size mean "the same tile, more pixels" here as it
+    # does everywhere else; at 256 the factor is exactly 1 and nothing moves.
+    grime = f32(C_0_09 * f32(256.0 / size))
     for y in range(size):
         for x in range(size):
             # Diagonal bands, wrapping so the tile still repeats seamlessly.
             band = ((x + y) % size) // stripe
             warn = band % 2 == 0
-            n = smooth_noise(f32(x * C_0_09), f32(y * C_0_09), 31)
+            n = smooth_noise(f32(x * grime), f32(y * grime), 31)
             wear = int(f32(n * 34.0)) - 17
             if warn:
                 tile.put(x, y, 224 + wear, 168 + wear, 38 + wear)
@@ -284,8 +304,17 @@ def main(argv):
         "--only",
         help="comma-separated tile names to rewrite; the default is all of them",
     )
-    parser.add_argument("--size", type=int, default=SIZE, help=f"pixels square (default {SIZE})")
+    parser.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help="pixels square; the default is the manifest's \"size\"",
+    )
     args = parser.parse_args(argv)
+    if args.size is None:
+        args.size = manifest_size()
+    if args.size < 1:
+        parser.error("--size must be positive")
 
     names = list(GENERATORS)
     if args.only:

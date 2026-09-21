@@ -64,63 +64,71 @@ std::vector<uint8_t> loadTile(const std::filesystem::path& path, int size) {
     return out;
 }
 
-// Mean absolute RGB difference between two columns, or two rows.
-float columnDelta(const std::vector<uint8_t>& rgba, int size, int xa, int xb) {
-    uint64_t sum = 0;
-    for (int y = 0; y < size; ++y) {
-        const size_t a = (static_cast<size_t>(y) * size + xa) * 4;
-        const size_t b = (static_cast<size_t>(y) * size + xb) * 4;
-        for (size_t c = 0; c < 3; ++c) {
-            sum += static_cast<uint64_t>(std::abs(static_cast<int>(rgba[a + c]) -
-                                                  static_cast<int>(rgba[b + c])));
-        }
-    }
-    return static_cast<float>(sum) / static_cast<float>(size * 3);
-}
-
-float rowDelta(const std::vector<uint8_t>& rgba, int size, int ya, int yb) {
-    uint64_t sum = 0;
-    const size_t rowA = static_cast<size_t>(ya) * size * 4;
-    const size_t rowB = static_cast<size_t>(yb) * size * 4;
-    for (int x = 0; x < size; ++x) {
-        for (size_t c = 0; c < 3; ++c) {
-            sum += static_cast<uint64_t>(
-                std::abs(static_cast<int>(rgba[rowA + static_cast<size_t>(x) * 4 + c]) -
-                         static_cast<int>(rgba[rowB + static_cast<size_t>(x) * 4 + c])));
-        }
-    }
-    return static_cast<float>(sum) / static_cast<float>(size * 3);
-}
-
 }   // namespace
 
 TileReport checkTile(const std::vector<uint8_t>& rgba, int size) {
     TileReport report;
     if (size <= 1 || rgba.size() != static_cast<size_t>(size) * size * 4) return report;
 
+    // Everything below comes out of one pass over the pixels.
+    //
+    // The obvious shape - a columnDelta(a, b) helper called once per adjacent
+    // pair - is a column scan inside a loop over columns, so it costs size^3.
+    // That is unnoticeable at 256 and about a billion operations at 1024, which
+    // is a --validate-assets that looks hung. Accumulating every pair's total
+    // as the pass goes past it costs size^2 and gives the same numbers.
+    std::vector<uint64_t> columnGap(static_cast<size_t>(size), 0);   // x to x + 1
+    std::vector<uint64_t> rowGap(static_cast<size_t>(size), 0);      // y to y + 1
+    uint64_t wrapColumn = 0;   // last column against the first
+    uint64_t wrapRow = 0;      // last row against the first
     double luminance = 0.0;
-    for (size_t i = 0; i < rgba.size(); i += 4) {
-        // Unweighted by gamma on purpose: nothing in this renderer converts
-        // between sRGB and linear, so these bytes are what the lighting math
-        // multiplies and what ends up on screen.
-        luminance += 0.2126 * rgba[i] + 0.7152 * rgba[i + 1] + 0.0722 * rgba[i + 2];
+
+    const auto at = [&](int x, int y) {
+        return (static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)) * 4;
+    };
+    const auto absDiff = [&](size_t a, size_t b) {
+        uint64_t sum = 0;
+        for (size_t c = 0; c < 3; ++c) {
+            sum += static_cast<uint64_t>(
+                std::abs(static_cast<int>(rgba[a + c]) - static_cast<int>(rgba[b + c])));
+        }
+        return sum;
+    };
+
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            const size_t here = at(x, y);
+            // Unweighted by gamma on purpose: nothing in this renderer converts
+            // between sRGB and linear, so these bytes are what the lighting
+            // math multiplies and what ends up on screen.
+            luminance +=
+                0.2126 * rgba[here] + 0.7152 * rgba[here + 1] + 0.0722 * rgba[here + 2];
+
+            if (x + 1 < size) columnGap[static_cast<size_t>(x)] += absDiff(here, at(x + 1, y));
+            if (y + 1 < size) rowGap[static_cast<size_t>(y)] += absDiff(here, at(x, y + 1));
+        }
+        wrapColumn += absDiff(at(size - 1, y), at(0, y));
     }
+    for (int x = 0; x < size; ++x) wrapRow += absDiff(at(x, size - 1), at(x, 0));
+
+    const auto mean = [&](uint64_t sum) {
+        return static_cast<float>(sum) / static_cast<float>(size * 3);
+    };
     report.meanLuminance =
         static_cast<float>(luminance / (static_cast<double>(size) * static_cast<double>(size)));
 
     float worstInteriorX = 0.0f;
     float worstInteriorY = 0.0f;
     for (int i = 0; i + 1 < size; ++i) {
-        worstInteriorX = std::max(worstInteriorX, columnDelta(rgba, size, i, i + 1));
-        worstInteriorY = std::max(worstInteriorY, rowDelta(rgba, size, i, i + 1));
+        worstInteriorX = std::max(worstInteriorX, mean(columnGap[static_cast<size_t>(i)]));
+        worstInteriorY = std::max(worstInteriorY, mean(rowGap[static_cast<size_t>(i)]));
     }
 
     // A flat tile has no interior edge to measure against and no seam either,
     // so the floor keeps the ratio from dividing its way to infinity.
     constexpr float kFloor = 0.5f;
-    report.seamRatioX =
-        columnDelta(rgba, size, size - 1, 0) / std::max(worstInteriorX, kFloor);
-    report.seamRatioY = rowDelta(rgba, size, size - 1, 0) / std::max(worstInteriorY, kFloor);
+    report.seamRatioX = mean(wrapColumn) / std::max(worstInteriorX, kFloor);
+    report.seamRatioY = mean(wrapRow) / std::max(worstInteriorY, kFloor);
     return report;
 }
 

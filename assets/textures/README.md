@@ -33,8 +33,8 @@ The editor reads the same manifest — `/api/textures` in `tools/editor/serve.py
   fatal error. Raising `size` raises it for the whole set.
 - **Bright.** There is no ambient term anywhere in the renderer, so albedo is
   the only thing keeping a lit surface off pure black. A moody dark cave texture
-  does not read as gloomy, it reads as nothing. The shipped set sits between 105
-  and 156 mean luminance.
+  does not read as gloomy, it reads as nothing. The shipped set sits between 63
+  and 156 mean luminance, the painted tiles at the darker end.
 - **Tiling.** UVs are planar at 5.5 world units per tile (`kWorldUnitsPerTile`)
   against 20-unit segments, so a wall shows about four repeats and a seam is
   obvious. Hard edges at the tile boundary are fine — a plate groove is supposed
@@ -43,6 +43,14 @@ The editor reads the same manifest — `/api/textures` in `tools/editor/serve.py
 
 `descent --validate-assets` measures the last two and warns rather than failing,
 since a tile may be dark or hard-edged on purpose.
+
+As it stands the ten painted tiles all wrap exactly, and two of the generated
+ones do not: `rock` reports a seam 42x its own interior variation and `hazard`
+8.5x. The value noise behind them is not periodic, so it does not meet itself
+where the tile repeats. It got worse rather than better when the set moved to
+1024, because the noise is smoother per pixel at higher resolution while the
+join is just as hard. Worth knowing before reaching for `rock`, which is also
+the tile every unpainted wall defaults to.
 
 ## Four names the renderer needs
 
@@ -58,13 +66,19 @@ renderer rather than by a level, and the game will not start without them:
 
 ## Regenerating the shipped set
 
-`tools/make-textures.py` writes the five tiles that shipped, so the art is
-reproducible rather than opaque binaries nobody can rebuild:
+`tools/make-textures.py` writes the five generated tiles - `rock`, `panel`,
+`hazard`, `grate` and `hull` - so that part of the set is reproducible rather
+than opaque binaries nobody can rebuild. The other ten are painted and this
+script knows nothing about them:
 
 ```
 tools/make-textures.py                 # rewrite every generated tile
 tools/make-textures.py --only rock     # rewrite one, leave the rest alone
 ```
+
+It writes at the size `tiles.json` declares, so a regenerated tile always
+matches the set. Every generator is written against the tile rather than against
+a pixel count, so `--size` changes the resolution and not the picture.
 
 It is committed, deterministic and stdlib-only. There is deliberately no
 `--check` mode: a tile you have repainted is the feature working, not a failure.

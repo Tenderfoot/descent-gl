@@ -18,7 +18,8 @@ constexpr const char* kWallTileManifest = "assets/textures/tiles.json";
 // Below this mean luminance a tile is almost certainly art that was authored to
 // look dark rather than art that is dark on purpose. There is no ambient term
 // in the renderer, so such a tile does not read as gloomy, it reads as nothing:
-// the shipped set sits between 105 and 156.
+// the shipped set sits between 63 and 156, the painted tiles at the darker end
+// of that and the generated ones at the brighter.
 constexpr float kMinMeanLuminance = 48.0f;
 
 // Above this, the join where a tile repeats is several times harsher than any
