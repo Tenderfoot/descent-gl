@@ -10,8 +10,8 @@
 #include "render/camera.h"
 #include "render/comm_clip.h"
 #include "render/font.h"
-#include "render/procedural.h"
 #include "render/sprites.h"
+#include "render/wall_tiles.h"
 
 #include <glm/common.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -30,9 +30,9 @@ namespace {
 
 constexpr float kAutomapFovY = glm::radians(70.0f);
 constexpr float kZNear = 0.05f;
-constexpr int kWallTileSize = 256;
 constexpr int kPickupSpriteSize = 256;
 constexpr const char* kCommRoot = "assets/comm";
+constexpr const char* kWallTileManifest = "assets/textures/tiles.json";
 
 // Lays `body` out as lines no wider than `width`, breaking on spaces and on
 // the newlines the text itself carries, and draws at most `maxLines` of them
@@ -146,7 +146,14 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     constexpr size_t kSignQuadsPerPlate = 2 + 24;
     doorSigns_.reserveQuads(static_cast<size_t>(sim::kMaxDoors) * 2 * 2 * 2 * kSignQuadsPerPlate);
 
-    walls_ = std::make_unique<TextureArray>(kWallTileSize, makeWallTiles(kWallTileSize), "walls");
+    {
+        // The pixels go straight into the array and are not wanted again; the
+        // handful of layer indices the renderer chooses for itself are, so
+        // those outlive the load and the rest goes out of scope here.
+        const WallTiles tiles = loadWallTiles(kWallTileManifest);
+        walls_ = std::make_unique<TextureArray>(tiles.size, tiles.layers, "walls");
+        wallTiles_ = tiles.index;
+    }
     // Clamped rather than repeating: a sprite is a picture with an edge, and
     // the art is authored far larger than kPickupSpriteSize, so it is resampled
     // once here instead of carrying twenty times the pixels for a quad that is
@@ -278,7 +285,7 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
         RobotType type;
         type.mesh = &propMeshes_.at(def.model);
         type.occluder = &propOccluders_.at(def.model);
-        type.textureLayer = WallPanel;
+        type.textureLayer = wallTiles_.panel;
         robotTypes_.push_back(type);
     }
 
@@ -311,7 +318,7 @@ void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
         prop.occluderMesh = &propOccluders_.at(obj.type);
         prop.segment = obj.segment;
         prop.objectIndex = static_cast<int>(oi);
-        prop.textureLayer = obj.type == "pillar" ? WallRock : WallPanel;
+        prop.textureLayer = obj.type == "pillar" ? wallTiles_.rock : wallTiles_.panel;
         prop.model = glm::translate(glm::mat4(1.0f), obj.position) *
                      glm::mat4_cast(obj.orientation) * glm::scale(glm::mat4(1.0f), glm::vec3(obj.scale));
         // Static, so the world-space positions and planes are computed once.
@@ -2071,7 +2078,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
                 std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentA) ||
                 std::binary_search(light.segments.begin(), light.segments.end(), slab.segmentB);
             if (!reached) continue;
-            wallShader_->setInt("uLayerOverride", WallHazard);
+            wallShader_->setInt("uLayerOverride", wallTiles_.hazard);
             wallShader_->setMat4("uModel", slab.model);
             slabMesh_->draw();
         }
@@ -2080,7 +2087,7 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         // attribute, so the override selects its tile from the same array.
         if (rs.drawShip && walk.isVisible(rs.shipSegment) &&
             std::binary_search(light.segments.begin(), light.segments.end(), rs.shipSegment)) {
-            wallShader_->setInt("uLayerOverride", WallHull);
+            wallShader_->setInt("uLayerOverride", wallTiles_.hull);
             wallShader_->setVec3("uAlbedoTint",
                                  rs.shipDisabled ? disabledTint(rs.shipDisabledTime)
                                                  : glm::vec3(1.0f));

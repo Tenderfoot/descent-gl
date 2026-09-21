@@ -16,6 +16,7 @@ import {
 } from './entities.js';
 import {
     KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
+    setWallTileNames,
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkLevelName, checkName, newLevel } from './create.js';
@@ -323,6 +324,21 @@ function replaceLevel(next) {
 }
 
 // --- loading and saving -----------------------------------------------------
+
+// The tile names the game would load, so the picker offers what the manifest
+// has rather than what this file was last told about. A set that will not load
+// is not worth stopping the editor over - the names in format.js still let
+// every existing level be edited - so this reports and carries on.
+async function loadTileNames() {
+    try {
+        const response = await fetch('/api/textures');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const { tiles } = await response.json();
+        setWallTileNames(tiles);
+    } catch (e) {
+        console.warn(`could not read assets/textures/tiles.json (${e.message}); using the built-in tile names`);
+    }
+}
 
 async function listLevels() {
     const response = await fetch('/api/levels');
@@ -1661,6 +1677,7 @@ guard(async () => {
     const [{ levels, binary }, modelList] = await Promise.all([
         listLevels(),
         fetch('/api/models').then((r) => (r.ok ? r.json() : { models: [] })).catch(() => ({ models: [] })),
+        loadTileNames(),
     ]);
     app.models = modelList.models ?? [];
     await models.loadAll(app.models);

@@ -42,9 +42,21 @@ export const PICKUP_NAMES = [
     'key_blue', 'key_yellow', 'key_red',
 ];
 
-// src/render/procedural.h: enum WallTile. A level file's `texture: 2` means
-// the same thing here as it does in the game.
+// The tile set in layer order, so a level file's `texture: 2` means the same
+// thing here as it does in the game.
+//
+// Filled from assets/textures/tiles.json at startup rather than being a list
+// kept in step with the game by hand - see loadTileNames() in main.js. The
+// names below are what the set has shipped as, and are what the editor falls
+// back to if the manifest cannot be read; the array is replaced in place so
+// every module that imported it sees the update.
 export const WALL_TILE_NAMES = ['rock', 'panel', 'hazard', 'grate', 'hull'];
+
+export function setWallTileNames(names) {
+    if (!Array.isArray(names) || names.length === 0) return;
+    WALL_TILE_NAMES.length = 0;
+    WALL_TILE_NAMES.push(...names);
+}
 
 // src/game/level.cpp: kWorldUnitsPerTile. One texture tile per this many world
 // units, for sides with no authored UVs.

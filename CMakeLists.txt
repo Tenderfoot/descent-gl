@@ -81,7 +81,6 @@ add_executable(descent
     src/render/level_mesh.cpp
     src/render/mesh.cpp
     src/render/model.cpp
-    src/render/procedural.cpp
     src/render/renderer.cpp
     src/render/screenshot.cpp
     src/render/shader.cpp
@@ -91,6 +90,7 @@ add_executable(descent
     src/render/stb_impl.cpp
     src/render/target.cpp
     src/render/texture_array.cpp
+    src/render/wall_tiles.cpp
     src/sim/collision.cpp
     src/sim/combat.cpp
     src/sim/flight.cpp

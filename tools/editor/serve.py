@@ -30,6 +30,7 @@ EDITOR = ROOT / "tools" / "editor"
 LEVELS = ROOT / "assets" / "levels"
 MODELS = ROOT / "assets" / "models"
 CONFIG = ROOT / "assets" / "config"
+TEXTURES = ROOT / "assets" / "textures"
 
 # A level, model or config name is a bare stem: no separators, no dots, no
 # traversal. The extension is supplied here, never by the request.
@@ -117,6 +118,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/levels":
             names = sorted(p.stem for p in LEVELS.glob("*.json"))
             return self.send_json(200, {"levels": names, "binary": str(find_binary() or "")})
+
+        if path == "/api/textures":
+            # The tile names in layer order, which is what the side panel's
+            # picker and the colour-by-texture view are indexed by. Served from
+            # the manifest the game reads, so a tile added there shows up here
+            # without the editor being changed to match.
+            manifest = TEXTURES / "tiles.json"
+            if not manifest.is_file():
+                return self.send_json(404, {"error": "no assets/textures/tiles.json"})
+            try:
+                tiles = json.loads(manifest.read_text())["tiles"]
+            except (ValueError, KeyError, TypeError) as e:
+                return self.send_json(500, {"error": f"tiles.json is unreadable: {e}"})
+            names = [t["name"] for t in tiles if isinstance(t, dict) and "name" in t]
+            return self.send_json(200, {"tiles": names})
 
         if path == "/api/models":
             names = sorted(p.stem for p in MODELS.glob("*.obj"))

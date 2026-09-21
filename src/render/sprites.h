@@ -6,8 +6,15 @@
 namespace dvk::gl {
 
 // Hand-authored sprite art, loaded from assets/images/ and handed to a
-// TextureArray. The counterpart to procedural.h: that file makes tiles because
-// nobody drew any, this one reads the ones somebody did.
+// TextureArray.
+
+// Area-average `src` (srcSize square, RGBA) down to `dstSize` square.
+//
+// Shared with wall_tiles.cpp, which resamples art the same way and for the same
+// reason: a texture array layer is a fixed square, and art authored larger than
+// it is drawn is resampled once at load rather than costing the VRAM and the
+// mip chain to match.
+std::vector<uint8_t> downsample(const uint8_t* src, int srcSize, int dstSize);
 
 // The pickup sprite set, in the order the texture array's layers use. A pickup
 // kind maps to one of these in the renderer; kinds with no art here keep the

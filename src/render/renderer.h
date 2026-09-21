@@ -14,6 +14,7 @@
 #include "render/signs.h"
 #include "render/target.h"
 #include "render/texture_array.h"
+#include "render/wall_tiles.h"
 
 #include <glm/mat4x4.hpp>
 #include <array>
@@ -440,6 +441,11 @@ private:
     std::unique_ptr<Shader> debugLineShader_;
 
     std::unique_ptr<TextureArray> walls_;
+    // The layers in walls_ that the renderer selects itself rather than a
+    // level's `texture` field choosing them. Resolved by name when the set is
+    // loaded, so adding or reordering tiles in the manifest cannot silently
+    // put the ship's hull on a door.
+    WallTileIndex wallTiles_;
     std::unique_ptr<TextureArray> pickupSprites_;
     std::unique_ptr<TextureArray> commFrames_;
     // One layer, its own shape: the wordmark the main menu is topped with.
