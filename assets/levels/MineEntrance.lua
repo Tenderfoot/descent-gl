@@ -28,6 +28,13 @@ tutorial {
   text = "When firing your primary weapon projectiles, they'll inherit your velocity. You'll need to compensate with your crosshair.\n\nWhen using secondary fire missiles, they fire straight toward their trajectory.",
 }
 
+tutorial {
+  id = "automapinfo",
+  clip = "automapinfo",
+  title = "Automap Navigation",
+  text = "Press TAB to access your automap.\n\nYour mousewheel will zoom you in and out of your ships position.\n\nIt Can help you find areas you haven't yet accessed.",
+}
+
 
 message {
   id = "anothermine",
@@ -35,6 +42,14 @@ message {
   speaker = "???",
   text = "You've made your way to another mine.\nGood.\nI'll help you through this one.",
   seconds = 5,
+}
+
+message {
+  id = "firstbluekeypickup",
+  clip = "firstbluekeypickup",
+  speaker = "???",
+  text = "Nice! You found a blue security key.\n But this is a dead end.\nYou'll need to use your automap to find the matching door.",
+  seconds = 10,
 }
 
 trigger {
@@ -66,5 +81,13 @@ pickup {
   once = true,              
   on_pickup = function(kind)
     show_tutorial("projvelinherit")
+  end,
+}
+
+pickup {
+  kind = "key_blue",
+  on_pickup = function()
+    comm("firstbluekeypickup")
+    after(10, function() show_tutorial("automapinfo") end)
   end,
 }
