@@ -158,8 +158,23 @@ struct PlayerState {
     int vulcanAmmo = 2000;
     int concussionAmmo = 8;
     int homingAmmo = 6;
+    // The two hitscan guns carry their own rounds rather than drawing on the
+    // energy bar. Lean on purpose: the railgun is twenty shots and the beam is
+    // twenty-five seconds of trigger, so both are weapons you pick a moment for
+    // rather than fly on.
+    int railgunAmmo = 20;
+    int lightningAmmo = 200;
     int flares = 12;
     std::array<float, WeaponCount> cooldown{};
+    // What a continuous weapon has spent but not yet paid for, in whole rounds.
+    // Its ammoCost is per SECOND, like its damage and its energy, so a step
+    // spends a fraction of a round; the fraction accumulates here and comes off
+    // the count as it crosses one. Without it a per-step deduction would empty
+    // any pool 120 times too fast, and a truncated one would be free.
+    //
+    // Indexed by weapon so the carry can never be attributed to the wrong gun.
+    // Only the continuous weapons ever use their entry.
+    std::array<float, WeaponCount> ammoCarry{};
     float flareCooldown = 0.0f;
     // Laser alternates wingtips. One bit of state that makes the weapon read
     // as a pair of guns rather than one.

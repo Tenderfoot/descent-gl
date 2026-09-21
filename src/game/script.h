@@ -65,6 +65,8 @@ struct ScriptLoadout {
     int vulcanAmmo = -1;
     int concussionAmmo = -1;
     int homingAmmo = -1;
+    int railgunAmmo = -1;
+    int lightningAmmo = -1;
     int flares = -1;
 };
 

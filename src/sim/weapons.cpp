@@ -130,14 +130,15 @@ WeaponConfig WeaponConfig::defaults() {
     homing.seekCone = 0.9f;
     homing.seekRange = 140.0f;
 
-    // Hitscan. Neither takes ammunition: a counter would mean new PlayerState
-    // fields, new HUD branches and new pickup kinds, and energy already says
-    // the thing that matters - the headlight goes out if you keep firing.
+    // Hitscan. Both carry their own rounds and cost no energy at all, the way
+    // the vulcan does: what limits them is what you found in the mine, and the
+    // energy bar is left to the headlight and the laser. Twenty shots is a
+    // weapon you pick your moment with.
     WeaponDef& railgun = cfg.weapons[WeaponRailgun];
     railgun.damage = 55.0f;
     railgun.impactImpulse = 26.0f;
     railgun.fireInterval = 1.15f;   // slow enough that a miss costs you
-    railgun.energyCost = 14.0f;
+    railgun.ammoCost = 1;
     railgun.range = 300.0f;
     railgun.color = glm::vec3(0.62f, 0.80f, 1.0f);
     railgun.beamWidth = 0.16f;
@@ -145,15 +146,15 @@ WeaponConfig WeaponConfig::defaults() {
     railgun.lightRadius = 30.0f;
     railgun.lightIntensity = 4.0f;
 
-    // Damage and energy per SECOND: weaponFire() calls this one Continuous and
-    // stepCombat multiplies both by dt. 36 a second against a drone's 26 health
+    // Damage and ammunition per SECOND: weaponFire() calls this one Continuous
+    // and stepCombat meters both by dt. 36 a second against a drone's 26 health
     // is most of a second on target, which is what makes it a different weapon
     // from the railgun rather than a faster one.
     WeaponDef& lightning = cfg.weapons[WeaponLightning];
     lightning.damage = 36.0f;
     lightning.impactImpulse = 30.0f;   // also per second; a steady push
     lightning.fireInterval = 0.14f;    // the crackle's repeat, not a damage gate
-    lightning.energyCost = 11.0f;
+    lightning.ammoCost = 8;            // rounds per SECOND: 200 is 25 s of trigger
     lightning.range = 70.0f;           // short, so it has to be flown into range
     lightning.color = glm::vec3(0.75f, 0.62f, 1.0f);
     lightning.beamWidth = 0.10f;
