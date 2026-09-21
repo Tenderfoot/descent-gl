@@ -1,3 +1,12 @@
+loadout {
+  shields = 100,
+  energy = 100,
+  vulcan = 0,
+  concussion = 0,   
+  homing = 0,
+  flares = 20,
+}
+
 tutorial {
   id = "headlightflaredemo",
   clip = "headlightflaredemo",
@@ -11,6 +20,14 @@ tutorial {
   title = "Be Sneaky",
   text = "If you stick to the shadows and turn of your headlight, you can get the jump on enemies.\n\nYou're safe as long as the exposure meter isn't past the line",
 }
+
+tutorial {
+  id = "projvelinherit",
+  clip = "projvelinherit",
+  title = "Velocity Inheritance",
+  text = "When firing your primary weapon projectiles, they'll inherit your velocity. You'll need to compensate with your crosshair.\n\nWhen using secondary fire missiles, they fire straight toward their trajectory.",
+}
+
 
 message {
   id = "anothermine",
@@ -41,5 +58,13 @@ trigger {
   once = true,
   on_enter = function()
     show_tutorial("besneaky")
+  end,
+}
+
+pickup {
+  kind = "concussion",
+  once = true,              
+  on_pickup = function(kind)
+    show_tutorial("projvelinherit")
   end,
 }
