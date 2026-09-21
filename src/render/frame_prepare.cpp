@@ -16,7 +16,7 @@ namespace dvk {
 namespace {
 
 constexpr float kEngineSilentBelow = 0.5f;
-constexpr float kEngineGain = 0.275f;
+constexpr float kEngineGain = 0.1f;
 constexpr float kEngineLowPitch = 0.72f;
 constexpr float kEngineHighPitch = 1.28f;
 
