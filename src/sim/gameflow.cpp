@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
+#include "sim/geometry.h"
 #include "sim/robots.h"
 
 #include <glm/geometric.hpp>
@@ -13,10 +14,6 @@
 namespace dvk::sim {
 
 namespace {
-
-// A door counts as passable a little before it is fully open, so flying
-// through one does not feel like squeezing past it.
-constexpr float kPassableAt = 0.75f;
 
 void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked,
                 bool opaque) {
@@ -46,6 +43,55 @@ bool hasKey(const GameState& state, KeyColor key) {
     return i < state.keys.size() && state.keys[i];
 }
 
+// How far a body is from the DOORWAY, not from the middle of it.
+//
+// The difference is the whole trigger. A door's opening is as wide as the
+// segment face it fills, which in the shipped mines runs to fifty units across
+// - so a radius drawn around its centre leaves the corners of the biggest doors
+// twenty-five units outside their own trigger, and you can sit with your hull
+// against the bottom corner of a door and have it ignore you. Measured to the
+// opening, `openDistance` means what whoever authored it thought it meant, it
+// scales with the door, and touching the slab is inside it by construction:
+// nothing can be in contact with a door and further than a ship's radius from
+// its face.
+float distanceToDoorway(const Door& door, const glm::vec3& position) {
+    return std::min(distanceToTriangle(position, door.corners[0], door.corners[1],
+                                       door.corners[2]),
+                    distanceToTriangle(position, door.corners[0], door.corners[2],
+                                       door.corners[3]));
+}
+
+// Near enough in the segment graph for a door to be worth asking about: one of
+// the two rooms it joins, or one room off either of them.
+//
+// This is a sanity check on the distance test above, not a second trigger.
+// Measuring to the opening rather than to its centre makes the volume around a
+// wide door much bigger, and a doorway can then reach `openDistance` into a
+// room it has nothing to do with, through the rock - a door opening for someone
+// on the far side of its own wall.
+//
+// The neighbours are in because the two rooms alone are not enough. Segments in
+// these mines run from ten units across to nearly forty, so a body eleven units
+// off a door in a SHORT room is standing one segment back and is still flying
+// straight at it. Cutting those out would bring back the complaint this whole
+// change exists to answer, on exactly the doors that are hardest to reach.
+bool nearDoorway(const Level& level, const Door& door, int segment) {
+    if (segment < 0) return false;
+    if (segment == door.segment || segment == door.neighbour) return true;
+    if (segment >= level.segmentCount()) return false;
+    for (const SideData& sd : level.segments[static_cast<size_t>(segment)].sides) {
+        if (!sd.isPortal()) continue;
+        if (sd.neighbour == door.segment || sd.neighbour == door.neighbour) return true;
+    }
+    return false;
+}
+
+// Close enough to a door to ask it to open, on either side of it.
+bool atDoor(const Level& level, const Door& door, const Body& body) {
+    return distanceToDoorway(door, body.position) < door.openDistance &&
+           nearDoorway(level, door, body.segment);
+}
+
 } // namespace
 
 bool sidePassable(const GameState& state, int segment, int side) {
@@ -55,18 +101,31 @@ bool sidePassable(const GameState& state, int segment, int side) {
 void buildSolidDoors(const Level& level, const GameState& state, SolidDoors& out) {
     out.clear();
     for (size_t di = 0; di < level.doors.size() && di < kMaxDoors; ++di) {
-        if (state.doors[di].openness >= kPassableAt) continue;
+        const float openness = state.doors[di].openness;
+        // Fully open is the only state with nothing in the way: both slabs are
+        // buried in the rock to either side and the doorway is just a portal.
+        if (openness >= 1.0f) continue;
         const Door& door = level.doors[di];
+        const DoorFrame frame = doorFrame(door);
+        if (!frame.valid) continue;
+
+        // Each half where it has slid to, as two triangles. The gap between
+        // them is left empty on purpose: it is the way through, and it is the
+        // whole reason this is per-slab rather than one quad over the opening.
         const int split[2][3] = {{0, 1, 2}, {0, 2, 3}};
-        for (int t = 0; t < 2 && out.count < SolidDoors::kCapacity; ++t) {
-            SolidDoors::Face& face = out.faces[static_cast<size_t>(out.count++)];
-            for (int k = 0; k < 3; ++k) {
-                face.p[static_cast<size_t>(k)] = door.corners[static_cast<size_t>(split[t][k])];
+        for (int half = 0; half < 2; ++half) {
+            const std::array<glm::vec3, 4> quad = doorSlabQuad(door, frame, half, openness);
+            for (int t = 0; t < 2 && out.count < SolidDoors::kCapacity; ++t) {
+                SolidDoors::Face& face = out.faces[static_cast<size_t>(out.count++)];
+                for (int k = 0; k < 3; ++k) {
+                    face.p[static_cast<size_t>(k)] = quad[static_cast<size_t>(split[t][k])];
+                }
+                face.normal = door.normal;
+                face.segmentA = door.segment;
+                face.segmentB = door.neighbour;
+                face.door = static_cast<int>(di);
+                face.openness = openness;
             }
-            face.normal = door.normal;
-            face.segmentA = door.segment;
-            face.segmentB = door.neighbour;
-            face.opaque = state.doors[di].openness <= 0.0f;
         }
     }
 }
@@ -113,16 +172,24 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         const Door& door = level.doors[di];
         DoorState& ds = state.doors[di];
 
-        // Anything that can open a door: the player, or a robot. A door that
-        // only the player can open makes a mine full of robots feel like a
-        // museum.
-        bool someoneNear = glm::length(player.position - door.center) < door.openDistance;
-        if (!someoneNear) {
-            for (int ri = 0; ri < robots.count && !someoneNear; ++ri) {
-                const Robot& robot = robots.robots[static_cast<size_t>(ri)];
-                if (!robot.alive) continue;
-                someoneNear = glm::length(robot.body.position - door.center) < door.openDistance;
-            }
+        // Everything that asks a door to open.
+        //
+        // Flying up to it, touching it, or shooting it: three ways of saying
+        // the same thing, which is that the player is at this door and wants
+        // through it. Touching needs no rule of its own - a hull in contact
+        // with a slab is within a ship's radius of the opening, and so is
+        // already inside any sane `openDistance`.
+        //
+        // A robot gets the proximity but not the shot: a door only the player
+        // can open makes a mine full of robots feel like a museum, while a door
+        // that flies open because two robots traded fire near it is a mine that
+        // will not hold still.
+        const bool playerAsking = atDoor(level, door, player) || combat.doorsStruck.struck(di);
+        bool someoneNear = playerAsking;
+        for (int ri = 0; ri < robots.count && !someoneNear; ++ri) {
+            const Robot& robot = robots.robots[static_cast<size_t>(ri)];
+            if (!robot.alive) continue;
+            someoneNear = atDoor(level, door, robot.body);
         }
 
         // A locked door does not even acknowledge you without the key. Robots
@@ -139,8 +206,10 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         // Refused. Only for the player: a robot bumping into a door it cannot
         // open is not something the player needs told about, and every robot in
         // the mine buzzing at every locked door would be unbearable.
-        if (!mayOpen && ds.lockedTimer <= 0.0f &&
-            glm::length(player.position - door.center) < door.openDistance) {
+        //
+        // Asked the same way it is asked to open, shot included, so that firing
+        // at a locked door answers rather than silently doing nothing.
+        if (!mayOpen && ds.lockedTimer <= 0.0f && playerAsking) {
             ds.lockedTimer = kLockedRefusalInterval;
             emit(events, Cue::DoorLocked, door.center, door.segment);
         }
@@ -171,6 +240,11 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         // cracked open at all.
         setBlocked(state, level, di, ds.openness < kPassableAt, ds.openness <= 0.0f);
     }
+
+    // Spent, whether or not a door was standing where the shot landed. Held for
+    // exactly one step: a hit is a knock, not a button that stays pressed, and
+    // what keeps the door open from here is `closeDelay` like any other.
+    combat.doorsStruck.clear();
 
     // --- pickups ---------------------------------------------------------
     for (size_t pi = 0; pi < level.pickups.size() && pi < kMaxPickups; ++pi) {

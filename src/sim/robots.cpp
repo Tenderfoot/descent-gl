@@ -80,7 +80,6 @@ RobotConfig RobotConfig::defaults() {
     drone.speed = 19.0f;
     drone.acceleration = 34.0f;
     drone.turnRate = 3.0f;
-    drone.sightRange = 80.0f;
     drone.attackRange = 45.0f;
     drone.aggression = 0.8f;
     drone.retreatThreshold = 0.35f;
@@ -107,7 +106,6 @@ RobotConfig RobotConfig::defaults() {
     gunner.speed = 13.0f;
     gunner.acceleration = 22.0f;
     gunner.turnRate = 2.0f;
-    gunner.sightRange = 110.0f;
     gunner.attackRange = 75.0f;
     gunner.aggression = 0.55f;
     gunner.retreatThreshold = 0.3f;
@@ -134,7 +132,6 @@ RobotConfig RobotConfig::defaults() {
     brute.speed = 8.5f;
     brute.acceleration = 14.0f;
     brute.turnRate = 1.3f;
-    brute.sightRange = 95.0f;
     brute.attackRange = 55.0f;
     brute.aggression = 0.95f;   // barely retreats; it is the wall you run into
     brute.retreatThreshold = 0.15f;
@@ -163,7 +160,6 @@ RobotConfig RobotConfig::defaults() {
     reactor.speed = 0.0f;
     reactor.acceleration = 0.0f;
     reactor.turnRate = 0.8f;
-    reactor.sightRange = 130.0f;
     reactor.attackRange = 130.0f;
     reactor.aggression = 1.0f;      // never retreats; it cannot move anyway
     reactor.retreatThreshold = -1.0f;
@@ -219,7 +215,6 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "speed", def.speed);
             get(tj, "acceleration", def.acceleration);
             get(tj, "turnRate", def.turnRate);
-            get(tj, "sightRange", def.sightRange);
             get(tj, "attackRange", def.attackRange);
             get(tj, "aggression", def.aggression);
             get(tj, "retreatThreshold", def.retreatThreshold);
@@ -268,7 +263,6 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["speed"] = def.speed;
         tj["acceleration"] = def.acceleration;
         tj["turnRate"] = def.turnRate;
-        tj["sightRange"] = def.sightRange;
         tj["attackRange"] = def.attackRange;
         tj["aggression"] = def.aggression;
         tj["retreatThreshold"] = def.retreatThreshold;
@@ -354,7 +348,7 @@ void rebuildPathField(const Level& level, RobotState& state, int playerSegment,
     state.pathValidCount = n;
     for (int i = 0; i < n; ++i) state.distanceToPlayer[static_cast<size_t>(i)] = -1;
     state.pathSegment = playerSegment;
-    state.pathDoorCount = doors ? doors->count : 0;
+    state.pathDoorCount = doors ? doors->shutCount() : 0;
     if (playerSegment < 0 || playerSegment >= n) return;
 
     // The queue is the distance array itself walked in order, so no allocation.
@@ -443,7 +437,11 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 const OccluderSet* occluders) {
     (void)weapons;
 
-    const int shutDoors = doors ? doors->count : 0;
+    // Doors a robot still cannot route through, not doors present: a slab stays
+    // in the geometry until its door is fully open, so the face total no longer
+    // moves on the step passability changes and a field keyed to it would go
+    // stale with every robot still steering around an open doorway.
+    const int shutDoors = doors ? doors->shutCount() : 0;
     if (state.pathSegment != player.segment || state.pathDoorCount != shutDoors) {
         rebuildPathField(level, state, player.segment, doors);
     }
@@ -517,7 +515,16 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         const glm::vec3 toPlayer = player.position - robot.body.position;
         const float distance = glm::length(toPlayer);
         bool canSee = false;
-        if (distance < def.sightRange && distance > 1e-3f) {
+        // No range test. Distance is not what decides whether a robot has
+        // noticed you - line of sight and whether you are lit are, and the
+        // mine's own bends, pillars and shut doors are what break them. A
+        // radius drawn around each robot only added a second, invisible rule
+        // on top, so that standing in plain view down a lit gallery was safe
+        // for no reason the player could see.
+        //
+        // What is left is `distance > 1e-3f`, which is not a range: a robot
+        // sitting exactly on the player has no direction to cast along.
+        if (distance > 1e-3f) {
             const glm::vec3 dir = toPlayer / distance;
             const RayHit hit =
                 raycast(level, robot.body.position, dir, distance, robot.body.segment, doors);

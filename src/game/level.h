@@ -149,9 +149,10 @@ struct WallTriangle {
     int side = 0;
 };
 
-// A door fills one portal. Opens when a body comes close, closes again after a
-// delay, and refuses to open at all while either of its locks holds: without
-// the right key, or, for an emergency hatch, while the reactor is still up.
+// A door fills one portal. Opens when a body comes close or when the player
+// shoots it, closes again after a delay, and refuses to open at all while
+// either of its locks holds: without the right key, or, for an emergency hatch,
+// while the reactor is still up.
 struct Door {
     int segment = 0;
     int side = 0;
@@ -170,6 +171,10 @@ struct Door {
     // A hatch in a level with no reactor never opens, which is the honest
     // answer: there is nothing that could ever unseal it.
     bool requiresReactor = false;
+    // How close something has to get before the door opens, measured to the
+    // nearest point of the OPENING rather than to its centre. A door's opening
+    // is as wide as the segment face it fills, so a radius about the centre
+    // would leave the corners of the widest doors outside their own trigger.
     float openDistance = 11.0f;
     float openTime = 0.9f;      // seconds to travel from shut to open
     float closeDelay = 2.5f;    // seconds held open after nothing is near
@@ -179,6 +184,51 @@ struct Door {
     glm::vec3 center{0.0f};
     glm::vec3 normal{0.0f};
 };
+
+// A door slab is oversized by this much at the frame and at the top and bottom,
+// so its outer faces sit inside the rock rather than exactly in the plane of the
+// adjacent wall. Exactly coplanar faces from two different meshes z-fight in the
+// depth prepass and then disagree in every light pass, which showed as a fizzing
+// strip around the door frame.
+inline constexpr float kSlabMargin = 0.25f;
+
+// The slab mesh is scaled to 0.9 across the doorway's normal, so a slab's face
+// stands this far out from the plane of the opening.
+inline constexpr float kSlabHalfThickness = 0.45f;
+
+// The opening's own frame, derived from its four corners rather than from the
+// segment, so a deformed doorway still gets a slab and a sign that fit it.
+//
+// THIS IS WHERE THE TWO HALVES OF A DOOR ARE. It lives in the level rather than
+// in the renderer because collision needs the same answer: a door blocks a body
+// exactly where its slabs are, and a slab drawn in one place and collided
+// somewhere else is a door you can fly through while looking at it.
+struct DoorFrame {
+    glm::vec3 across{1.0f, 0.0f, 0.0f};   // unit, left to right across the opening
+    glm::vec3 up{0.0f, 1.0f, 0.0f};       // unit
+    glm::vec3 normal{0.0f, 0.0f, 1.0f};   // unit, out of the doorway
+    float width = 0.0f;                   // the whole opening, not a half
+    float height = 0.0f;
+    // Half-extent of one slab across the opening, and how far that slab travels
+    // to end up entirely buried in the wall.
+    float halfWidth = 0.0f;
+    float travel = 0.0f;
+    bool valid = false;
+};
+
+DoorFrame doorFrame(const Door& door);
+
+// How far half `half` of a door has slid from where it sits when shut.
+float doorSlide(const DoorFrame& frame, int half, float openness);
+
+// The four corners of one half's slab, in the plane of the opening, at this
+// openness. Wound so `door.normal` is the outward normal of the quad.
+//
+// Zero thickness on purpose: a door stops a body at the plane of its doorway,
+// and giving the collision quad the mesh's 0.9 of depth would only mean the
+// ship stopping half a unit short of the slab it can see.
+std::array<glm::vec3, 4> doorSlabQuad(const Door& door, const DoorFrame& frame, int half,
+                                      float openness);
 
 // The three keys are last on purpose, and anything new goes in front of them:
 // the automap, the render size and the loop test all ask "is this a key" as

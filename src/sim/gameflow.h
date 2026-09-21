@@ -2,6 +2,7 @@
 
 #include "game/level.h"
 #include "sim/body.h"
+#include "sim/collision.h"
 #include "sim/events.h"
 #include "sim/triggers.h"
 
@@ -15,17 +16,22 @@ namespace dvk::sim {
 struct CombatState;
 struct RobotState;
 struct RobotConfig;
-struct SolidDoors;
 
 // Which side of a segment is currently shut, in the two senses a door has.
 //
-// `blocked` is what a body cannot get through: a door counts as passable a
-// little before it is fully open. `opaque` is what nothing can be seen or lit
-// through: only a door that is FULLY shut. The moment a door starts to open
-// the room behind it comes into view through the gap, while the slab still
-// stops the ship for most of its travel. Both arrays are written together
-// from the same door state, so the portal walk, the light flood and collision
-// can never disagree about the same door.
+// `blocked` is what a body cannot ROUTE through: a door counts as a way through
+// a little before it is fully open, per kPassableAt. It is not the collision
+// answer - what actually stops a body is the door's two slabs, which are exact
+// at every openness (see SolidDoors) - so a ship small enough for the gap can
+// be through a door this still calls blocked. What reads this is the portal
+// walk and the robots' path search, which want "is this a route" rather than
+// "is there steel at this exact point".
+//
+// `opaque` is what nothing can be seen or lit through: only a door that is
+// FULLY shut. The moment a door starts to open the room behind it comes into
+// view through the gap. Both arrays are written together from the same door
+// state, so the portal walk and the light flood can never disagree about the
+// same door.
 inline constexpr int kMaxFlowSegments = 128;
 
 struct DoorField {
@@ -72,7 +78,6 @@ enum class GamePhase : uint8_t {
 inline constexpr std::array<const char*, static_cast<size_t>(GamePhase::Count)> kGamePhaseNames{
     "playing", "countdown", "won", "lost"};
 
-inline constexpr int kMaxDoors = 32;
 inline constexpr int kMaxPickups = 96;
 
 struct GameState {

@@ -37,6 +37,14 @@ inline constexpr std::array<const char*, static_cast<size_t>(RobotMode::Count)> 
     "idle", "alert", "chase", "attack", "retreat", "disabled"};
 
 // Per-type data, from assets/config/robots.json.
+//
+// THERE IS NO `sightRange`, and putting one back is a regression. What a robot
+// can see is line of sight and whether the player is lit; the mine's own
+// bends, pillars and shut doors are what limit it. A per-type radius was a
+// second, invisible rule sitting on top of those, and it meant standing in
+// plain view down a lit gallery was safe for no reason the player could read.
+// `attackRange` below is a different thing and still exists: how close a robot
+// has to be before it shoots at what it has already noticed.
 struct RobotDef {
     std::string name;
     std::string model;
@@ -51,7 +59,6 @@ struct RobotDef {
     float speed = 14.0f;           // units/s
     float acceleration = 26.0f;
     float turnRate = 2.2f;         // rad/s
-    float sightRange = 90.0f;
     float attackRange = 60.0f;
     // 0 pushes in to point blank, 1 keeps its distance. Also how readily it
     // leaves Idle.

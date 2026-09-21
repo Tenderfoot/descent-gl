@@ -46,25 +46,75 @@ struct ContactLog {
     }
 };
 
-// The triangles of every door that still blocks a body, in world space.
+// How many doors a level may have. Here rather than with the game flow because
+// this is the file that owns door geometry, and the two things that have to
+// agree on the number - the slab set below and the strike set in combat.h -
+// both reach it from here.
+inline constexpr int kMaxDoors = 32;
+
+// A door counts as open to a body a little before its slabs are fully buried,
+// so flying through one does not feel like squeezing past it.
+//
+// This is the PATHING and body-to-body answer - "is this doorway a way through"
+// - and not the collision geometry, which is the slabs themselves and is exact
+// at every openness. A ship small enough to fit can already be through the gap
+// before this trips; what trips here is the robots' route planning and whether
+// two bodies either side of the doorway are allowed to shove each other.
+inline constexpr float kPassableAt = 0.25f;
+
+// The triangles of every door slab that is still in the way, in world space.
 //
 // A door is a portal in the segment graph, so it contributes nothing to the
-// static wall list. The face remains in this set until a body can pass, while
-// `opaque` becomes false at the first crack so rays and projectiles agree with
-// portal visibility. It has to work from both sides.
+// static wall list. What lives here is the two SLABS at their current positions
+// - not the whole opening - because that is what a door actually is: two halves
+// that slide apart, leaving a gap in the middle that grows. Collide against the
+// opening instead and a door is all-or-nothing, so it either stops a ship that
+// can plainly see its way through the gap or lets one through the part of the
+// doorway still covered by slab. Both of those were true before this was
+// per-slab.
+//
+// A slab is opaque at every openness - it is a steel plate - so there is no
+// per-face see-through flag any more. What a ray needs to know instead is
+// whether the door is fully SHUT, because only then can the portal behind it
+// not be crossed at all; `openness` carries that and the passability threshold
+// besides. Faces have to work from both sides.
 struct SolidDoors {
     struct Face {
         std::array<glm::vec3, 3> p{};
         glm::vec3 normal{0.0f};
         int segmentA = -1;
         int segmentB = -1;
-        bool opaque = true;
+        // Which Level::doors entry this slab belongs to, so that something
+        // hitting it - a shot, most of all - knows which door to open.
+        int door = -1;
+        float openness = 0.0f;
     };
-    static constexpr int kCapacity = 64;
+    // Four triangles per door that is not yet fully open: two slabs, two
+    // triangles each. Sized so every door a level may have can be mid-travel at
+    // once, which is the only bound that cannot be argued with - the old cap
+    // held half as many because a door left the set once it was merely passable,
+    // and a slab stays now until it is buried.
+    static constexpr int kCapacity = kMaxDoors * 4;
     std::array<Face, kCapacity> faces{};
     int count = 0;
 
     void clear() { count = 0; }
+
+    // How many of the faces belong to a door a body still cannot route through.
+    //
+    // `count` on its own no longer answers that: a slab stays in the set until
+    // its door is fully open, so the total does not change on the step a door
+    // becomes passable. Anything caching a decision that turns on passability -
+    // the robots' path field, above all - has to watch this number instead, or
+    // it keeps steering around a door that has since opened.
+    int shutCount() const {
+        int n = 0;
+        for (int i = 0; i < count; ++i) {
+            if (faces[static_cast<size_t>(i)].openness < kPassableAt) ++n;
+        }
+        return n;
+    }
+
     bool touches(int segment) const {
         for (int i = 0; i < count; ++i) {
             if (faces[static_cast<size_t>(i)].segmentA == segment ||
@@ -80,10 +130,11 @@ struct SolidDoors {
 // segments. `doors` may be null, in which case nothing is blocked.
 bool doorShut(const SolidDoors* doors, int segment, int neighbour);
 
-// True while the door is fully closed. Sight rays and projectile sweeps use
-// this instead of the body threshold: once the next room is visible through a
-// moving door, a shot can travel into it too.
-bool doorOpaque(const SolidDoors* doors, int segment, int neighbour);
+// True while the door is fully closed, and so is the one state in which the
+// portal behind it cannot be crossed by anything at all. Once the slabs have
+// started to part, sight and shots go through the gap and are stopped by the
+// slabs themselves rather than by the doorway.
+bool doorSealed(const SolidDoors* doors, int segment, int neighbour);
 
 struct CollisionConfig {
     // How many times the push-out is repeated per step. Corners need more than
@@ -199,6 +250,10 @@ struct RayHit {
     glm::vec3 normal{0.0f};
     int segment = -1;
     int triangle = -1;
+    // Which Level::doors entry was hit, or -1 for the mine itself. What lets a
+    // shot open the door it just struck, rather than dying against an anonymous
+    // surface the way it used to.
+    int door = -1;
 };
 
 // Walks the segment graph: tests the current segment's wall triangles, and on

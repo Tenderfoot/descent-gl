@@ -202,6 +202,41 @@ void validate(const Level& level, const std::string& path) {
 
 } // namespace
 
+DoorFrame doorFrame(const Door& door) {
+    DoorFrame frame;
+    const glm::vec3 acrossRaw = (door.corners[1] - door.corners[0]) +
+                                (door.corners[2] - door.corners[3]);
+    const glm::vec3 upRaw = (door.corners[3] - door.corners[0]) +
+                            (door.corners[2] - door.corners[1]);
+    frame.width = glm::length(acrossRaw) * 0.5f;
+    frame.height = glm::length(upRaw) * 0.5f;
+    if (frame.width < 1e-3f || frame.height < 1e-3f) return frame;
+
+    frame.across = acrossRaw / (frame.width * 2.0f);
+    frame.up = upRaw / (frame.height * 2.0f);
+    frame.normal = glm::normalize(glm::cross(frame.across, frame.up));
+    frame.halfWidth = frame.width * 0.25f + kSlabMargin * 0.5f;
+    frame.travel = frame.width * 0.5f + kSlabMargin;
+    frame.valid = true;
+    return frame;
+}
+
+float doorSlide(const DoorFrame& frame, int half, float openness) {
+    const float side = half == 0 ? -1.0f : 1.0f;
+    return side * openness * frame.travel;
+}
+
+std::array<glm::vec3, 4> doorSlabQuad(const Door& door, const DoorFrame& frame, int half,
+                                      float openness) {
+    const float side = half == 0 ? -1.0f : 1.0f;
+    const float centreOffset = side * frame.halfWidth + doorSlide(frame, half, openness);
+    const glm::vec3 centre = door.center + frame.across * centreOffset;
+    const glm::vec3 across = frame.across * frame.halfWidth;
+    const glm::vec3 up = frame.up * (frame.height + kSlabMargin * 2.0f) * 0.5f;
+    return {centre - across - up, centre + across - up, centre + across + up,
+            centre - across + up};
+}
+
 bool insideMine(const Level& level, const glm::vec3& point) {
     // Deliberately irrational-looking directions: a ray down an axis lies in
     // the plane of a grid-aligned wall far too often.

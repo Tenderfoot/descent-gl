@@ -453,61 +453,6 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
     }
 }
 
-namespace {
-
-// A door slab is oversized by this much at the frame and at the top and bottom,
-// so its outer faces sit inside the rock rather than exactly in the plane of the
-// adjacent wall. Exactly coplanar faces from two different meshes z-fight in the
-// depth prepass and then disagree in every light pass, which showed as a fizzing
-// strip around the door frame.
-constexpr float kSlabMargin = 0.25f;
-
-// The unit cube is scaled to 0.9 across the doorway's normal, so a slab's face
-// stands this far out from the plane of the opening.
-constexpr float kSlabHalfThickness = 0.45f;
-
-// The opening's own frame, derived from its four corners rather than from the
-// segment, so a deformed doorway still gets a slab and a sign that fit it.
-struct DoorFrame {
-    glm::vec3 across{1.0f, 0.0f, 0.0f};   // unit, left to right across the opening
-    glm::vec3 up{0.0f, 1.0f, 0.0f};       // unit
-    glm::vec3 normal{0.0f, 0.0f, 1.0f};   // unit, out of the doorway
-    float width = 0.0f;                   // the whole opening, not a half
-    float height = 0.0f;
-    // Half-extent of one slab across the opening, and how far that slab travels
-    // to end up entirely buried in the wall.
-    float halfWidth = 0.0f;
-    float travel = 0.0f;
-    bool valid = false;
-};
-
-DoorFrame doorFrame(const Door& door) {
-    DoorFrame frame;
-    const glm::vec3 acrossRaw = (door.corners[1] - door.corners[0]) +
-                                (door.corners[2] - door.corners[3]);
-    const glm::vec3 upRaw = (door.corners[3] - door.corners[0]) +
-                            (door.corners[2] - door.corners[1]);
-    frame.width = glm::length(acrossRaw) * 0.5f;
-    frame.height = glm::length(upRaw) * 0.5f;
-    if (frame.width < 1e-3f || frame.height < 1e-3f) return frame;
-
-    frame.across = acrossRaw / (frame.width * 2.0f);
-    frame.up = upRaw / (frame.height * 2.0f);
-    frame.normal = glm::normalize(glm::cross(frame.across, frame.up));
-    frame.halfWidth = frame.width * 0.25f + kSlabMargin * 0.5f;
-    frame.travel = frame.width * 0.5f + kSlabMargin;
-    frame.valid = true;
-    return frame;
-}
-
-// How far half `half` of a door has slid from where it sits when shut.
-float doorSlide(const DoorFrame& frame, int half, float openness) {
-    const float side = half == 0 ? -1.0f : 1.0f;
-    return side * openness * frame.travel;
-}
-
-}   // namespace
-
 // Places the two halves of every door. A door slides apart across the opening,
 // so the halves stay inside the doorway's own plane and end up buried in the
 // wall to either side rather than poking through the ceiling.
@@ -542,7 +487,8 @@ void Renderer::buildDoors(const RenderState& rs, const Level& level) {
 
             glm::mat4 model = glm::translate(glm::mat4(1.0f), centre) * basis;
             model = glm::scale(model, glm::vec3(frame.halfWidth * 2.0f,
-                                                frame.height + kSlabMargin * 2.0f, 0.9f));
+                                                frame.height + kSlabMargin * 2.0f,
+                                                kSlabHalfThickness * 2.0f));
 
             DoorSlab& slab = doorSlabs_[di * 2 + static_cast<size_t>(half)];
             slab.model = model;
