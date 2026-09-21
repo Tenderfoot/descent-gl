@@ -29,6 +29,8 @@ Without --seconds the whole source is encoded, so the usual call is just the
 clip directory and the file. Dropping a video onto this script in Explorer is
 that same call: the clip directory is the file's own name beside it, so
 reactorsblown.mp4 becomes reactorsblown\comm.mpg, comm.wav and comm.json.
+Dropping it on make-comm-video.bat does the same thing without needing .py
+associated with an interpreter, and takes several files at once.
 """
 
 from __future__ import annotations
@@ -256,8 +258,10 @@ def main() -> None:
         run(argv)
     finally:
         # A dropped file gets a console of its own, which closes the instant
-        # this returns - taking the error with it. Hold it open.
-        if dropped is not None and os.name == "nt" and sys.stdin.isatty():
+        # this returns - taking the error with it. Hold it open, unless
+        # make-comm-video.bat is already holding one console for a whole drop.
+        batched = os.environ.get("COMM_VIDEO_BATCH") == "1"
+        if dropped is not None and os.name == "nt" and sys.stdin.isatty() and not batched:
             try:
                 input("\npress Enter to close")
             except EOFError:
