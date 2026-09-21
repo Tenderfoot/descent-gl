@@ -28,6 +28,13 @@ tutorial {
   text = "When firing your primary weapon projectiles, they'll inherit your velocity. You'll need to compensate with your crosshair.\n\nWhen using secondary fire missiles, they fire straight toward their trajectory.",
 }
 
+tutorial {
+  id = "automapinfo",
+  clip = "automapinfo",
+  title = "Automap Navigation",
+  text = "Press TAB to access your automap.\n\nYour mousewheel will zoom you in and out of your ships position.\n\nIt Can help you find areas you haven't yet accessed.",
+}
+
 
 message {
   id = "anothermine",
@@ -66,5 +73,12 @@ pickup {
   once = true,              
   on_pickup = function(kind)
     show_tutorial("projvelinherit")
+  end,
+}
+
+pickup {
+  kind = "key_blue",
+  on_pickup = function()
+    after(5, function() show_tutorial("automapinfo") end)
   end,
 }
