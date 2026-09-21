@@ -128,6 +128,12 @@ void ScriptHost::clear() {
     messages_.clear();
     tutorials_.clear();
     callbackErrors_ = 0;
+    // Emptied rather than unreffed: the registry that held these references
+    // went with the state that was just closed, and there is nothing left to
+    // hand them back to.
+    deferred_ = {};
+    elapsed_ = 0.0f;
+    lastElapsed_ = 0.0f;
 }
 
 void ScriptHost::load(const Level& level) {
@@ -166,6 +172,7 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "tutorial", &ScriptHost::declareTutorial);
     expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
     expose(state_, this, "set_shields", &ScriptHost::setShields);
+    expose(state_, this, "after", &ScriptHost::scheduleAfter);
 
     if (luaL_loadfile(state_, level.scriptPath.c_str()) != LUA_OK) {
         const char* error = lua_tostring(state_, -1);
@@ -503,6 +510,76 @@ int ScriptHost::showTutorial(lua_State* state) {
     return 0;
 }
 
+// The one thing a callback can do that happens later: after(15, function() ...
+// end) puts a second beat fifteen seconds behind the first, which is what a
+// comm on a key followed by a tutorial about what the key opens actually
+// wants. A timer cannot express it, because a timer's moment is authored
+// against the level's start and this one is not known until the player does
+// something.
+//
+// Counted on the level clock, so a delay does not run down while the game is
+// paused or while a tutorial pane holds the simulation. Reference-counted in
+// the registry exactly like an authored callback, and dropped wholesale by a
+// restart: see cancelDeferred().
+int ScriptHost::scheduleAfter(lua_State* state) {
+    ScriptHost* host = self(state);
+    const double seconds = luaL_checknumber(state, 1);
+    luaL_checktype(state, 2, LUA_TFUNCTION);
+    if (!host->draining_) return luaL_error(state, "after() is only valid inside a callback");
+    // The same floor a timer has, and for the same reason: a delay of zero is
+    // not a delay, and something that wants to happen now can just happen now.
+    if (!std::isfinite(seconds) || seconds < 0.05 || seconds > 3600.0) {
+        return luaL_error(state, "after() expects a delay between 0.05 and 3600 seconds");
+    }
+
+    int slot = -1;
+    for (int i = 0; i < kMaxDeferredCalls && slot < 0; ++i) {
+        if (!host->deferred_[static_cast<size_t>(i)].active) slot = i;
+    }
+    // Warned rather than raised, like a second tutorial in one frame. An
+    // error here would disable the callback that made it, which is a far
+    // bigger loss than the one beat that could not be scheduled.
+    if (slot < 0) {
+        log::warn("Lua after({:.2f}) ignored: {} delayed calls are already outstanding", seconds,
+                  kMaxDeferredCalls);
+        return 0;
+    }
+
+    lua_pushvalue(state, 2);
+    Deferred& entry = host->deferred_[static_cast<size_t>(slot)];
+    entry.callback = luaL_ref(state, LUA_REGISTRYINDEX);
+    entry.due = host->elapsed_ + static_cast<float>(seconds);
+    entry.active = true;
+    return 0;
+}
+
+void ScriptHost::cancelDeferred() {
+    for (Deferred& entry : deferred_) {
+        if (!entry.active) continue;
+        if (state_) luaL_unref(state_, LUA_REGISTRYINDEX, entry.callback);
+        entry = Deferred{};
+    }
+}
+
+// Every delay that has come due, in slot order. The slot is emptied before the
+// call rather than after it, so a callback that schedules another delay can
+// have the slot it just vacated - and so a callback that fails is already off
+// the list by the time it is disabled.
+//
+// Nothing scheduled during this pass can run in it: after() counts from
+// elapsed_, which is fixed for the whole drain, and its floor is well clear of
+// zero.
+void ScriptHost::runDeferred() {
+    for (Deferred& entry : deferred_) {
+        if (!entry.active || entry.due > elapsed_) continue;
+
+        const int callback = entry.callback;
+        entry = Deferred{};
+        call(callback, "delayed callback");
+        luaL_unref(state_, LUA_REGISTRYINDEX, callback);
+    }
+}
+
 int ScriptHost::findMessage(const char* id) const {
     for (size_t i = 0; i < messages_.size(); ++i) {
         if (messages_[i].id == id) return static_cast<int>(i);
@@ -541,6 +618,15 @@ void ScriptHost::drain(sim::GameState& game) {
         game.pickupHooks.clearPending();
         return;
     }
+
+    // A clock that has gone backwards is a level that has started again, and
+    // a delay scheduled by the run before it belongs to nobody. Noticed here
+    // rather than announced by whoever restarts, because there is more than
+    // one way back to the beginning of a level and a hook every one of them
+    // has to remember to call is a hook one of them will not.
+    if (game.elapsed < lastElapsed_) cancelDeferred();
+    lastElapsed_ = game.elapsed;
+    elapsed_ = game.elapsed;
 
     draining_ = true;
     const int count = game.triggers.pendingCount;
@@ -585,6 +671,10 @@ void ScriptHost::drain(sim::GameState& game) {
             callback = LUA_NOREF;
         }
     }
+    // Delays last, after everything this frame has had its say: a beat put in
+    // the air fifteen seconds ago is owed less immediacy than the wall the
+    // player has just flown into.
+    runDeferred();
     draining_ = false;
     game.triggers.clearPending();
     game.timers.clearPending();
