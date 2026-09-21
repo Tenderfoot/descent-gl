@@ -74,6 +74,12 @@ struct ScriptLoadout {
 // script left alone are not touched.
 void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player);
 
+// How many delayed callbacks can be outstanding at once. A level with sixteen
+// beats in the air at the same moment is already doing something stranger than
+// the mine can express, and a fixed array is what keeps a runtime-scheduled
+// call out of the heap.
+inline constexpr int kMaxDeferredCalls = 16;
+
 // Owns the one Lua state for the loaded level. It executes only in the game
 // layer: once while loading declarations and while draining trigger callbacks
 // after the fixed-step accumulator. No Lua object crosses into sim or render.
@@ -114,6 +120,17 @@ private:
         size_t limit = 8u * 1024u * 1024u;
     };
 
+    // One call a callback asked to have made later. `due` is on the level's
+    // own clock, the same seconds-since-start a timer is authored against, so
+    // a delay does not run down while the game is paused or while a tutorial
+    // pane has the simulation stopped - which is the whole point of measuring
+    // it there rather than against the wall clock.
+    struct Deferred {
+        float due = 0.0f;
+        int callback = 0;
+        bool active = false;
+    };
+
     static void* allocate(void* ud, void* ptr, size_t oldSize, size_t newSize);
     static void instructionLimit(lua_State* state, lua_Debug* debug);
     static int declareMessage(lua_State* state);
@@ -125,6 +142,7 @@ private:
     static int declareTutorial(lua_State* state);
     static int showTutorial(lua_State* state);
     static int setShields(lua_State* state);
+    static int scheduleAfter(lua_State* state);
 
     static ScriptHost* self(lua_State* state);
     int findMessage(const char* id) const;
@@ -133,6 +151,10 @@ private:
     // how a pickup hook is told which kind was taken; a trigger or a timer has
     // nothing to say and passes nullptr.
     bool call(int functionRef, const char* context, const char* argument = nullptr);
+    // Drops every outstanding delayed call and releases its reference. What a
+    // restart does to the beats a previous run left in the air.
+    void cancelDeferred();
+    void runDeferred();
 
     lua_State* state_ = nullptr;
     MemoryBudget memory_;
@@ -149,6 +171,13 @@ private:
     std::array<int, sim::kMaxTriggers> callbacks_{};
     std::array<int, sim::kMaxTimers> timerCallbacks_{};
     std::array<int, sim::kMaxPickupHooks> pickupCallbacks_{};
+    std::array<Deferred, kMaxDeferredCalls> deferred_{};
+    // The level clock as of this drain, and as of the last one. The first is
+    // what after() counts from; the second is how a restart is noticed, since
+    // a clock that has gone backwards can only mean the run began again and
+    // the delays the last one scheduled are for a game that no longer exists.
+    float elapsed_ = 0.0f;
+    float lastElapsed_ = 0.0f;
     std::vector<ScriptMessage> messages_;
     std::vector<ScriptTutorial> tutorials_;
     int callbackErrors_ = 0;
