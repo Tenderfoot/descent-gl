@@ -15,9 +15,25 @@ namespace dvk {
 struct Level;
 
 namespace sim {
+struct CombatState;
 struct GameState;
 struct PlayerState;
+struct RobotConfig;
+struct RobotState;
 }
+
+// The rest of the run, for the questions a callback is allowed to ask. The
+// GameState is not in here because drain() is handed that already; these are
+// the three things it is not.
+//
+// Pointers rather than references because not every caller has a mine around
+// it: the script test drains levels with no ship and no robots in them, and a
+// query with nothing to read should say so rather than invent an answer.
+struct ScriptWorld {
+    const sim::CombatState* combat = nullptr;
+    const sim::RobotState* robots = nullptr;
+    const sim::RobotConfig* robotConfig = nullptr;
+};
 
 struct ScriptMessage {
     std::string id;
@@ -80,6 +96,11 @@ void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player);
 // call out of the heap.
 inline constexpr int kMaxDeferredCalls = 16;
 
+// How many scripted responses to the run's own moments a level may declare.
+// Small because there are only three moments to respond to, and a level with
+// sixteen things to say about them is a level with a pacing problem.
+inline constexpr int kMaxEventHooks = 16;
+
 // Owns the one Lua state for the loaded level. It executes only in the game
 // layer: once while loading declarations and while draining trigger callbacks
 // after the fixed-step accumulator. No Lua object crosses into sim or render.
@@ -92,7 +113,10 @@ public:
 
     void load(const Level& level);
     void clear();
-    void drain(sim::GameState& game);
+    // `world` is what the query functions read. A drain without one still
+    // runs every callback; only the queries notice, and they refuse rather
+    // than answering about a mine that is not there.
+    void drain(sim::GameState& game, const ScriptWorld& world = {});
 
     const sim::TriggerSet& triggers() const { return triggers_; }
     const sim::TimerSet& timers() const { return timers_; }
@@ -120,6 +144,14 @@ private:
         size_t limit = 8u * 1024u * 1024u;
     };
 
+    // A script's response to one of the run's own moments. No `once`: each
+    // moment happens at most once in a run, so the sim state that records it
+    // is already the only latch there is to keep.
+    struct EventHook {
+        sim::LevelEvent kind = sim::LevelEvent::ReactorDestroyed;
+        int callback = 0;
+    };
+
     // One call a callback asked to have made later. `due` is on the level's
     // own clock, the same seconds-since-start a timer is authored against, so
     // a delay does not run down while the game is paused or while a tutorial
@@ -138,6 +170,29 @@ private:
     static int declareTrigger(lua_State* state);
     static int declareTimer(lua_State* state);
     static int declarePickup(lua_State* state);
+    static int declareEvent(lua_State* state);
+
+    // --- queries ----------------------------------------------------------
+    //
+    // Reads, and a read is the one thing a script can do to the simulation
+    // without latching. comm() and set_shields() defer because Lua runs
+    // outside the fixed step and must not write simulation state; looking at
+    // state that has already been stepped breaks no such rule, so these
+    // answer on the spot.
+    //
+    // All of them are callback-only, for the same reason comm() is: at load
+    // there is no run to ask about.
+    static int queryPhase(lua_State* state);
+    static int queryElapsed(lua_State* state);
+    static int queryCountdown(lua_State* state);
+    static int queryReactorAlive(lua_State* state);
+    static int queryRobotsLeft(lua_State* state);
+    static int queryRobotsAlive(lua_State* state);
+    static int queryHasKey(lua_State* state);
+    static int queryShields(lua_State* state);
+    static int queryEnergy(lua_State* state);
+    static int queryLaserLevel(lua_State* state);
+    static int queryAmmo(lua_State* state);
     static int startComm(lua_State* state);
     static int declareTutorial(lua_State* state);
     static int showTutorial(lua_State* state);
@@ -151,6 +206,12 @@ private:
     // how a pickup hook is told which kind was taken; a trigger or a timer has
     // nothing to say and passes nullptr.
     bool call(int functionRef, const char* context, const char* argument = nullptr);
+    // The common preamble of every query: refuses outside a callback, and
+    // hands back what there is to read. Never returns when it refuses.
+    const sim::GameState& queryGame(lua_State* state, const char* name) const;
+    // The same for the player and the robots, which not every drain has.
+    const sim::PlayerState& queryPlayer(lua_State* state, const char* name) const;
+    const sim::RobotState& queryRobots(lua_State* state, const char* name) const;
     // Drops every outstanding delayed call and releases its reference. What a
     // restart does to the beats a previous run left in the air.
     void cancelDeferred();
@@ -171,7 +232,13 @@ private:
     std::array<int, sim::kMaxTriggers> callbacks_{};
     std::array<int, sim::kMaxTimers> timerCallbacks_{};
     std::array<int, sim::kMaxPickupHooks> pickupCallbacks_{};
+    std::array<EventHook, kMaxEventHooks> eventHooks_{};
+    int eventHookCount_ = 0;
     std::array<Deferred, kMaxDeferredCalls> deferred_{};
+    // What the queries read. Valid only for the length of a drain, which is
+    // the only time a query can be asked.
+    const sim::GameState* queryGame_ = nullptr;
+    ScriptWorld world_;
     // The level clock as of this drain, and as of the last one. The first is
     // what after() counts from; the second is how a restart is noticed, since
     // a clock that has gone backwards can only mean the run began again and

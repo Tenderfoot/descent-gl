@@ -66,7 +66,11 @@ enum class GamePhase : uint8_t {
     Countdown,    // reactor gone, get out
     Won,
     Lost,
+    Count,
 };
+
+inline constexpr std::array<const char*, static_cast<size_t>(GamePhase::Count)> kGamePhaseNames{
+    "playing", "countdown", "won", "lost"};
 
 inline constexpr int kMaxDoors = 32;
 inline constexpr int kMaxPickups = 96;
@@ -109,6 +113,10 @@ struct GameState {
     // reason: a one-shot hook spent on the blue key is unspent again the
     // moment the level is restarted and the key is back on the floor.
     PickupHookState pickupHooks;
+    // The moments the run turns on - the reactor going up, and the two ways a
+    // level ends - waiting to be heard by the script. Named for what they are
+    // rather than `events`, which in this file is already the sound queue.
+    LevelEventState levelEvents;
 };
 
 struct GameConfig {

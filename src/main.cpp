@@ -695,7 +695,8 @@ int main(int argc, char** argv) {
         // Lua is deliberately outside the measured fixed step. Every step in
         // this rendered frame has already latched its trigger ids into POD
         // state; callbacks may allocate without compromising sim determinism.
-        script.drain(cur.game);
+        script.drain(cur.game,
+                     dvk::ScriptWorld{&cur.combat, &cur.robots, &robotConfig});
         // A callback asking for the ship back. Applied to the live state only:
         // this is something that happened during the run, not a condition the
         // run begins from, and writing it to initial() would carry it across a
