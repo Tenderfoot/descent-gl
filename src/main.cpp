@@ -674,7 +674,7 @@ int main(int argc, char** argv) {
                                                 &solidObjects);
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
-                               &script.triggers(), &script.timers());
+                               &script.triggers(), &script.timers(), &script.pickupHooks());
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;

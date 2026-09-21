@@ -82,7 +82,8 @@ void initGame(const Level& level, const RobotState& robots, GameState& out) {
 
 void stepGame(const Level& level, const GameConfig& cfg, GameState& state, CombatState& combat,
               RobotState& robots, const RobotConfig& robotCfg, Body& player, float dt,
-              EventQueue* events, const TriggerSet* triggers, const TimerSet* timers) {
+              EventQueue* events, const TriggerSet* triggers, const TimerSet* timers,
+              const PickupHookSet* pickupHooks) {
     if (state.phase == GamePhase::Won || state.phase == GamePhase::Lost) return;
 
     state.elapsed += dt;
@@ -222,6 +223,11 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             case PickupKind::Count:
                 break;
         }
+
+        // After the effect, not before it: a callback raised from here runs
+        // once the frame's steps are done, and what it says about the thing
+        // just collected should be true by the time it says it.
+        notePickup(state.pickupHooks, static_cast<int>(pickup.kind), pickupHooks);
     }
 
     // --- the reactor -----------------------------------------------------
