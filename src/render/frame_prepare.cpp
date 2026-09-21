@@ -201,7 +201,7 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
         // explosion rather than on top of it.
         audio.setAmbient(dvk::audio::Ambient::Alarm,
                          cur.game.phase == dvk::sim::GamePhase::Countdown
-                             ? 0.25f + 0.35f * cur.game.shake
+                             ? 0.1f + 0.2f * cur.game.shake
                              : 0.0f);
 
         rs.pickupCount = static_cast<int>(
