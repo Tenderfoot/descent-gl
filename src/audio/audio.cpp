@@ -61,7 +61,7 @@ constexpr std::array<CueDef, static_cast<size_t>(Cue::Count)> kCues{{
     {"pickup.wav", 0.55f, 0.04f},         // Pickup
     {"key_pickup.wav", 0.70f, 0.00f},     // KeyPickup
     {"reactor.wav", 1.00f, 0.00f},        // ReactorDestroyed
-    {"countdown.wav", 0.60f, 0.00f},      // CountdownWarn
+    {"countdown.wav", 0.10f, 0.00f},      // CountdownWarn
     {"exit.wav", 0.90f, 0.00f},           // Exit
 }};
 
