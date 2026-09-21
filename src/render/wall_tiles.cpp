@@ -176,7 +176,27 @@ WallTiles loadWallTiles(const char* manifestPath) {
         // levels and the renderer depend on - having to change with it.
         const std::string file = entry.value("file", name + ".png");
         tiles.layers.push_back(loadTile(directory / file, tiles.size));
+
+        TileAnim anim;
+        if (const auto scroll = entry.find("scroll"); scroll != entry.end()) {
+            if (!scroll->is_array() || scroll->size() != 2) {
+                log::fatal("tile manifest '{}': '{}' has a \"scroll\" that is not [u, v]",
+                           path.string(), name);
+            }
+            anim.scrollU = (*scroll)[0].get<float>();
+            anim.scrollV = (*scroll)[1].get<float>();
+        }
+        anim.turbulence = entry.value("turbulence", 0.0f);
+        tiles.anim.push_back(anim);
+
         tiles.names.push_back(std::move(name));
+    }
+
+    if (static_cast<int>(tiles.layers.size()) > kMaxWallTiles) {
+        log::fatal("tile manifest '{}' lists {} tiles; the emissive pass carries animation for at "
+                   "most {}. Raise kMaxWallTiles in wall_tiles.h and uTileAnim in "
+                   "shaders/wall_emissive.frag together.",
+                   path.string(), tiles.layers.size(), kMaxWallTiles);
     }
 
     for (const auto& [name, member] : kRequired) {
@@ -189,8 +209,12 @@ WallTiles loadWallTiles(const char* manifestPath) {
         tiles.index.*member = layer;
     }
 
-    log::info("wall tiles: {} layer(s) at {}px from '{}'", tiles.layers.size(), tiles.size,
-              directory.string());
+    int animated = 0;
+    for (const TileAnim& a : tiles.anim) {
+        if (!a.still()) ++animated;
+    }
+    log::info("wall tiles: {} layer(s) at {}px from '{}', {} animated", tiles.layers.size(),
+              tiles.size, directory.string(), animated);
     return tiles;
 }
 

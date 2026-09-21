@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <string>
 #include <string_view>
 
 namespace dvk::gl {
@@ -102,6 +103,8 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
 
     depthShader_ = std::make_unique<Shader>("shaders/depth.vert", "shaders/depth.frag");
     wallShader_ = std::make_unique<Shader>("shaders/wall.vert", "shaders/wall.frag");
+    emissiveShader_ =
+        std::make_unique<Shader>("shaders/wall_emissive.vert", "shaders/wall_emissive.frag");
     unlitShader_ = std::make_unique<Shader>("shaders/unlit.vert", "shaders/unlit.frag");
     shadowShader_ = std::make_unique<Shader>("shaders/shadow.vert", "shaders/shadow.frag");
     fullscreenShader_ =
@@ -153,6 +156,19 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
         const WallTiles tiles = loadWallTiles(kWallTileManifest);
         walls_ = std::make_unique<TextureArray>(tiles.size, tiles.layers, "walls");
         wallTiles_ = tiles.index;
+
+        // Uniform rather than per-draw state: which tiles move is a property of
+        // the set, fixed from here to the end of the run, so it is written once
+        // and the pass only ever sets the clock.
+        emissiveShader_->bind();
+        for (int i = 0; i < kMaxWallTiles; ++i) {
+            const TileAnim a = i < static_cast<int>(tiles.anim.size())
+                                   ? tiles.anim[static_cast<size_t>(i)]
+                                   : TileAnim{};
+            const std::string name = "uTileAnim[" + std::to_string(i) + "]";
+            emissiveShader_->setVec4(name.c_str(),
+                                     glm::vec4(a.scrollU, a.scrollV, a.turbulence, 0.0f));
+        }
     }
     // Clamped rather than repeating: a sprite is a picture with an edge, and
     // the art is authored far larger than kPickupSpriteSize, so it is resampled
@@ -2124,6 +2140,40 @@ void Renderer::visualiseStencil() {
     glDisable(GL_BLEND);
 }
 
+void Renderer::emissivePass(const RenderState& rs, const PortalWalk& walk) {
+    if (!levelMesh_->anyEmissive()) return;
+
+    // The same depth contract as a light pass: shade exactly the fragments the
+    // prepass decided are visible, write no depth, add to what is there.
+    //
+    // The stencil is off, and that is the point rather than an omission. A
+    // light pass is masked by the shadow volumes of everything between the
+    // light and the wall; this surface IS the source, so there is nothing
+    // between it and itself to cast.
+    glDepthMask(GL_FALSE);
+    glDepthFunc(GL_EQUAL);
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE);
+    glEnable(GL_CULL_FACE);
+
+    emissiveShader_->bind();
+    walls_->bind(0);
+    emissiveShader_->setFloat("uTime", rs.elapsed);
+    emissiveShader_->setMat4("uModel", glm::mat4(1.0f));
+
+    levelMesh_->bind();
+    // The same list the prepass walked, so every fragment this pass shades is
+    // one the prepass wrote depth for and GL_EQUAL has something to match.
+    for (int segment : walk.visible()) {
+        levelMesh_->drawSegmentEmissive(segment);
+    }
+
+    glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_GEQUAL);
+}
+
 void Renderer::unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk) {
     (void)level;
     glDisable(GL_STENCIL_TEST);
@@ -2237,6 +2287,9 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     timers_.passBegin(GpuTimers::Lights);
     lightPasses(rs, walk);
     timers_.passEnd(GpuTimers::Lights);
+    timers_.passBegin(GpuTimers::Emissive);
+    emissivePass(rs, walk);
+    timers_.passEnd(GpuTimers::Emissive);
     timers_.passBegin(GpuTimers::Unlit);
     unlitPass(rs, level, walk);
     timers_.passEnd(GpuTimers::Unlit);

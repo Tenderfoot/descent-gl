@@ -21,7 +21,7 @@ namespace dvk::gl {
 // last good numbers stay on screen.
 class GpuTimers {
 public:
-    enum Pass { Prepass, Lights, Unlit, PassCount };
+    enum Pass { Prepass, Lights, Emissive, Unlit, PassCount };
 
     // Per-light timings stop at this many lights. The whole Lights pass is
     // timed separately, so lights beyond this limit are still included in the

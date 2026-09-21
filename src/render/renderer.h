@@ -415,6 +415,10 @@ private:
     void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
     void lightPasses(const RenderState& rs, const PortalWalk& walk);
+    // Every emitting side the portal walk can see, once for the frame. Between
+    // the light passes and the unlit pass because it is neither: it reads the
+    // prepass depth the way a light does, and carries no light of its own.
+    void emissivePass(const RenderState& rs, const PortalWalk& walk);
     void unlitPass(const RenderState& rs, const Level& level, const PortalWalk& walk);
     void buildDoors(const RenderState& rs, const Level& level);
     void buildDoorSigns(const RenderState& rs, const Level& level, const PortalWalk& walk);
@@ -435,6 +439,7 @@ private:
 
     std::unique_ptr<Shader> depthShader_;
     std::unique_ptr<Shader> wallShader_;
+    std::unique_ptr<Shader> emissiveShader_;
     std::unique_ptr<Shader> unlitShader_;
     std::unique_ptr<Shader> shadowShader_;
     std::unique_ptr<Shader> fullscreenShader_;

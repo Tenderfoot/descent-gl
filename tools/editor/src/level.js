@@ -67,6 +67,7 @@ export function parseLevel(json, path = '<memory>') {
                 neighbour: side.portal ?? -1,
                 door: side.door ?? -1,
                 texture: side.texture ?? 0,
+                emissive: Number(side.emissive ?? 0),
                 // null, not a filled array: the loader distinguishes "authored"
                 // from "left to the planar default" and so must the writer.
                 uv: Array.isArray(side.uv) ? side.uv.map((p) => [Number(p[0]), Number(p[1])]) : null,
@@ -232,6 +233,9 @@ export function serializeLevel(level) {
                 // editor resolves doors at load.
             } else {
                 side.texture = sd.texture;
+                // Omitted at the default, matching saveLevel: a level that
+                // emits nowhere writes exactly what it did before sides could.
+                if (sd.emissive > 0) side.emissive = sd.emissive;
             }
             if (sd.uv) side.uv = sd.uv.map((p) => [p[0], p[1]]);
             return side;

@@ -61,6 +61,18 @@ struct SideData {
     // opening while it is shut.
     int door = -1;
     int texture = 0;     // layer in the wall texture array, walls only
+    // How brightly this side emits, on top of whatever light reaches it. 0,
+    // the default, is an ordinary wall that is only ever as bright as the
+    // lights in the room.
+    //
+    // This is emissive, not ambient. The project's bet is that a surface no
+    // light reaches stays black, and this keeps it: a lava floor is a specific
+    // wall that emits, not a floor lifted off black everywhere. It does not
+    // light anything else either - the renderer has no area lights and shadow
+    // volumes have no meaning for one - so a glowing pool that should also lay
+    // light on the room around it is a side with `emissive` AND a Light in the
+    // segment, which is the same arrangement as a lamp with a fixture.
+    float emissive = 0.0f;
     std::array<glm::vec2, 4> uv{};
 
     // Chosen at load time, never authored: which diagonal splits the quad.

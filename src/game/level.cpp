@@ -397,6 +397,11 @@ Level loadLevel(const std::string& path) {
                 sd.neighbour = sides[i].value("portal", -1);
                 sd.door = sides[i].value("door", -1);
                 sd.texture = sides[i].value("texture", 0);
+                sd.emissive = sides[i].value("emissive", 0.0f);
+                if (sd.emissive < 0.0f) {
+                    log::fatal("{}: segment {} side {} has a negative emissive ({})", path,
+                               level.segments.size(), i, sd.emissive);
+                }
                 if (auto it = sides[i].find("uv"); it != sides[i].end()) {
                     for (size_t k = 0; k < 4 && k < it->size(); ++k) {
                         sd.uv[k] = glm::vec2((*it)[k][0].get<float>(), (*it)[k][1].get<float>());
@@ -678,6 +683,9 @@ bool saveLevel(const std::string& path, const Level& level) {
                 if (sd.door >= 0) side["door"] = sd.door;
             } else {
                 side["texture"] = sd.texture;
+                // Omitted at the default, so a level that emits nowhere reads
+                // exactly as it did before sides could emit at all.
+                if (sd.emissive > 0.0f) side["emissive"] = sd.emissive;
             }
             sj["sides"].push_back(side);
         }

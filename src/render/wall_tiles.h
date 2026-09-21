@@ -29,6 +29,29 @@ struct WallTileIndex {
     int hull = 0;      // the ship, so one texture array covers everything lit
 };
 
+// The most layers the emissive pass can carry animation for. Its shader holds
+// one vec4 per tile in a uniform array, which has to have a fixed length, and a
+// set is rejected at load rather than silently losing the tail.
+inline constexpr int kMaxWallTiles = 32;
+
+// How a tile moves, for the tiles that move at all. Read from the manifest and
+// applied only in the emissive pass: the lit pass runs once per light, so
+// anything computed there is computed again for every light that reaches the
+// wall, and a surface bright enough to be worth animating is being drawn by the
+// emissive pass anyway.
+struct TileAnim {
+    // UV units per second. A tile is 5.5 world units, so 0.05 here is a little
+    // over a quarter of a unit a second.
+    float scrollU = 0.0f;
+    float scrollV = 0.0f;
+    // Amplitude, in UV, of a sine warp of the lookup - the old trick for
+    // flowing lava. Its period is exactly one tile, so the warp meets itself
+    // where the tile repeats and animating cannot introduce a seam.
+    float turbulence = 0.0f;
+
+    bool still() const { return scrollU == 0.0f && scrollV == 0.0f && turbulence == 0.0f; }
+};
+
 struct WallTiles {
     // The square edge the whole set was resampled to, from the manifest. Every
     // layer of a texture array shares one size, so this is set-wide rather than
@@ -38,6 +61,7 @@ struct WallTiles {
     // Layer order, which is the order the manifest lists and the order a level
     // file's `texture: N` counts in.
     std::vector<std::string> names;
+    std::vector<TileAnim> anim;                 // one per layer, still by default
     std::vector<std::vector<uint8_t>> layers;   // size * size * 4 bytes each
 
     // The layer a name selects, or -1. For callers that want to fail softly;

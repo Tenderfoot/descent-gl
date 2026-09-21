@@ -52,6 +52,44 @@ where the tile repeats. It got worse rather than better when the set moved to
 join is just as hard. Worth knowing before reaching for `rock`, which is also
 the tile every unpainted wall defaults to.
 
+## Emitting, and moving
+
+A wall is normally only ever as bright as the lights that reach it. A side with
+`emissive` set adds its own albedo on top of that, which is what a lava pool or
+a reactor glow is:
+
+```json
+{ "texture": 13, "emissive": 2.5 }
+```
+
+The editor's side panel has an `emits` box for it. This is emissive, not
+ambient — the rest of the mine stays exactly as black as it was. It also lights
+nothing: the renderer has no area lights, so a pool that should lay light on the
+room around it wants a `Light` in the segment as well, the same pairing as a
+lamp and its fixture. The editor offers to drop one for you.
+
+A tile can also move, and the manifest is where that lives:
+
+```json
+{ "name": "lava", "scroll": [0.0, 0.03], "turbulence": 0.02 }
+```
+
+`scroll` slides the lookup in UV units per second. `turbulence` is the amplitude
+of a sine warp of it — the old flowing-lava trick — whose period is exactly one
+tile, so animating cannot pull a seam into a texture that tiles.
+
+Both are applied **only in the emissive pass**, so they show up on sides that
+emit and nowhere else. That is deliberate: the lit shader runs once per light
+per fragment, so anything animated there is computed again for every light in
+the room, while the emissive pass runs once. A tile bright enough to be worth
+animating is being drawn by that pass anyway.
+
+`reactor-plate` ships with a slow turbulence, so setting `emits` on a wall that
+uses it is the shortest way to see this working. Delete the field to still it.
+Animation is phased off the level's own elapsed time from the fixed-step
+simulation, not a wall clock, so `--frames N --screenshot` still renders the
+same picture every run.
+
 ## Four names the renderer needs
 
 Most tiles are the level author's to arrange, but four are chosen by the
