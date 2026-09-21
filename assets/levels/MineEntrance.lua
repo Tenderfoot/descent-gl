@@ -44,6 +44,14 @@ message {
   seconds = 5,
 }
 
+message {
+  id = "firstbluekeypickup",
+  clip = "firstbluekeypickup",
+  speaker = "???",
+  text = "Nice! You found a blue security key.\n But this is a dead end.\nYou'll need to use your automap to find the matching door.",
+  seconds = 10,
+}
+
 trigger {
   segment = 2,
   once = true,
@@ -79,6 +87,7 @@ pickup {
 pickup {
   kind = "key_blue",
   on_pickup = function()
-    after(5, function() show_tutorial("automapinfo") end)
+    comm("firstbluekeypickup")
+    after(10, function() show_tutorial("automapinfo") end)
   end,
 }
