@@ -959,9 +959,10 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             return out;
         };
 
-        // Which cells ever show a number at all: the laser its level, the three
-        // that spend a count their count. The railgun and the lightning gun run
-        // on energy and show none, so they are not padded for one.
+        // Which cells ever show a number at all: the laser its level, and every
+        // weapon that spends a count its count - which since the two hitscan
+        // guns took ammunition of their own is all five of the rest. A cell with
+        // neither is not padded for one.
         const auto counted = [](const HudWeaponSlot& slot) {
             return slot.ammo >= 0 || slot.level > 0;
         };

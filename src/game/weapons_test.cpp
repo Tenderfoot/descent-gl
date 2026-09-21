@@ -965,22 +965,24 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
         held.primary = true;
 
         // One second of held trigger, a step at a time. What comes off the
-        // energy bar must be the per-second number in the config, not that
-        // number once per step - which at 120 Hz would empty the bar instantly.
-        const float before = rig.state.player.energy;
+        // count must be the per-second number in the config, not that number
+        // once per step - which at 120 Hz would empty the pool instantly.
+        // Within one round, because the fraction of a round the last step did
+        // not finish paying for is still on the carry.
+        const int before = rig.state.player.lightningAmmo;
         rig.run(120, held);
-        const float spent = before - rig.state.player.energy;
+        const int spent = before - rig.state.player.lightningAmmo;
 
-        ok &= expect(std::abs(spent - arc.energyCost) < arc.energyCost * 0.05f,
-                     "one second of beam costs one second of energy");
+        ok &= expect(spent >= arc.ammoCost - 1 && spent <= arc.ammoCost + 1,
+                     "one second of beam costs one second of ammunition");
         ok &= expect(rig.state.beams.count() > 0, "the beam is still up while held");
 
         // And it stops the moment the trigger does.
         rig.run(static_cast<int>(arc.beamTime / kStep) + 2, sim::FireControls{});
         ok &= expect(rig.state.beams.count() == 0, "the beam goes out when the trigger does");
 
-        log::info("held beam: {:.1f} energy over 1.0 s against {:.1f}/s configured", spent,
-                  arc.energyCost);
+        log::info("held beam: {} rounds over 1.0 s against {}/s configured", spent,
+                  arc.ammoCost);
     }
 
     // --- shooting a floating light moves it ----------------------------------

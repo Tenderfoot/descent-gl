@@ -10,7 +10,7 @@
   "flareLifetime": 30.0,
   "flareRadius": 26.0,
   "flareSpeed": 34.0,
-  "headlightDrain": 1.600000023841858,
+  "headlightDrain": 0.5,
   "laserLevels": [
     {
       "color": [

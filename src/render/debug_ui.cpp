@@ -99,8 +99,10 @@ void drawDebugUi(DebugUiContext& ctx) {
             }
             ImGui::Text("secondary: %s",
                         dvk::sim::kWeaponNames[static_cast<size_t>(pl.secondaryWeapon)]);
-            ImGui::Text("vulcan %d   concussion %d   homing %d   flares %d", pl.vulcanAmmo,
-                        pl.concussionAmmo, pl.homingAmmo, pl.flares);
+            ImGui::Text("vulcan %d   rail %d   ltng %d", pl.vulcanAmmo, pl.railgunAmmo,
+                        pl.lightningAmmo);
+            ImGui::Text("concussion %d   homing %d   flares %d", pl.concussionAmmo, pl.homingAmmo,
+                        pl.flares);
             ImGui::Text("%d bolts, %d flares burning, %d effects, %d deaths",
                         cur.combat.projectiles.count(), cur.combat.flares.count(),
                         cur.combat.effects.count(), pl.deaths);
@@ -425,12 +427,18 @@ void drawDebugUi(DebugUiContext& ctx) {
             }
             ImGui::SameLine();
             if (ImGui::Button("Refill")) {
-                cur.combat.player.shields = 100.0f;
-                cur.combat.player.energy = 100.0f;
-                cur.combat.player.vulcanAmmo = 2000;
-                cur.combat.player.concussionAmmo = 8;
-                cur.combat.player.homingAmmo = 6;
-                cur.combat.player.flares = 12;
+                // From a fresh PlayerState rather than from numbers written out
+                // here, so a change to what the ship starts with cannot leave
+                // this button handing out last month's loadout.
+                const dvk::sim::PlayerState full;
+                cur.combat.player.shields = full.shields;
+                cur.combat.player.energy = full.energy;
+                cur.combat.player.vulcanAmmo = full.vulcanAmmo;
+                cur.combat.player.concussionAmmo = full.concussionAmmo;
+                cur.combat.player.homingAmmo = full.homingAmmo;
+                cur.combat.player.railgunAmmo = full.railgunAmmo;
+                cur.combat.player.lightningAmmo = full.lightningAmmo;
+                cur.combat.player.flares = full.flares;
             }
         }
         ImGui::End();

@@ -201,6 +201,12 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             case PickupKind::Homing:
                 p.homingAmmo += cfg.homingPickup;
                 break;
+            case PickupKind::RailgunAmmo:
+                p.railgunAmmo += cfg.railgunPickup;
+                break;
+            case PickupKind::LightningAmmo:
+                p.lightningAmmo += cfg.lightningPickup;
+                break;
             case PickupKind::Flares:
                 p.flares += cfg.flarePickup;
                 break;

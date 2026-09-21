@@ -233,6 +233,15 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
                 case dvk::PickupKind::Concussion: view.color = glm::vec3(1.0f, 0.6f, 0.3f); break;
                 case dvk::PickupKind::Homing: view.color = glm::vec3(0.6f, 0.85f, 1.0f); break;
                 case dvk::PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
+                // The two hitscan counts have no art yet and wear the colour of
+                // the beam they feed, which is the only thing on screen that
+                // already says which gun they belong to.
+                case dvk::PickupKind::RailgunAmmo:
+                    view.color = glm::vec3(0.62f, 0.80f, 1.0f);
+                    break;
+                case dvk::PickupKind::LightningAmmo:
+                    view.color = glm::vec3(0.75f, 0.62f, 1.0f);
+                    break;
                 case dvk::PickupKind::KeyBlue:
                     view.sprite = dvk::gl::SpriteKey;
                     view.color = glm::vec3(0.35f, 0.55f, 1.0f);

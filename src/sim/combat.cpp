@@ -314,9 +314,9 @@ int* weaponAmmoPool(PlayerState& player, int weaponId) {
         case WeaponVulcan: return &player.vulcanAmmo;
         case WeaponConcussion: return &player.concussionAmmo;
         case WeaponHoming: return &player.homingAmmo;
+        case WeaponRailgun: return &player.railgunAmmo;
+        case WeaponLightning: return &player.lightningAmmo;
         case WeaponLaser:
-        case WeaponRailgun:
-        case WeaponLightning:
         case WeaponCount:
             break;
     }
@@ -330,10 +330,16 @@ const int* weaponAmmoPool(const PlayerState& player, int weaponId) {
 bool weaponReady(const PlayerState& player, const WeaponConfig& cfg, int weaponId, float dt) {
     if (weaponId < 0 || weaponId >= WeaponCount) return false;
     const WeaponDef& def = cfg.weapons[static_cast<size_t>(weaponId)];
-    const float meter = weaponFire(weaponId) == WeaponFire::Continuous ? dt : 1.0f;
+    const bool continuous = weaponFire(weaponId) == WeaponFire::Continuous;
+    const float meter = continuous ? dt : 1.0f;
     if (def.energyCost > 0.0f && player.energy < def.energyCost * meter) return false;
     const int* ammo = weaponAmmoPool(player, weaponId);
-    if (def.ammoCost > 0 && ammo && *ammo < def.ammoCost) return false;
+    // A continuous weapon's ammoCost is rounds per second, not rounds per pull:
+    // a beam that costs eight a second is perfectly able to fire on the three
+    // it has left, for rather less than half a second. What it cannot do is
+    // fire on nothing, so what is asked of it is one whole round.
+    const int needed = continuous ? 1 : def.ammoCost;
+    if (def.ammoCost > 0 && ammo && *ammo < needed) return false;
     return true;
 }
 
@@ -445,7 +451,20 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         }
 
         if (def.energyCost > 0.0f) player.energy -= energyCost;
-        if (def.ammoCost > 0 && ammo) *ammo -= def.ammoCost;
+        if (def.ammoCost > 0 && ammo) {
+            if (mode == WeaponFire::Continuous) {
+                // Per second, paid in whole rounds: the step's fraction goes on
+                // the carry and comes off the count as it crosses one. See
+                // PlayerState::ammoCarry.
+                float& carry = player.ammoCarry[static_cast<size_t>(weaponId)];
+                carry += static_cast<float>(def.ammoCost) * dt;
+                const float whole = std::floor(carry);
+                carry -= whole;
+                *ammo = std::max(0, *ammo - static_cast<int>(whole));
+            } else {
+                *ammo -= def.ammoCost;
+            }
+        }
         if (mode != WeaponFire::Continuous) {
             player.cooldown[static_cast<size_t>(weaponId)] = def.fireInterval;
         }

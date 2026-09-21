@@ -168,13 +168,20 @@ struct Door {
     glm::vec3 normal{0.0f};
 };
 
+// The three keys are last on purpose, and anything new goes in front of them:
+// the automap, the render size and the loop test all ask "is this a key" as
+// `kind >= PickupKind::KeyBlue`, and a kind appended after KeyRed would quietly
+// become a key to all three. Saved levels name their kind rather than number
+// it, so inserting here does not invalidate a level file.
 enum class PickupKind : int {
     Shield = 0, Energy, LaserUpgrade, Concussion, Homing, Flares,
+    RailgunAmmo, LightningAmmo,
     KeyBlue, KeyYellow, KeyRed, Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)> kPickupNames{
     "shield", "energy", "laser", "concussion", "homing", "flares",
+    "railgun", "lightning",
     "key_blue", "key_yellow", "key_red"};
 
 struct Pickup {

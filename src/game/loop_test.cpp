@@ -901,7 +901,10 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
                 after.shields != before.shields || after.energy != before.energy ||
                 after.laserLevel != before.laserLevel ||
                 after.concussionAmmo != before.concussionAmmo ||
-                after.homingAmmo != before.homingAmmo || after.flares != before.flares ||
+                after.homingAmmo != before.homingAmmo ||
+                after.railgunAmmo != before.railgunAmmo ||
+                after.lightningAmmo != before.lightningAmmo ||
+                after.flares != before.flares ||
                 rig.game.keys != keysBefore;
 
             ok &= expect(rig.game.collected[pi], "the pickup was collected on touch");

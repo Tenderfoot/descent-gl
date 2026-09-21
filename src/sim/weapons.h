@@ -73,11 +73,11 @@ constexpr WeaponId nextSecondaryWeapon(int weaponId) {
 // function of the id and not a field anyone can set to a nonsense combination.
 //
 //   Projectile   spawns a bolt that travels and is swept against the world.
-//   Instant      one trace per trigger pull, at fireInterval. Damage and
-//                energy are per shot.
-//   Continuous   one trace every step the trigger is held. Damage and energy
-//                are per SECOND and are multiplied by dt; fireInterval is the
-//                gap between its sound cues, not a rate limit on damage.
+//   Instant      one trace per trigger pull, at fireInterval. Damage, energy
+//                and ammunition are per shot.
+//   Continuous   one trace every step the trigger is held. Damage, energy and
+//                ammunition are per SECOND and are metered by dt; fireInterval
+//                is the gap between its sound cues, not a rate limit on damage.
 enum class WeaponFire : uint8_t { Projectile, Instant, Continuous };
 
 constexpr WeaponFire weaponFire(int weaponId) {
@@ -134,7 +134,10 @@ struct WeaponDef {
     float speed = 120.0f;          // units/s
     float fireInterval = 0.25f;    // seconds between shots
     float energyCost = 0.0f;
-    int ammoCost = 0;              // vulcan and the missiles draw on counts, not energy
+    // What a shot takes out of the weapon's count. Everything but the laser
+    // draws on one. Per shot, except on a Continuous weapon, where it is per
+    // second like the rest of that weapon's numbers - see WeaponFire.
+    int ammoCost = 0;
     float radius = 0.35f;          // projectile sphere, for the sweep
     float lifetime = 4.0f;         // seconds before it expires on its own
     float spread = 0.0f;           // radians, half-angle of the random cone
@@ -186,7 +189,7 @@ struct WeaponConfig {
     // not. Lives here rather than in FlightConfig because this is the config
     // stepCombat is handed, and stepCombat is what does the shoving.
     float playerMass = 1.5f;
-    float headlightDrain = 1.6f;     // energy per second while the headlight is on
+    float headlightDrain = 0.5f;     // energy per second while the headlight is on
     float energyRecharge = 0.0f;     // none by default; pickups are M7's job
 
     // At most this many shadow-casting lights per frame. Every light still

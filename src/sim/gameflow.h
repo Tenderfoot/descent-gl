@@ -113,6 +113,8 @@ struct GameConfig {
     float energyPickup = 30.0f;
     int concussionPickup = 3;
     int homingPickup = 3;
+    int railgunPickup = 10;
+    int lightningPickup = 100;
     int flarePickup = 4;
 };
 

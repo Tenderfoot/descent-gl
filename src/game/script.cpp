@@ -272,6 +272,12 @@ int ScriptHost::declareLoadout(lua_State* state) {
     if (optionalNumber(state, 1, "homing", "homing ammo", 0.0, 999.0, value)) {
         host->loadout_.homingAmmo = static_cast<int>(value);
     }
+    if (optionalNumber(state, 1, "railgun", "railgun ammo", 0.0, 9'999.0, value)) {
+        host->loadout_.railgunAmmo = static_cast<int>(value);
+    }
+    if (optionalNumber(state, 1, "lightning", "lightning ammo", 0.0, 9'999.0, value)) {
+        host->loadout_.lightningAmmo = static_cast<int>(value);
+    }
     if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {
         host->loadout_.flares = static_cast<int>(value);
     }
@@ -605,6 +611,8 @@ void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player) {
     if (loadout.vulcanAmmo >= 0) player.vulcanAmmo = loadout.vulcanAmmo;
     if (loadout.concussionAmmo >= 0) player.concussionAmmo = loadout.concussionAmmo;
     if (loadout.homingAmmo >= 0) player.homingAmmo = loadout.homingAmmo;
+    if (loadout.railgunAmmo >= 0) player.railgunAmmo = loadout.railgunAmmo;
+    if (loadout.lightningAmmo >= 0) player.lightningAmmo = loadout.lightningAmmo;
     if (loadout.flares >= 0) player.flares = loadout.flares;
 }
 
