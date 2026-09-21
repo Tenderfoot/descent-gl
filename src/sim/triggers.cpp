@@ -71,4 +71,14 @@ void notePickup(PickupHookState& state, int kind, const PickupHookSet* hooks) {
     }
 }
 
+void noteLevelEvent(LevelEventState& state, LevelEvent event) {
+    const size_t i = static_cast<size_t>(event);
+    // `fired` is the whole bound: an event that has already happened is never
+    // queued again, so the queue can never hold more than one of each.
+    if (i >= kLevelEventCount || state.fired[i] != 0) return;
+
+    state.fired[i] = 1;
+    state.pending[static_cast<size_t>(state.pendingCount++)] = static_cast<uint8_t>(i);
+}
+
 } // namespace dvk::sim

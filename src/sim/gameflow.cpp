@@ -290,6 +290,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             // attenuating it by how far the player had already run from the
             // room would be exactly backwards.
             emitLocal(events, Cue::ReactorDestroyed);
+            noteLevelEvent(state.levelEvents, LevelEvent::ReactorDestroyed);
             log::info("reactor destroyed: {:.0f} seconds to get out", state.countdown);
         }
     }
@@ -318,6 +319,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             state.phase = GamePhase::Won;
             state.endReason = "escaped";
             emitLocal(events, Cue::Exit);
+            noteLevelEvent(state.levelEvents, LevelEvent::Won);
             log::info("escaped with {:.1f}s to spare, {} robots destroyed", state.countdown,
                       state.robotsDestroyed);
             return;
@@ -327,6 +329,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
             state.phase = GamePhase::Lost;
             state.endReason = "the mine went up with you still in it";
             emitLocal(events, Cue::PlayerDeath);
+            noteLevelEvent(state.levelEvents, LevelEvent::Lost);
             log::info("countdown reached zero");
             return;
         }
@@ -340,6 +343,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         if (state.phase != GamePhase::Lost) emitLocal(events, Cue::PlayerDeath);
         state.phase = GamePhase::Lost;
         state.endReason = "shields gone";
+        noteLevelEvent(state.levelEvents, LevelEvent::Lost);
         log::info("destroyed after {:.1f}s, {} robots destroyed", state.elapsed,
                   state.robotsDestroyed);
     }

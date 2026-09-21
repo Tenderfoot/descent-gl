@@ -5,6 +5,7 @@
 #include "game/level.h"
 #include "sim/combat.h"
 #include "sim/gameflow.h"
+#include "sim/robots.h"
 
 #include <lua.hpp>
 
@@ -125,6 +126,10 @@ void ScriptHost::clear() {
     callbacks_.fill(LUA_NOREF);
     timerCallbacks_.fill(LUA_NOREF);
     pickupCallbacks_.fill(LUA_NOREF);
+    eventHooks_ = {};
+    eventHookCount_ = 0;
+    queryGame_ = nullptr;
+    world_ = ScriptWorld{};
     messages_.clear();
     tutorials_.clear();
     callbackErrors_ = 0;
@@ -173,6 +178,19 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
     expose(state_, this, "set_shields", &ScriptHost::setShields);
     expose(state_, this, "after", &ScriptHost::scheduleAfter);
+    expose(state_, this, "event", &ScriptHost::declareEvent);
+
+    expose(state_, this, "phase", &ScriptHost::queryPhase);
+    expose(state_, this, "elapsed", &ScriptHost::queryElapsed);
+    expose(state_, this, "countdown", &ScriptHost::queryCountdown);
+    expose(state_, this, "reactor_alive", &ScriptHost::queryReactorAlive);
+    expose(state_, this, "robots_left", &ScriptHost::queryRobotsLeft);
+    expose(state_, this, "robots_alive", &ScriptHost::queryRobotsAlive);
+    expose(state_, this, "has_key", &ScriptHost::queryHasKey);
+    expose(state_, this, "shields", &ScriptHost::queryShields);
+    expose(state_, this, "energy", &ScriptHost::queryEnergy);
+    expose(state_, this, "laser_level", &ScriptHost::queryLaserLevel);
+    expose(state_, this, "ammo", &ScriptHost::queryAmmo);
 
     if (luaL_loadfile(state_, level.scriptPath.c_str()) != LUA_OK) {
         const char* error = lua_tostring(state_, -1);
@@ -188,10 +206,10 @@ void ScriptHost::load(const Level& level) {
                    error ? error : "unknown error");
     }
 
-    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} pickup hook(s), {} message(s), "
-              "{} tutorial(s)",
+    log::info("Lua script '{}': {} trigger(s), {} timer(s), {} pickup hook(s), {} event hook(s), "
+              "{} message(s), {} tutorial(s)",
               level.scriptPath, triggers_.count, timers_.count, pickupHooks_.count,
-              messages_.size(), tutorials_.size());
+              eventHookCount_, messages_.size(), tutorials_.size());
 }
 
 int ScriptHost::declareMessage(lua_State* state) {
@@ -455,6 +473,157 @@ int ScriptHost::declarePickup(lua_State* state) {
     return 0;
 }
 
+// A response to one of the moments the run itself turns on: the reactor going
+// up, and the two ways a level ends. Unlike a trigger or a pickup hook there
+// is nothing to filter on beyond the name, because the mine only has three of
+// these and a level does not author them - it is told about them.
+//
+// No `once`: the sim records each moment as fired the step it happens and
+// never raises it twice in a run, so every hook on it is a one-shot already.
+// More than one hook may name the same moment, and all of them run.
+int ScriptHost::declareEvent(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    if (host->eventHookCount_ >= kMaxEventHooks) {
+        return luaL_error(state, "level exceeds the limit of %d event hooks", kMaxEventHooks);
+    }
+
+    const char* kind = requiredString(state, 1, "kind");
+    int matched = -1;
+    for (size_t k = 0; k < sim::kLevelEventNames.size(); ++k) {
+        if (std::strcmp(kind, sim::kLevelEventNames[k]) == 0) matched = static_cast<int>(k);
+    }
+    if (matched < 0) return luaL_error(state, "unknown event kind '%s'", kind);
+
+    lua_getfield(state, 1, "on_event");
+    if (!lua_isfunction(state, -1)) return luaL_error(state, "event on_event must be a function");
+    const int callback = luaL_ref(state, LUA_REGISTRYINDEX);
+
+    EventHook& hook = host->eventHooks_[static_cast<size_t>(host->eventHookCount_++)];
+    hook.kind = static_cast<sim::LevelEvent>(matched);
+    hook.callback = callback;
+    return 0;
+}
+
+// --- queries ---------------------------------------------------------------
+
+const sim::GameState& ScriptHost::queryGame(lua_State* state, const char* name) const {
+    if (!draining_ || !queryGame_) {
+        luaL_error(state, "%s() is only valid inside a callback", name);
+    }
+    return *queryGame_;
+}
+
+const sim::PlayerState& ScriptHost::queryPlayer(lua_State* state, const char* name) const {
+    queryGame(state, name);
+    if (!world_.combat) luaL_error(state, "%s() has no player to read here", name);
+    return world_.combat->player;
+}
+
+const sim::RobotState& ScriptHost::queryRobots(lua_State* state, const char* name) const {
+    queryGame(state, name);
+    if (!world_.robots) luaL_error(state, "%s() has no robots to read here", name);
+    return *world_.robots;
+}
+
+int ScriptHost::queryPhase(lua_State* state) {
+    const sim::GameState& game = self(state)->queryGame(state, "phase");
+    const size_t i = static_cast<size_t>(game.phase);
+    lua_pushstring(state, i < sim::kGamePhaseNames.size() ? sim::kGamePhaseNames[i] : "playing");
+    return 1;
+}
+
+int ScriptHost::queryElapsed(lua_State* state) {
+    lua_pushnumber(state, self(state)->queryGame(state, "elapsed").elapsed);
+    return 1;
+}
+
+// Seconds left to get out, or -1 while the reactor is still standing. A
+// negative answer rather than nil so that arithmetic on it never blows up in
+// the middle of somebody's countdown line.
+int ScriptHost::queryCountdown(lua_State* state) {
+    const sim::GameState& game = self(state)->queryGame(state, "countdown");
+    lua_pushnumber(state,
+                   game.phase == sim::GamePhase::Countdown ? game.countdown : -1.0f);
+    return 1;
+}
+
+int ScriptHost::queryReactorAlive(lua_State* state) {
+    lua_pushboolean(state, self(state)->queryGame(state, "reactor_alive").reactorAlive ? 1 : 0);
+    return 1;
+}
+
+int ScriptHost::queryRobotsLeft(lua_State* state) {
+    const sim::RobotState& robots = self(state)->queryRobots(state, "robots_left");
+    lua_pushinteger(state, robots.aliveCount());
+    return 1;
+}
+
+// How many of one type are still flying. Matching on type and not on identity
+// is deliberate: a robot's index is its position in the level file among the
+// objects that happen to be robots, which nothing about the format promises
+// to keep stable. A type is named in the file and means the same thing after
+// somebody reorders it.
+int ScriptHost::queryRobotsAlive(lua_State* state) {
+    ScriptHost* host = self(state);
+    const char* type = luaL_checkstring(state, 1);
+    const sim::RobotState& robots = host->queryRobots(state, "robots_alive");
+    if (!host->world_.robotConfig) {
+        return luaL_error(state, "robots_alive() has no robot types to read here");
+    }
+    const int wanted = host->world_.robotConfig->indexOf(type);
+    if (wanted < 0) return luaL_error(state, "unknown robot type '%s'", type);
+
+    int alive = 0;
+    for (int i = 0; i < robots.count; ++i) {
+        const sim::Robot& robot = robots.robots[static_cast<size_t>(i)];
+        if (robot.alive && robot.type == wanted) ++alive;
+    }
+    lua_pushinteger(state, alive);
+    return 1;
+}
+
+int ScriptHost::queryHasKey(lua_State* state) {
+    const char* color = luaL_checkstring(state, 1);
+    const sim::GameState& game = self(state)->queryGame(state, "has_key");
+    for (size_t i = 0; i < kKeyNames.size(); ++i) {
+        if (std::strcmp(color, kKeyNames[i]) != 0) continue;
+        lua_pushboolean(state, i < game.keys.size() && game.keys[i] ? 1 : 0);
+        return 1;
+    }
+    return luaL_error(state, "unknown key colour '%s'", color);
+}
+
+int ScriptHost::queryShields(lua_State* state) {
+    lua_pushnumber(state, self(state)->queryPlayer(state, "shields").shields);
+    return 1;
+}
+
+int ScriptHost::queryEnergy(lua_State* state) {
+    lua_pushnumber(state, self(state)->queryPlayer(state, "energy").energy);
+    return 1;
+}
+
+int ScriptHost::queryLaserLevel(lua_State* state) {
+    lua_pushinteger(state, self(state)->queryPlayer(state, "laser_level").laserLevel);
+    return 1;
+}
+
+// Named with the words loadout{} uses, so the thing a level starts the ship
+// with and the thing a script asks about later are spelled the same way.
+int ScriptHost::queryAmmo(lua_State* state) {
+    const char* kind = luaL_checkstring(state, 1);
+    const sim::PlayerState& player = self(state)->queryPlayer(state, "ammo");
+    if (std::strcmp(kind, "vulcan") == 0) lua_pushinteger(state, player.vulcanAmmo);
+    else if (std::strcmp(kind, "concussion") == 0) lua_pushinteger(state, player.concussionAmmo);
+    else if (std::strcmp(kind, "homing") == 0) lua_pushinteger(state, player.homingAmmo);
+    else if (std::strcmp(kind, "railgun") == 0) lua_pushinteger(state, player.railgunAmmo);
+    else if (std::strcmp(kind, "lightning") == 0) lua_pushinteger(state, player.lightningAmmo);
+    else if (std::strcmp(kind, "flares") == 0) lua_pushinteger(state, player.flares);
+    else return luaL_error(state, "unknown ammunition '%s'", kind);
+    return 1;
+}
+
 // Hands the ship back, or takes it away. The one thing a script can change
 // about the player mid-level, and the reason the intro can start the ship
 // disabled and repair it on a cue.
@@ -611,13 +780,20 @@ bool ScriptHost::call(int functionRef, const char* context, const char* argument
     return false;
 }
 
-void ScriptHost::drain(sim::GameState& game) {
+void ScriptHost::drain(sim::GameState& game, const ScriptWorld& world) {
     if (!state_) {
         game.triggers.clearPending();
         game.timers.clearPending();
         game.pickupHooks.clearPending();
+        game.levelEvents.clearPending();
         return;
     }
+
+    // What the queries read, for the length of this drain and no longer. A
+    // query outside one has nothing to answer about, and a pointer kept past
+    // it would be a pointer into a frame that has moved on.
+    queryGame_ = &game;
+    world_ = world;
 
     // A clock that has gone backwards is a level that has started again, and
     // a delay scheduled by the run before it belongs to nobody. Noticed here
@@ -659,6 +835,26 @@ void ScriptHost::drain(sim::GameState& game) {
         }
     }
 
+    // The run's own moments after the two things the player did, because that
+    // is the order they happen in: the missile goes into the reactor, then the
+    // reactor goes up. Every hook on a moment runs; there is no first-one-wins
+    // here, because a level may reasonably want two things said at once.
+    const int eventCount = game.levelEvents.pendingCount;
+    for (int i = 0; i < eventCount; ++i) {
+        const size_t event = game.levelEvents.pending[static_cast<size_t>(i)];
+        for (int h = 0; h < eventHookCount_; ++h) {
+            EventHook& hook = eventHooks_[static_cast<size_t>(h)];
+            if (hook.callback == LUA_NOREF) continue;
+            if (static_cast<size_t>(hook.kind) != event) continue;
+            if (!call(hook.callback, "event callback",
+                      event < sim::kLevelEventNames.size() ? sim::kLevelEventNames[event]
+                                                           : "unknown")) {
+                luaL_unref(state_, LUA_REGISTRYINDEX, hook.callback);
+                hook.callback = LUA_NOREF;
+            }
+        }
+    }
+
     // Timers after volumes, so that within one frame a place the player has
     // just flown into is heard from before a moment that merely came round.
     const int timerCount = game.timers.pendingCount;
@@ -676,9 +872,12 @@ void ScriptHost::drain(sim::GameState& game) {
     // player has just flown into.
     runDeferred();
     draining_ = false;
+    queryGame_ = nullptr;
+    world_ = ScriptWorld{};
     game.triggers.clearPending();
     game.timers.clearPending();
     game.pickupHooks.clearPending();
+    game.levelEvents.clearPending();
 }
 
 const ScriptMessage* ScriptHost::message(int index) const {
@@ -729,6 +928,14 @@ static int runOneScriptTest(const std::string& levelPath) {
         return 0;
     }
 
+    // A mine for the queries to read. Empty - no robots, a default ship - but
+    // real, so a script that asks something inside a callback is answered
+    // rather than refused and counted as a broken callback.
+    sim::CombatState combat;
+    sim::RobotState robots;
+    const sim::RobotConfig robotConfig = sim::RobotConfig::defaults();
+    const ScriptWorld world{&combat, &robots, &robotConfig};
+
     bool ok = host.triggers().count > 0;
     sim::Body player;
     for (int i = 0; i < host.triggers().count; ++i) {
@@ -747,7 +954,7 @@ static int runOneScriptTest(const std::string& levelPath) {
             found |= game.triggers.pending[static_cast<size_t>(p)] == i;
         }
         ok &= found;
-        host.drain(game);
+        host.drain(game, world);
         drainRequests(host);
 
         // Staying inside is never a second entry. Leaving and returning is a
@@ -760,7 +967,7 @@ static int runOneScriptTest(const std::string& levelPath) {
         sim::stepTriggers(game.triggers, player, &host.triggers());
         const bool repeated = game.triggers.pendingCount > 0;
         ok &= repeated == !trigger.once;
-        host.drain(game);
+        host.drain(game, world);
         drainRequests(host);
     }
 

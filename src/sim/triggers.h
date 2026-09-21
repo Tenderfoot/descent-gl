@@ -3,6 +3,7 @@
 #include <glm/vec3.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace dvk::sim {
@@ -178,5 +179,47 @@ struct PickupHookState {
 // as an int. Called by gameflow the moment a pickup is collected; standalone
 // for the same reason stepTriggers is.
 void notePickup(PickupHookState& state, int kind, const PickupHookSet* hooks);
+
+// --- level events ---------------------------------------------------------
+//
+// The handful of moments the run itself turns on, as opposed to anything the
+// player flew into or took: the reactor going up, and the two ways a level
+// ends. What a script wants in order to say something over the countdown.
+//
+// A much smaller machine than the three above, and deliberately so. These are
+// not authored - a level does not declare that it has a reactor worth blowing
+// - so there is no set to build and no filter to match. Each one happens at
+// most once in a run, which `fired` enforces, so a hook needs no `once` of its
+// own and the queue cannot hold more entries than there are events.
+//
+// There is no `exit_opened`: the exit opens on the same step the reactor dies,
+// and two names for one instant is one name too many.
+
+enum class LevelEvent : uint8_t {
+    ReactorDestroyed,
+    Won,
+    Lost,
+    Count,
+};
+
+inline constexpr size_t kLevelEventCount = static_cast<size_t>(LevelEvent::Count);
+
+inline constexpr std::array<const char*, kLevelEventCount> kLevelEventNames{
+    "reactor_destroyed", "won", "lost"};
+
+// Mutable, copyable simulation state, in GameState for the same reason the
+// others are: a restart forgets that the reactor ever went up, and the level
+// can say so again.
+struct LevelEventState {
+    std::array<uint8_t, kLevelEventCount> fired{};
+    std::array<uint8_t, kLevelEventCount> pending{};
+    int pendingCount = 0;
+
+    void clearPending() { pendingCount = 0; }
+};
+
+// Records that `event` has happened, once per run. Called by gameflow at the
+// step the run turns on.
+void noteLevelEvent(LevelEventState& state, LevelEvent event);
 
 } // namespace dvk::sim
