@@ -24,6 +24,11 @@ that, and --tone writes a synthetic one for a source that has none.
 With --pattern this needs no input file and writes a synthetic placeholder: a
 test pattern with a burnt-in frame counter, so which frame is on screen can be
 read off a screenshot.
+
+Without --seconds the whole source is encoded, so the usual call is just the
+clip directory and the file. Dropping a video onto this script in Explorer is
+that same call: the clip directory is the file's own name beside it, so
+reactorsblown.mp4 becomes reactorsblown\comm.mpg, comm.wav and comm.json.
 """
 
 from __future__ import annotations
@@ -31,10 +36,18 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import struct
 import subprocess
+import sys
 import wave
 from pathlib import Path
+
+DEFAULT_SECONDS = 20.0
+
+# What a drop is allowed to be. Anything else on its own is a mistake worth an
+# error rather than an encode.
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm", ".wmv", ".mpg", ".mpeg"}
 
 
 def probe(source: Path, entries: str) -> str:
@@ -48,6 +61,16 @@ def probe(source: Path, entries: str) -> str:
     return done.stdout.strip()
 
 
+def source_duration(source: Path) -> float | None:
+    """How long the source runs, or None if ffprobe cannot say."""
+    raw = probe(source, "format=duration")
+    try:
+        actual = float(raw)
+    except ValueError:
+        return None
+    return actual if actual > 0.0 else None
+
+
 def source_seconds(source: Path, requested: float) -> float:
     """`requested`, but never longer than the source actually is.
 
@@ -55,12 +78,10 @@ def source_seconds(source: Path, requested: float) -> float:
     stops at the end - it just makes the manifest claim a duration the stream
     does not have. Clamping here is the cheapest place to keep the two honest.
     """
-    raw = probe(source, "format=duration")
-    try:
-        actual = float(raw)
-    except ValueError:
+    actual = source_duration(source)
+    if actual is None:
         return requested
-    if actual > 0.0 and actual < requested:
+    if actual < requested:
         print(f"note: {source.name} is {actual:.2f}s, shorter than the {requested:.2f}s asked "
               f"for; using {actual:.2f}s")
         return actual
@@ -148,7 +169,22 @@ def write_tone(destination: Path, seconds: float, rate: int = 22050) -> Path:
     return out
 
 
-def main() -> None:
+def dropped_file(argv: list[str]) -> Path | None:
+    """The file a drag-and-drop passes, or None for an ordinary invocation.
+
+    Explorer hands a dropped file over as the only argument. The first
+    positional here is the clip directory, so a lone argument that is an
+    existing video file can only have come from a drop.
+    """
+    if len(argv) != 1 or argv[0].startswith("-"):
+        return None
+    candidate = Path(argv[0])
+    if candidate.is_file() and candidate.suffix.lower() in VIDEO_SUFFIXES:
+        return candidate
+    return None
+
+
+def run(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("destination", type=Path, help="clip directory under assets/comm")
     parser.add_argument("source", type=Path, nargs="?", default=None)
@@ -157,7 +193,9 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=192)
     parser.add_argument("--fps", type=float, default=24.0)
-    parser.add_argument("--seconds", type=float, default=20.0)
+    parser.add_argument("--seconds", type=float, default=None,
+                        help=f"clip length; the whole source by default, or "
+                             f"{DEFAULT_SECONDS:.0f}s with --pattern")
     parser.add_argument("--bitrate", default="500k")
     parser.add_argument("--gop", type=int, default=12)
     parser.add_argument("--speaker", default="incoming transmission")
@@ -166,11 +204,18 @@ def main() -> None:
                              "no soundtrack to take)")
     parser.add_argument("--no-audio", action="store_true",
                         help="discard the source's soundtrack instead of writing comm.wav")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     seconds = args.seconds
     if args.source is not None and not args.pattern:
-        seconds = source_seconds(args.source, seconds)
+        # No --seconds means the whole clip. Guessing a length only truncates
+        # what someone recorded, and ffprobe already knows the real one.
+        if seconds is None:
+            seconds = source_duration(args.source) or DEFAULT_SECONDS
+        else:
+            seconds = source_seconds(args.source, seconds)
+    elif seconds is None:
+        seconds = DEFAULT_SECONDS
 
     out = encode(args.source, args.destination, args.width, args.height, args.fps,
                  seconds, args.bitrate, args.gop, args.pattern)
@@ -198,6 +243,25 @@ def main() -> None:
 
     print(f"{out} ({out.stat().st_size / 1024:.0f} KiB){note} and comm.json written; "
           f"run 'descent --comm-test' to validate")
+
+
+def main() -> None:
+    argv = sys.argv[1:]
+    dropped = dropped_file(argv)
+    if dropped is not None:
+        # Rewrite the drop into the call it stands for: the clip directory is
+        # the file's own name, beside the file.
+        argv = [str(dropped.parent / dropped.stem), str(dropped)]
+    try:
+        run(argv)
+    finally:
+        # A dropped file gets a console of its own, which closes the instant
+        # this returns - taking the error with it. Hold it open.
+        if dropped is not None and os.name == "nt" and sys.stdin.isatty():
+            try:
+                input("\npress Enter to close")
+            except EOFError:
+                pass
 
 
 if __name__ == "__main__":
