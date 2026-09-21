@@ -3931,7 +3931,8 @@
         0.0
       ],
       "cone": 45.0,
-      "segment": 66
+      "segment": 66,
+      "fixtureSize": 0.9
     },
     {
       "position": [
@@ -3953,7 +3954,8 @@
         0.0
       ],
       "cone": 45.0,
-      "segment": 67
+      "segment": 67,
+      "fixtureSize": 0.9
     },
     {
       "position": [
@@ -3975,7 +3977,8 @@
         0.0
       ],
       "cone": 45.0,
-      "segment": 0
+      "segment": 0,
+      "fixtureSize": 0.9
     },
     {
       "position": [
@@ -3997,7 +4000,8 @@
         0.0
       ],
       "cone": 45.0,
-      "segment": 66
+      "segment": 66,
+      "fixtureSize": 0.9
     },
     {
       "position": [
@@ -4019,7 +4023,8 @@
         0.0
       ],
       "cone": 45.0,
-      "segment": 0
+      "segment": 0,
+      "fixtureSize": 0.9
     }
   ],
   "start": {
@@ -4537,6 +4542,42 @@
         -194.875
       ],
       "segment": 43
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        -15.940138044077385,
+        108.23827607005542,
+        -268.67954111686333
+      ],
+      "segment": 21
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        -12.365904226866315,
+        108.9377480148803,
+        -272.7320794515355
+      ],
+      "segment": 21
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        -6.101882557056761,
+        110.81018884561475,
+        -281.8554655629624
+      ],
+      "segment": 21
+    },
+    {
+      "kind": "energy",
+      "position": [
+        -1.9241489919427277,
+        111.39726951904383,
+        -286.3698732393357
+      ],
+      "segment": 21
     }
   ],
   "exit": {
