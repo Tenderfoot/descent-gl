@@ -56,6 +56,9 @@ export const DEFAULTS = {
     lightRadius: 30.0,
     lightIntensity: 1.0,
     lightCone: 45.0,
+    // 0 is no fixture, which is what a light with nothing authored has. The
+    // size a newly fitted one takes is LIGHT_FIXTURE_SIZE below.
+    lightFixtureSize: 0.0,
     doorOpenDistance: 11.0,
     doorOpenTime: 0.9,
     doorCloseDelay: 2.5,
@@ -78,6 +81,12 @@ export const DEFAULTS = {
     lampLightIntensity: 3.2,
     lampCone: 60.0,
 };
+
+// What a light's fixture is sized at when one is first fitted. The same
+// half-extent the swinging lamp's housing is drawn at - a fixture IS that
+// housing, without the cord - so the two match in a room that has both.
+// src/game/state.h: interpolate(), the swinging light's PropView.
+export const LIGHT_FIXTURE_SIZE = 0.9;
 
 // The default colours the two prop kinds take when the file omits them.
 // src/game/level.h.

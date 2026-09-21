@@ -424,6 +424,7 @@ Level loadLevel(const std::string& path) {
                                                                              : LightType::Point;
                 if (lj.contains("direction")) light.direction = glm::normalize(readVec3(lj.at("direction")));
                 light.coneDegrees = lj.value("cone", 45.0f);
+                light.fixtureSize = lj.value("fixtureSize", 0.0f);
                 light.segment = lj.value("segment", -1);
                 level.lights.push_back(light);
             }
@@ -694,6 +695,9 @@ bool saveLevel(const std::string& path, const Level& level) {
             lj["direction"] = {light.direction.x, light.direction.y, light.direction.z};
             lj["cone"] = light.coneDegrees;
         }
+        // Omitted when there is no fixture, which is almost every light: a
+        // level full of "fixtureSize": 0.0 would be noise in every diff.
+        if (light.fixtureSize > 0.0f) lj["fixtureSize"] = light.fixtureSize;
         j["lights"].push_back(lj);
     }
 

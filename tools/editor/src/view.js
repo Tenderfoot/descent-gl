@@ -279,6 +279,21 @@ export class LevelView {
                                                      Math.min(light.radius, 12), color.getHex(), 2.5, 1.6);
                 this.groups.lights.add(helper);
             }
+
+            // A light authored with a visible source. The game draws a
+            // camera-facing emissive quad of this half-extent; a wire sphere
+            // is the same size from every angle the editor can be turned to,
+            // and leaves the bulb underneath it visible.
+            if (light.fixtureSize > 0) {
+                const fixture = new THREE.Mesh(
+                    this.track(new THREE.IcosahedronGeometry(light.fixtureSize, 1)),
+                    this.track(new THREE.MeshBasicMaterial({
+                        color, wireframe: true, transparent: true, opacity: 0.55,
+                    })));
+                fixture.position.copy(v3(light.position));
+                fixture.userData.pick = { kind: 'light', index: i };
+                this.groups.lights.add(fixture);
+            }
         }
     }
 
