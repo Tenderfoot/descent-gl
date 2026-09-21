@@ -360,6 +360,12 @@ public:
     // that toggle them are: a cube floating inside every lamp in the mine is
     // a tuning aid, and with the panels hidden by default there was no way to
     // turn one off without first knowing F3 existed.
+    //
+    // Not to be confused with Light::fixtureSize, which is authored and ships.
+    // This marks EVERY static light, including ones that already draw a
+    // fixture: the point of it is to say where the lights are, and one that
+    // went quiet because it happens to be visible would be a debug view that
+    // lies.
     bool drawLightGizmos = false;
     bool shadowsEnabled = true;
     bool drawVolumeWireframe = false;
@@ -404,7 +410,7 @@ private:
     void updateRobotOccluders(const RenderState& rs);
     void gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
                       const glm::vec3& eye, const PortalWalk& walk, int shadowBudget);
-    void buildBillboards(const RenderState& rs);
+    void buildBillboards(const RenderState& rs, const PortalWalk& walk);
     void buildShadowVolumes(const RenderState& rs, const PortalWalk& walk);
     void depthPrepass(const RenderState& rs, const PortalWalk& walk);
     void lightPasses(const RenderState& rs, const PortalWalk& walk);

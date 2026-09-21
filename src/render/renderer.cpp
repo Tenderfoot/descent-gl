@@ -1538,7 +1538,7 @@ glm::vec3 disabledTint(float seconds) {
 }
 }   // namespace
 
-void Renderer::buildBillboards(const RenderState& rs) {
+void Renderer::buildBillboards(const RenderState& rs, const PortalWalk& walk) {
     billboards_.clear();
 
     // The camera's right and up, read straight out of the view matrix, so every
@@ -1567,6 +1567,26 @@ void Renderer::buildBillboards(const RenderState& rs) {
             billboards_.addBeam(prop.anchor, prop.position, eye, right, 0.05f,
                                 prop.color * 0.28f);
         }
+    }
+
+    // Static lights that were authored with a visible source. The same quad a
+    // lamp's housing is, because it is the same idea and the lamp is the proof
+    // it reads: a spot whose apex is empty air looks like light from nowhere.
+    //
+    // Only the static lights, which are active_'s first staticLightCount_
+    // entries. A bolt or a flare already draws itself, and the level cannot
+    // author one anyway. Culled by the portal walk rather than by the light's
+    // reach: what matters is whether the room the fixture is bolted to is on
+    // screen, not whether its light falls where the eye is.
+    for (size_t li = 0; li < staticLightCount_ && li < active_.size(); ++li) {
+        const Light& light = *active_[li];
+        if (light.fixtureSize <= 0.0f) continue;
+        if (!walk.isVisible(light.segment)) continue;
+        // Dimmed with the light it belongs to while the mine is coming apart.
+        // A bulb holding steady in a room that is flickering is the fixture
+        // reading as a decal rather than as the source.
+        billboards_.add(light.position, right, up, light.fixtureSize,
+                        light.color * rs.staticLightScale);
     }
 
     // Hitscan tracers, into the same buffer as the sprites so the unlit pass
@@ -2198,7 +2218,7 @@ void Renderer::drawScene(const RenderState& rs, const Level& level, const Portal
     updateRobotOccluders(rs);
     buildDoors(rs, level);
     buildDoorSigns(rs, level, walk);
-    buildBillboards(rs);
+    buildBillboards(rs, walk);
     buildHud(hud, cam.proj * cam.view);
     buildMenu(menu);
     hud_.upload();

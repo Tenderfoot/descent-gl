@@ -11,11 +11,11 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import {
     addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
-    ceilingAnchor, ENTITY_LISTS, entityFacing, entityList, hasReactor, moveEntities, moveEntity,
-    removeEntity, segmentCentre, setExit,
+    ceilingAnchor, duplicateEntity, ENTITY_LISTS, entityFacing, entityList, hasReactor,
+    moveEntities, moveEntity, removeEntity, segmentCentre, setExit,
 } from './entities.js';
 import {
-    KEY_NAMES, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
+    KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkLevelName, checkName, newLevel } from './create.js';
@@ -698,6 +698,24 @@ function renderEntityTools(container, button, hint) {
                 field('cone°', light.coneDegrees, { type: 'number', min: 1, max: 179, step: 1 },
                       (el) => edit(`light ${index} cone`, () => { light.coneDegrees = Number(el.value); }));
             }
+
+            // A visible source, so the light does not appear to come from
+            // nowhere. The same emissive quad a swinging lamp's housing is.
+            const fitted = light.fixtureSize > 0;
+            button(fitted ? 'Remove the fixture' : 'Add a fixture',
+                   'Draws an emissive marker at the light, the way a swinging lamp draws its ' +
+                   'housing. A spotlight with nothing at its apex reads as light from nowhere.',
+                   () => edit(`light ${index} fixture`, () => {
+                       light.fixtureSize = fitted ? 0 : LIGHT_FIXTURE_SIZE;
+                   }));
+            if (fitted) {
+                field('fixture size', light.fixtureSize,
+                      { type: 'number', min: 0.1, max: 8, step: 0.1 },
+                      (el) => edit(`light ${index} fixture size`, () => {
+                          light.fixtureSize = Number(el.value);
+                      }));
+                row('half the marker’s width, so 0.9 draws 1.8 units across');
+            }
         }
 
         if (kind === 'object') {
@@ -761,6 +779,17 @@ function renderEntityTools(container, button, hint) {
             const exit = app.level.exitTrigger;
             field('radius', exit.radius, { type: 'number', min: 1, max: 60, step: 0.5 },
                   (el) => edit('exit radius', () => { exit.radius = Number(el.value); }));
+        }
+
+        // Offered beside Delete, and only for the kinds a level can hold more
+        // than one of. The start and the exit are the level rather than
+        // furniture in it, and there is one of each.
+        if (ENTITY_LISTS[kind]) {
+            button(`Duplicate ${kind}`,
+                   'A copy with the same settings, in the same place (Ctrl+D). The copy becomes ' +
+                   'the selection, so the gizmo is on it and the first drag moves it off the ' +
+                   'original.',
+                   () => duplicateSelected());
         }
 
         if (kind !== 'start') {
@@ -1153,6 +1182,22 @@ function selectItem(item, extend) {
 function clearSelection() {
     app.selection = null;
     gizmo.detach();
+}
+
+// A copy of the selected entity, standing on top of it and selected in its
+// place, so the gizmo lands on the copy and dragging moves it rather than the
+// original.
+//
+// The primary only, not the whole group: one thing is what a group's primary
+// means everywhere else, and a cluster of copies all sitting inside the
+// cluster they were copied from is a harder thing to pull apart than it sounds.
+function duplicateSelected() {
+    const selection = app.selection;
+    if (!selection || app.mode !== 'entity' || !ENTITY_LISTS[selection.kind]) return;
+    const { kind, index } = selection;
+    edit(`duplicate ${kind} ${index}`, (level) => {
+        app.selection = { kind, index: duplicateEntity(level, kind, index) };
+    });
 }
 
 // Selects a set of vertices and switches to vertex mode, without going through
@@ -1587,6 +1632,13 @@ window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         replaceLevel(e.shiftKey ? app.history.redo(app.level) : app.history.undo(app.level));
+        return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        // The browser's own Ctrl+D bookmarks the page, which in an editor with
+        // unsaved work is the last thing anyone meant by it.
+        e.preventDefault();
+        duplicateSelected();
         return;
     }
     if (e.key === '1') setMode('segment');

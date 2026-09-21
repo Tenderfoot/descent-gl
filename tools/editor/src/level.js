@@ -84,6 +84,7 @@ export function parseLevel(json, path = '<memory>') {
             type: lj.type === 'spot' ? 'spot' : 'point',
             direction: lj.direction ? vec3(lj.direction) : [0, -1, 0],
             coneDegrees: lj.cone ?? DEFAULTS.lightCone,
+            fixtureSize: lj.fixtureSize ?? DEFAULTS.lightFixtureSize,
             segment: lj.segment ?? -1,
         });
     }
@@ -267,6 +268,9 @@ export function serializeLevel(level) {
                 lj.direction = l.direction.slice();
                 lj.cone = l.coneDegrees;
             }
+            // Omitted when there is no fixture, matching saveLevel: almost no
+            // light has one, and a zero on every light would be noise.
+            if (l.fixtureSize !== DEFAULTS.lightFixtureSize) lj.fixtureSize = l.fixtureSize;
             lj.segment = l.segment;
             return reorder(lj, l.keyOrder);
         });

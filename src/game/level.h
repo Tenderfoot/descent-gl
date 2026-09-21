@@ -94,6 +94,15 @@ struct Light {
     glm::vec3 direction{0.0f, -1.0f, 0.0f};
     float coneDegrees = 45.0f;
 
+    // A visible source for the light: the half-extent of an emissive billboard
+    // drawn at `position`, or 0 for nothing, which is the default. Authored and
+    // written back to the file, unlike castsShadows below.
+    //
+    // This is the swinging lamp's housing without the cord or the swing. A
+    // spotlight whose apex is empty air reads as light from nowhere, and the
+    // reason a lamp does not is that it draws the thing the light comes out of.
+    float fixtureSize = 0.0f;
+
     int segment = 0;
     // Debug toggle, not a level property: lets one light's shadows be turned
     // off to see what it is contributing. Not written back to the file.

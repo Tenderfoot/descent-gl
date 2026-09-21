@@ -57,6 +57,7 @@ export function addLight(level, position, segment = -1) {
         type: 'point',
         direction: [0, -1, 0],
         coneDegrees: DEFAULTS.lightCone,
+        fixtureSize: DEFAULTS.lightFixtureSize,
         segment,
     });
     level.lights.push(light);
@@ -210,6 +211,62 @@ export function setExit(level, position, radius = DEFAULTS.exitRadius) {
         radius,
         segment: -1,
     });
+}
+
+// --- duplicating ------------------------------------------------------------
+
+// The caps the two prop kinds are under, so a clone cannot walk past a limit
+// the add path refuses to cross.
+const CAPS = {
+    ball: { limit: MAX_FLOATING_LIGHTS, what: 'floating lights' },
+    lamp: { limit: MAX_SWINGING_LIGHTS, what: 'swinging lights' },
+};
+
+// A second copy of an entity, standing exactly where the first one does.
+//
+// Placing several of a thing in one room otherwise means adding one at the
+// segment's centre and dragging it back, and - the part that actually costs
+// the time - tuning its seven or eight fields again to match the one beside
+// it. A clone arrives already matching, and the caller selects it, so the
+// gizmo is on the copy and the first drag moves it off its source.
+//
+// Exactly on top rather than offset by some amount: the source is inside a
+// segment, so the copy is too, which is the one placement that can never
+// produce the out-of-segment entity the game is fatal on. It does mean the two
+// are indistinguishable until the copy is dragged away, which is why this is
+// only ever reached from a path that selects the copy.
+export function duplicateEntity(level, kind, index) {
+    // There is one player start and one exit, so a second copy of either would
+    // silently replace the original rather than join it; a door belongs to a
+    // portal rather than to a place, and a portal takes one.
+    if (!ENTITY_LISTS[kind]) throw new Error(`a ${kind} cannot be duplicated`);
+
+    const list = entityList(level, kind);
+    const source = list[index];
+    if (!source) throw new Error(`no ${kind} ${index}`);
+
+    const cap = CAPS[kind];
+    if (cap && list.length >= cap.limit) {
+        throw new Error(`a level may have at most ${cap.limit} ${cap.what}`);
+    }
+
+    // Deep, because an entity's arrays - a position, a colour, a direction or
+    // an orientation - would otherwise be shared with the source, and a copy
+    // that moves when the thing it was copied from moves is not a copy. Copying
+    // every own field rather than a named list means a field added to one of
+    // these kinds later is cloned without anyone having to remember it here.
+    const copy = {};
+    for (const [key, value] of Object.entries(source)) copy[key] = cloneValue(value);
+
+    // The position is unchanged, so the cached segment is right by
+    // construction - but this file's rule is that the cache is re-resolved
+    // rather than trusted, and place() costs one lookup.
+    list.push(place(level, copy));
+    return list.length - 1;
+}
+
+function cloneValue(value) {
+    return Array.isArray(value) ? value.map(cloneValue) : value;
 }
 
 // --- moving and removing ----------------------------------------------------
