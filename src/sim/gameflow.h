@@ -119,6 +119,9 @@ struct GameConfig {
     int homingPickup = 3;
     int railgunPickup = 10;
     int lightningPickup = 100;
+    // A quarter of what the ship starts with, matching the fraction the other
+    // ammo pickups are worth against their own starting counts.
+    int vulcanPickup = 500;
     int flarePickup = 4;
 };
 

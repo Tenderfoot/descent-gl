@@ -214,9 +214,10 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
             const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(nowSeconds) * 3.0f +
                                                          static_cast<float>(i));
             // A kind with hand-drawn art names its sprite layer and tints it;
-            // the rest keep the colour-only glow and leave `sprite` at -1. The
-            // health and energy sprites carry their own colour, so white is
-            // what shows them as drawn - the pulse still rides on top. The key
+            // the rest keep the colour-only glow and leave `sprite` at -1,
+            // which is flares alone now that everything else has been drawn.
+            // The drawn sprites carry their own colour, so white is what shows
+            // them as they were painted - the pulse still rides on top. The key
             // art is a white template, so there the tint is the whole point and
             // the three keys differ by nothing else.
             view.sprite = -1;
@@ -229,18 +230,30 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
                     view.sprite = dvk::gl::SpriteEnergy;
                     view.color = glm::vec3(1.0f);
                     break;
-                case dvk::PickupKind::LaserUpgrade: view.color = glm::vec3(1.0f, 0.55f, 0.9f); break;
-                case dvk::PickupKind::Concussion: view.color = glm::vec3(1.0f, 0.6f, 0.3f); break;
-                case dvk::PickupKind::Homing: view.color = glm::vec3(0.6f, 0.85f, 1.0f); break;
+                case dvk::PickupKind::LaserUpgrade:
+                    view.sprite = dvk::gl::SpriteLaser;
+                    view.color = glm::vec3(1.0f);
+                    break;
+                case dvk::PickupKind::Concussion:
+                    view.sprite = dvk::gl::SpriteConcussion;
+                    view.color = glm::vec3(1.0f);
+                    break;
+                case dvk::PickupKind::Homing:
+                    view.sprite = dvk::gl::SpriteHoming;
+                    view.color = glm::vec3(1.0f);
+                    break;
                 case dvk::PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
-                // The two hitscan counts have no art yet and wear the colour of
-                // the beam they feed, which is the only thing on screen that
-                // already says which gun they belong to.
                 case dvk::PickupKind::RailgunAmmo:
-                    view.color = glm::vec3(0.62f, 0.80f, 1.0f);
+                    view.sprite = dvk::gl::SpriteRailgun;
+                    view.color = glm::vec3(1.0f);
                     break;
                 case dvk::PickupKind::LightningAmmo:
-                    view.color = glm::vec3(0.75f, 0.62f, 1.0f);
+                    view.sprite = dvk::gl::SpriteLightning;
+                    view.color = glm::vec3(1.0f);
+                    break;
+                case dvk::PickupKind::VulcanAmmo:
+                    view.sprite = dvk::gl::SpriteVulcan;
+                    view.color = glm::vec3(1.0f);
                     break;
                 case dvk::PickupKind::KeyBlue:
                     view.sprite = dvk::gl::SpriteKey;
