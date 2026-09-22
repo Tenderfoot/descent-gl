@@ -40,7 +40,7 @@ tutorial {
   id = "shipcontroltutorial",
   clip = "shipcontroltutorial",
   title = "Flight Controls",
-  text = "W/S - Forward/Back\nA/D - Strafe left, Strafe Right\nQ/E - Roll\nLeft Click - Primary Fire\nRight Click - Secondary Fire (Missiles)\nG - Toggle Missile Type",
+  text = "W / S - Forward / Back\nA / D - Strafe left / Strafe Right\nSpace / Ctrl - Up / Down\nQ / E - Roll Left / Roll Right\nLeft Click - Primary Fire\nRight Click - Secondary Fire (Missiles)\nG - Toggle Missile Type",
 }
 
 -- The whole opening hangs off one timer. after() is counted on the level
