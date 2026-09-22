@@ -781,17 +781,6 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         // Bleed speed so chunks settle rather than pinballing forever.
         d.body.velocity *= std::exp(-1.4f * dt);
     }
-
-    // --- drops -----------------------------------------------------------
-    for (Drop& drop : state.drops) {
-        if (!drop.alive) continue;
-        drop.age += dt;
-        if (glm::length(drop.position - player.position) < player.radius + 2.2f) {
-            // M7 turns these into real pickups. For now touching one removes
-            // it, which is enough to show that the drop table works.
-            drop.alive = false;
-        }
-    }
 }
 
 } // namespace dvk::sim

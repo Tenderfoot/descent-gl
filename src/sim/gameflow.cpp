@@ -15,6 +15,9 @@ namespace dvk::sim {
 
 namespace {
 
+// How close the ship's hull has to come to a pickup to take it.
+constexpr float kPickupReach = 2.4f;
+
 void setBlocked(GameState& state, const Level& level, size_t doorIndex, bool blocked,
                 bool opaque) {
     const Door& door = level.doors[doorIndex];
@@ -90,6 +93,65 @@ bool nearDoorway(const Level& level, const Door& door, int segment) {
 bool atDoor(const Level& level, const Door& door, const Body& body) {
     return distanceToDoorway(door, body.position) < door.openDistance &&
            nearDoorway(level, door, body.segment);
+}
+
+// Everything that happens when the player takes a pickup, whoever put it there:
+// the level's author or a robot that died.
+void collectPickup(PickupKind kind, const glm::vec3& position, int segment, const GameConfig& cfg,
+                   GameState& state, CombatState& combat, EventQueue* events,
+                   const PickupHookSet* pickupHooks) {
+    // A key is the one pickup that changes where the player can go, so it
+    // gets its own, more emphatic noise.
+    const bool isKey = kind == PickupKind::KeyBlue ||
+                       kind == PickupKind::KeyYellow ||
+                       kind == PickupKind::KeyRed;
+    emit(events, isKey ? Cue::KeyPickup : Cue::Pickup, position, segment);
+    PlayerState& p = combat.player;
+    switch (kind) {
+        case PickupKind::Shield:
+            p.shields = std::min(100.0f, p.shields + cfg.shieldPickup);
+            break;
+        case PickupKind::Energy:
+            p.energy = std::min(100.0f, p.energy + cfg.energyPickup);
+            break;
+        case PickupKind::LaserUpgrade:
+            p.laserLevel = std::min(kLaserLevels, p.laserLevel + 1);
+            break;
+        case PickupKind::Concussion:
+            p.concussionAmmo += cfg.concussionPickup;
+            break;
+        case PickupKind::Homing:
+            p.homingAmmo += cfg.homingPickup;
+            break;
+        case PickupKind::RailgunAmmo:
+            p.railgunAmmo += cfg.railgunPickup;
+            break;
+        case PickupKind::LightningAmmo:
+            p.lightningAmmo += cfg.lightningPickup;
+            break;
+        case PickupKind::VulcanAmmo:
+            p.vulcanAmmo += cfg.vulcanPickup;
+            break;
+        case PickupKind::Flares:
+            p.flares += cfg.flarePickup;
+            break;
+        case PickupKind::KeyBlue:
+            state.keys[0] = true;
+            break;
+        case PickupKind::KeyYellow:
+            state.keys[1] = true;
+            break;
+        case PickupKind::KeyRed:
+            state.keys[2] = true;
+            break;
+        case PickupKind::Count:
+            break;
+    }
+
+    // After the effect, not before it: a callback raised from here runs
+    // once the frame's steps are done, and what it says about the thing
+    // just collected should be true by the time it says it.
+    notePickup(state.pickupHooks, static_cast<int>(kind), pickupHooks);
 }
 
 } // namespace
@@ -250,61 +312,23 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
     for (size_t pi = 0; pi < level.pickups.size() && pi < kMaxPickups; ++pi) {
         if (state.collected[pi]) continue;
         const Pickup& pickup = level.pickups[pi];
-        if (glm::length(player.position - pickup.position) > player.radius + 2.4f) continue;
+        if (glm::length(player.position - pickup.position) > player.radius + kPickupReach) continue;
 
         state.collected[pi] = true;
-        // A key is the one pickup that changes where the player can go, so it
-        // gets its own, more emphatic noise.
-        const bool isKey = pickup.kind == PickupKind::KeyBlue ||
-                           pickup.kind == PickupKind::KeyYellow ||
-                           pickup.kind == PickupKind::KeyRed;
-        emit(events, isKey ? Cue::KeyPickup : Cue::Pickup, pickup.position, pickup.segment);
-        PlayerState& p = combat.player;
-        switch (pickup.kind) {
-            case PickupKind::Shield:
-                p.shields = std::min(100.0f, p.shields + cfg.shieldPickup);
-                break;
-            case PickupKind::Energy:
-                p.energy = std::min(100.0f, p.energy + cfg.energyPickup);
-                break;
-            case PickupKind::LaserUpgrade:
-                p.laserLevel = std::min(kLaserLevels, p.laserLevel + 1);
-                break;
-            case PickupKind::Concussion:
-                p.concussionAmmo += cfg.concussionPickup;
-                break;
-            case PickupKind::Homing:
-                p.homingAmmo += cfg.homingPickup;
-                break;
-            case PickupKind::RailgunAmmo:
-                p.railgunAmmo += cfg.railgunPickup;
-                break;
-            case PickupKind::LightningAmmo:
-                p.lightningAmmo += cfg.lightningPickup;
-                break;
-            case PickupKind::VulcanAmmo:
-                p.vulcanAmmo += cfg.vulcanPickup;
-                break;
-            case PickupKind::Flares:
-                p.flares += cfg.flarePickup;
-                break;
-            case PickupKind::KeyBlue:
-                state.keys[0] = true;
-                break;
-            case PickupKind::KeyYellow:
-                state.keys[1] = true;
-                break;
-            case PickupKind::KeyRed:
-                state.keys[2] = true;
-                break;
-            case PickupKind::Count:
-                break;
-        }
+        collectPickup(pickup.kind, pickup.position, pickup.segment, cfg, state, combat, events,
+                      pickupHooks);
+    }
 
-        // After the effect, not before it: a callback raised from here runs
-        // once the frame's steps are done, and what it says about the thing
-        // just collected should be true by the time it says it.
-        notePickup(state.pickupHooks, static_cast<int>(pickup.kind), pickupHooks);
+    // What the robots left behind. Not in `collected`, which is indexed by the
+    // level's own list: a drop is taken by clearing it where it lies.
+    for (Drop& drop : robots.drops) {
+        if (!drop.alive) continue;
+        if (glm::length(player.position - drop.position) > player.radius + kPickupReach) continue;
+
+        drop.alive = false;
+        const PickupKind kind =
+            drop.kind == DropKind::Energy ? PickupKind::Energy : PickupKind::Shield;
+        collectPickup(kind, drop.position, drop.segment, cfg, state, combat, events, pickupHooks);
     }
 
     // --- the reactor -----------------------------------------------------

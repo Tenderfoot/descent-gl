@@ -6,6 +6,8 @@
 #include "sim/gameflow.h"
 #include "sim/robots.h"
 
+#include <algorithm>
+
 namespace dvk {
 
 namespace {
@@ -32,13 +34,14 @@ glm::vec3 keyColor(PickupKind kind) {
 
 // Keys the player has laid eyes on, whether or not they picked them up.
 // Anything else on the map would be telling them where to go.
-void addKeys(gl::AutomapData& map, const Level& level, const SimState& state,
-             const RenderState& render, bool reveal) {
-    for (int i = 0; i < render.pickupCount; ++i) {
-        const Pickup& pickup = level.pickups[static_cast<size_t>(i)];
+void addKeys(gl::AutomapData& map, const Level& level, const SimState& state, bool reveal) {
+    const size_t count =
+        std::min(level.pickups.size(), static_cast<size_t>(sim::kMaxPickups));
+    for (size_t i = 0; i < count; ++i) {
+        const Pickup& pickup = level.pickups[i];
         if (pickup.kind < PickupKind::KeyBlue) continue;
-        if (!reveal && !state.game.seen[static_cast<size_t>(i)]) continue;
-        const bool collected = state.game.collected[static_cast<size_t>(i)];
+        if (!reveal && !state.game.seen[i]) continue;
+        const bool collected = state.game.collected[i];
         addMarker(map, pickup.position, keyColor(pickup.kind), 1.8f, !collected);
     }
 }
@@ -78,7 +81,7 @@ void buildAutomap(gl::AutomapData& map, const Level& level, const SimState& stat
     map.shipSegment = render.shipSegment;
 
     map.markerCount = 0;
-    addKeys(map, level, state, render, reveal);
+    addKeys(map, level, state, reveal);
     addReactor(map, state, robots, reveal);
     if (state.game.exitOpen && level.exitTrigger.present) {
         addMarker(map, level.exitTrigger.position, glm::vec3(0.5f, 1.0f, 0.7f), 3.0f, false);
