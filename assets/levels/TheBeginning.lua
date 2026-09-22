@@ -7,6 +7,8 @@ loadout {
   vulcan = 0,
   concussion = 1,   -- the one missile for the reactor
   homing = 0,
+  railgun = 0, 
+  lightning = 0, 
   flares = 0,
 }
 
@@ -14,23 +16,23 @@ message {
   id = "sos",
   clip = "hear_your_sos",
   speaker = "???",
-  text = "We hear your SOS.\nStay with me - you're not alone out there.",
-  seconds = 7,
+  text = "Attention ship. I can hear your S.O.S. But I can't verify your identity.\n\nGive me a minute.",
+  seconds = 7.5,
 }
 
 message {
   id = "frequency",
   clip = "canthitthisfrequency",
   speaker = "???",
-  text = "They can't hit this frequency.\nWhatever they told you, nobody is coming for you.",
-  seconds = 7,
+  text = "Your ship isn't in our registry. And its coming up as a corpo cruiser?\nThis doesn't make any sense.\nYou shouldn't even be able to hit this frequency.",
+  seconds = 7.5,
 }
 
 message {
   id = "help",
   clip = "help_each_other",
   speaker = "???",
-  text = "Out here we help each other.\nI'm bringing your systems back up.\nPut that missile into the reactor and run for the hatch.",
+  text = "I'm going to restore control to your ship. My readings indicate you are energy depleted, but have one missile on deck.\n\nMake it count...\n\nAnd maybe we can help each other",
   seconds = 10,
 }
 
@@ -38,7 +40,7 @@ tutorial {
   id = "shipcontroltutorial",
   clip = "shipcontroltutorial",
   title = "Flight Controls",
-  text = "Your ship answers again.\n\nThrust with W and S, slide with A and D, and roll with Q and E.\n\nThe mouse pitches and yaws. Six degrees of freedom - there is no up in here.",
+  text = "W/S - Forward/Back\nA/D - Strafe left, Strafe Right\nQ/E - Roll\nLeft Click - Primary Fire\nRight Click - Secondary Fire (Missiles)\nG - Toggle Missile Type",
 }
 
 -- The whole opening hangs off one timer. after() is counted on the level
