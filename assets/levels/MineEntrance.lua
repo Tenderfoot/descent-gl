@@ -5,6 +5,8 @@ loadout {
   concussion = 0,   
   homing = 0,
   flares = 20,
+  railgun = 5, 
+  lightning = 50, 
 }
 
 tutorial {
