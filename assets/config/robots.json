@@ -44,7 +44,6 @@
       "radius": 1.899999976158142,
       "retreatThreshold": 0.3499999940395355,
       "retreatTime": 1.600000023841858,
-      "sightRange": 80.0,
       "speed": 19.0,
       "spread": 0.07000000029802322,
       "turnRate": 3.0
@@ -93,7 +92,6 @@
       "radius": 2.200000047683716,
       "retreatThreshold": 0.30000001192092896,
       "retreatTime": 1.600000023841858,
-      "sightRange": 110.0,
       "speed": 13.0,
       "spread": 0.04500000178813934,
       "turnRate": 2.0
@@ -147,7 +145,6 @@
       "radius": 3.0999999046325684,
       "retreatThreshold": 0.15000000596046448,
       "retreatTime": 1.600000023841858,
-      "sightRange": 95.0,
       "speed": 8.5,
       "spread": 0.09000000357627869,
       "turnRate": 1.2999999523162842
@@ -191,7 +188,6 @@
       "radius": 5.5,
       "retreatThreshold": -1.0,
       "retreatTime": 1.600000023841858,
-      "sightRange": 130.0,
       "speed": 0.0,
       "spread": 0.05999999865889549,
       "turnRate": 0.800000011920929

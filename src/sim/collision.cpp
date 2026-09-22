@@ -16,9 +16,22 @@ namespace {
 
 // Iteration caps. A mine is small; these only stop a degenerate level from
 // spinning forever.
-constexpr int kMaxSegmentSteps = 32;
+//
+// kMaxSegmentSteps has to be at least as large as the number of segments a
+// straight line can cross, which is the whole mine in the worst case. It was
+// 32, which was comfortable while a robot's sight ray was capped at a hundred
+// units or so; with that cap gone the ray runs the length of the level, and a
+// walk that gives up reports NO HIT - so every robot at the far end of a long
+// enough mine would see the player through solid rock.
+constexpr int kMaxSegmentSteps = 128;
 constexpr int kMaxSweepSteps = 64;
 constexpr float kEpsilon = 1e-5f;
+
+// How much nearer a portal crossing has to be than a surface before the ray is
+// allowed to leave the segment through it. See the use in raycast: it exists to
+// break the tie between a door slab and the portal it sits in, which are
+// coplanar by construction.
+constexpr float kCoplanarSlack = 1e-3f;
 
 // The two triangles a portal side is split into, so a ray can be tested against
 // the opening itself rather than against the segment's bounding planes.
@@ -45,31 +58,31 @@ void reflect(Body& body, const glm::vec3& normal, float restitution) {
     if (intoKnock < 0.0f) body.knockback -= normal * (intoKnock * bounce);
 }
 
-} // namespace
-
-bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
-    if (!doors) return false;
+// The least open any slab between these two segments is, or 1 if there is no
+// door between them at all. Both of a door's slabs carry the same number, so
+// this is really "how open is the door here"; the minimum is only what makes
+// the absence of a door read as wide open.
+float doorOpenness(const SolidDoors* doors, int segment, int neighbour) {
+    if (!doors) return 1.0f;
+    float least = 1.0f;
     for (int i = 0; i < doors->count; ++i) {
         const SolidDoors::Face& f = doors->faces[static_cast<size_t>(i)];
         if ((f.segmentA == segment && f.segmentB == neighbour) ||
             (f.segmentB == segment && f.segmentA == neighbour)) {
-            return true;
+            least = std::min(least, f.openness);
         }
     }
-    return false;
+    return least;
 }
 
-bool doorOpaque(const SolidDoors* doors, int segment, int neighbour) {
-    if (!doors) return false;
-    for (int i = 0; i < doors->count; ++i) {
-        const SolidDoors::Face& f = doors->faces[static_cast<size_t>(i)];
-        if (((f.segmentA == segment && f.segmentB == neighbour) ||
-             (f.segmentB == segment && f.segmentA == neighbour)) &&
-            f.opaque) {
-            return true;
-        }
-    }
-    return false;
+} // namespace
+
+bool doorShut(const SolidDoors* doors, int segment, int neighbour) {
+    return doorOpenness(doors, segment, neighbour) < kPassableAt;
+}
+
+bool doorSealed(const SolidDoors* doors, int segment, int neighbour) {
+    return doorOpenness(doors, segment, neighbour) <= 0.0f;
 }
 
 int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg, float dt,
@@ -153,9 +166,14 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
             }
         }
 
-        // Shut doors, which are not in the static wall list because the side
+        // Door slabs, which are not in the static wall list because the side
         // they fill is a portal. Pushed out of on whichever side the body is,
         // so a door closing on a body shoves it clear rather than through.
+        //
+        // Only the slabs, at where they have slid to - so the middle of a door
+        // that has parted is genuinely empty and a body small enough to fit
+        // goes through it, while the parts still covered keep blocking. Being
+        // in the doorway is not the test; being where the steel is, is.
         if (doors) {
             for (int fi = 0; fi < doors->count; ++fi) {
                 const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
@@ -431,38 +449,50 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
             }
         }
 
-        // The nearest portal the ray leaves through, if it leaves before it
-        // meets a wall.
-        // A fully shut door stops a ray exactly as a wall does. Once it starts
-        // moving the portal is visible, and rays follow visibility through it.
+        // Door slabs, which stop a ray exactly as a wall does whatever the
+        // openness: a slab is a steel plate and does not become see-through on
+        // its way into the rock. What changes as a door opens is that the gap
+        // between its halves stops being covered by one, and a ray aimed there
+        // finds nothing to hit and goes through.
+        int bestDoor = -1;
         if (doors) {
             for (int fi = 0; fi < doors->count; ++fi) {
                 const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
-                if (!face.opaque || (face.segmentA != segment && face.segmentB != segment)) {
-                    continue;
-                }
+                if (face.segmentA != segment && face.segmentB != segment) continue;
                 const float t = rayTriangleDistance(origin + dir * travelled, dir, face.p[0],
                                                     face.p[1], face.p[2]);
                 if (t > kEpsilon && t < bestWall) {
                     bestWall = t;
                     bestTriangle = -2;   // a door, not a wall triangle
+                    bestDoor = face.door;
                 }
             }
         }
 
+        // The nearest portal the ray leaves through, if it leaves before it
+        // meets a wall or a slab.
         float bestPortal = bestWall;
         int nextSegment = -1;
         const Segment& seg = level.segments[static_cast<size_t>(segment)];
         for (int side = 0; side < SideCount; ++side) {
             const SideData& sd = seg.sides[static_cast<size_t>(side)];
             if (!sd.isPortal()) continue;
-            if (doorOpaque(doors, segment, sd.neighbour)) continue;
+            if (doorSealed(doors, segment, sd.neighbour)) continue;
             glm::vec3 tri[6];
             portalTriangles(level, segment, side, tri);
             for (int t2 = 0; t2 < 2; ++t2) {
                 const float t = rayTriangleDistance(origin + dir * travelled, dir, tri[t2 * 3 + 0],
                                                     tri[t2 * 3 + 1], tri[t2 * 3 + 2]);
-                if (t > kEpsilon && t < bestPortal) {
+                // The slack matters for exactly one pair of surfaces: a door
+                // slab lies in the plane of its own portal, so a ray that meets
+                // the slab meets the portal at the same distance to within a
+                // rounding error, and whichever wins is a coin toss. Losing it
+                // means the ray crosses the portal, re-enters the slab from
+                // behind at t = 0, is rejected as too close, and sails through
+                // a door that is standing right in front of it. Nothing else in
+                // a segment is coplanar with a portal, so a millimetre of bias
+                // towards stopping costs nothing anywhere else.
+                if (t > kEpsilon && t < bestPortal - kCoplanarSlack) {
                     bestPortal = t;
                     nextSegment = sd.neighbour;
                 }
@@ -485,6 +515,7 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
             result.normal = -dir;
             result.segment = segment;
             result.triangle = -1;
+            result.door = bestDoor;
         } else if (bestTriangle >= 0) {
             const WallTriangle& w = level.walls[static_cast<size_t>(bestTriangle)];
             result.hit = true;
@@ -496,6 +527,18 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
         }
         return result;
     }
+
+    // Out of steps, which means degenerate geometry rather than a long mine.
+    // Reported as a hit and not as a clear line, because every caller reads a
+    // clear line as permission - to see the player, to light them, to let a
+    // shot through - and the one answer that cannot be wrong in a way that
+    // matters is "something was in the way".
+    result.hit = true;
+    result.distance = travelled;
+    result.point = origin + dir * travelled;
+    result.normal = -dir;
+    result.segment = segment;
+    result.triangle = -1;
     return result;
 }
 
@@ -537,7 +580,7 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
         int candidateCount = 0;
         candidates[candidateCount++] = segment;
         for (const SideData& sd : seg.sides) {
-            if (sd.isPortal() && !doorOpaque(doors, segment, sd.neighbour)) {
+            if (sd.isPortal() && !doorSealed(doors, segment, sd.neighbour)) {
                 candidates[candidateCount++] = sd.neighbour;
             }
         }
@@ -560,20 +603,22 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
             }
         }
 
-        // Fully shut doors are surfaces too. A moving door remains in the set
-        // for body collision, but a projectile can cross its visible portal.
+        // Door slabs are surfaces too, at every openness. A projectile crosses
+        // a door through the GAP between its halves, not through the halves,
+        // so there is nothing to exclude here: the conservative advance simply
+        // finds no slab in its way when it is lined up with the opening.
         bool nearestIsDoor = false;
+        int nearestDoor = -1;
         if (doors) {
             for (int fi = 0; fi < doors->count; ++fi) {
                 const SolidDoors::Face& face = doors->faces[static_cast<size_t>(fi)];
-                if (!face.opaque || (face.segmentA != segment && face.segmentB != segment)) {
-                    continue;
-                }
+                if (face.segmentA != segment && face.segmentB != segment) continue;
                 const float d = distanceToTriangle(p, face.p[0], face.p[1], face.p[2]);
                 if (d < nearest) {
                     nearest = d;
                     nearestIsDoor = true;
                     nearestSegment = segment;
+                    nearestDoor = face.door;
                 }
             }
         }
@@ -587,6 +632,7 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
                 result.normal = -dir;
                 result.segment = nearestSegment;
                 result.triangle = -1;
+                result.door = nearestDoor;
                 return result;
             }
             if (nearestTriangle < 0) return result;

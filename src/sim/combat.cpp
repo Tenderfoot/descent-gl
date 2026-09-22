@@ -211,6 +211,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         hit.point = origin + direction * wall.distance;
         hit.normal = wall.normal;
         hit.segment = wall.segment >= 0 ? wall.segment : segment;
+        hit.door = wall.door;
     }
 
     if (!params.hitBodies) return hit;
@@ -571,6 +572,9 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                     }
                     break;
                 case CombatHit::Kind::Wall:
+                    // A door is a wall you can knock on, and a hitscan shot is
+                    // always the player's. No-ops on the mine.
+                    state.doorsStruck.note(hit.door);
                     if (audible) {
                         // Half the weapon's own light, in line with what a bolt
                         // impact throws. At full strength a railgun hitting a
@@ -782,6 +786,16 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 continue;
 
             case CombatHit::Kind::Wall: {
+                // A door is a wall you can knock on - but only the player gets
+                // to knock, and only with a weapon. A robot's stray bolt
+                // landing on a door it happens to be fighting in front of is
+                // not a request to open it, and a mine whose doors flap every
+                // time a burst goes wide does not hold still long enough to be
+                // read; a flare is thrown to light a corridor, not to ask a
+                // door for anything. No-ops on the mine.
+                if (p.owner < 0 && p.kind != ProjectileKind::Flare) {
+                    state.doorsStruck.note(hit.door);
+                }
                 // Pulled back along the direction of travel so the impact flash
                 // and any resulting flare sit in front of the wall rather than
                 // inside it, where the light would be occluded by the wall it

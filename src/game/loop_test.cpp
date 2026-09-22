@@ -617,8 +617,17 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
         // sight and light go through the gap - while it still stops a body.
         // The portal walk and the flood consult the same `opaque` flag, so the
         // flood stands in for both here.
+        //
+        // The shot below is a GEOMETRIC test now that a door collides as its
+        // two slabs rather than as one quad over the whole opening: the bolt
+        // gets through because it is aimed at the parting between the halves,
+        // and an identical bolt aimed a little to either side would not. So the
+        // openness here has to leave a gap wider than the bolt while staying
+        // under kPassableAt, or the case stops measuring what it says it does -
+        // at a fifteenth open, door 0 of mine01 parts by about three units
+        // against a laser bolt seven tenths across.
         rig.reset();
-        rig.game.doors[0].openness = 0.05f;
+        rig.game.doors[0].openness = 0.15f;
         rig.run(1);
         const bool seeThrough = !rig.game.doorField.isOpaque(door.segment, door.side);
         const bool stillBlocks = rig.game.doorField.isBlocked(door.segment, door.side);

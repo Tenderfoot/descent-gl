@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sim/body.h"
+#include "sim/collision.h"
 #include "sim/events.h"
 #include "sim/weapons.h"
 
@@ -262,6 +263,26 @@ struct FireControls {
     bool cycleSecondary = false;
 };
 
+// Which doors have been shot since the game flow last looked.
+//
+// A door is not combat's business to open - it has no keys, no reactor and no
+// GameState - so what it does is report the hit and leave it there, the same
+// way the simulation reports a noise into an EventQueue rather than making one.
+// stepGame runs after stepCombat in the same fixed step, so a shot opens the
+// door it landed on with no frame of lag.
+//
+// Set by a direct hit only. Splash is deliberately left out: a concussion going
+// off in a corridor would otherwise throw every door around it open at once.
+struct DoorStrikes {
+    std::array<uint8_t, kMaxDoors> hit{};
+
+    void clear() { hit.fill(0); }
+    void note(int door) {
+        if (door >= 0 && door < kMaxDoors) hit[static_cast<size_t>(door)] = 1u;
+    }
+    bool struck(size_t door) const { return door < hit.size() && hit[door] != 0u; }
+};
+
 struct CombatState {
     ProjectilePool projectiles;
     FlarePool flares;
@@ -269,11 +290,11 @@ struct CombatState {
     BeamPool beams;
     PlayerState player;
     ObjectHealth objects;
+    DoorStrikes doorsStruck;
 };
 
 struct RobotState;
 struct RobotConfig;
-struct SolidDoors;
 struct PropState;
 
 // --- the combat trace ----------------------------------------------------
@@ -290,6 +311,12 @@ struct CombatHit {
     int segment = -1;         // the segment the hit is in
     int index = -1;           // robot slot for Robot, Level::objects index for Object,
                               // floating-light slot for Prop
+    // Which Level::doors entry a Kind::Wall hit actually landed on, or -1 for
+    // the mine itself. A door slab stops a shot exactly as rock does and wants
+    // none of the handling a separate kind would drag in - it is still a wall
+    // to everything that reads this - but which door it was is the one thing
+    // the flow needs in order to let the shot open it.
+    int door = -1;
 };
 
 struct CombatTraceParams {
