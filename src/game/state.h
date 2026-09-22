@@ -118,7 +118,8 @@ struct RenderState {
     std::array<int, sim::kMaxRobots> robotSegments{};
     int robotCount = 0;
 
-    // Pickups still on the floor, as emissive markers.
+    // Pickups still on the floor, as emissive markers: the level's own first,
+    // in its order, then whatever the robots have dropped.
     struct PickupView {
         glm::vec3 position{0.0f};
         // Multiplies the sprite where there is one, so the white key template
@@ -130,7 +131,7 @@ struct RenderState {
         int sprite = -1;
         bool present = false;
     };
-    std::array<PickupView, sim::kMaxPickups> pickups{};
+    std::array<PickupView, sim::kMaxPickups + sim::kMaxDrops> pickups{};
     int pickupCount = 0;
 
     // How far each door has slid open, so the renderer can place the slabs.
@@ -271,24 +272,15 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         r.robots[static_cast<size_t>(r.robotCount++)] = view;
     }
 
-    // Debris and drops ride the bolt list: they are small emissive things and
-    // the unlit pass draws them identically.
+    // Debris rides the bolt list: small emissive things the unlit pass draws
+    // identically. Drops do not; they are pickups, and frame_prepare draws them
+    // as pickups.
     for (const sim::Debris& d : b.robots.debris) {
         if (!d.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
         RenderState::Bolt bolt;
         bolt.position = d.body.position;
         bolt.color = d.color * std::max(0.0f, 1.0f - d.age / d.lifetime);
         bolt.size = 0.45f;
-        r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
-    }
-    for (const sim::Drop& drop : b.robots.drops) {
-        if (!drop.alive || r.boltCount >= static_cast<int>(sim::kMaxProjectiles)) continue;
-        RenderState::Bolt bolt;
-        bolt.position = drop.position;
-        bolt.color = drop.kind == sim::DropKind::Energy ? glm::vec3(0.4f, 0.9f, 1.0f)
-                                                        : glm::vec3(0.5f, 1.0f, 0.5f);
-        // Pulses, so a drop in a dark corridor catches the eye.
-        bolt.size = 0.9f + 0.25f * std::sin(drop.age * 5.0f);
         r.bolts[static_cast<size_t>(r.boltCount++)] = bolt;
     }
 

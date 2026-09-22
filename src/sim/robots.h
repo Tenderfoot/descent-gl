@@ -165,12 +165,14 @@ struct Robot {
 
 enum class DropKind : uint8_t { Energy, Shield };
 
+// What a robot leaves behind. A pickup the level did not place: stepGame
+// collects it alongside the authored ones, with the same effect, sound and
+// script hooks, and it is drawn as the same sprite. It stays until it is taken.
 struct Drop {
     bool alive = false;
     DropKind kind = DropKind::Energy;
     glm::vec3 position{0.0f};
     int segment = 0;
-    float age = 0.0f;
 };
 
 struct Debris {

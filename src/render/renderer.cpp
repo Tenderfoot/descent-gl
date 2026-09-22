@@ -270,7 +270,7 @@ void Renderer::setLevel(const Level& level) {
     // mine grows them once here rather than during a draw.
     // The unlit pass's worst case, so its buffer never grows mid-frame: every
     // bolt, landed flare, effect, pickup, beam and robot eye at once. Debris
-    // and drops ride the bolt list and are already counted by it.
+    // rides the bolt list and is already counted by it.
     size_t eyes = 0;
     if (robotConfig_) {
         for (const sim::RobotDef& def : robotConfig_->types) {

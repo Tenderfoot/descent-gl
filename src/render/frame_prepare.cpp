@@ -66,6 +66,75 @@ constexpr float kChaseReturnRate = 5.0f;   // 1/s
 constexpr float kChaseShipHide = 3.0f;
 constexpr float kChaseShipShow = 3.6f;
 
+// How a pickup of `kind` is drawn: its sprite, its tint and its size. Shared
+// by the level's own pickups and the ones robots drop, so a shield is a shield
+// whoever left it there.
+void dressPickup(RenderState::PickupView& view, PickupKind kind, float pulse) {
+    // A kind with hand-drawn art names its sprite layer and tints it;
+    // the rest keep the colour-only glow and leave `sprite` at -1,
+    // which is flares alone now that everything else has been drawn.
+    // The drawn sprites carry their own colour, so white is what shows
+    // them as they were painted - the pulse still rides on top. The key
+    // art is a white template, so there the tint is the whole point and
+    // the three keys differ by nothing else.
+    view.sprite = -1;
+    switch (kind) {
+        case PickupKind::Shield:
+            view.sprite = gl::SpriteHealth;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::Energy:
+            view.sprite = gl::SpriteEnergy;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::LaserUpgrade:
+            view.sprite = gl::SpriteLaser;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::Concussion:
+            view.sprite = gl::SpriteConcussion;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::Homing:
+            view.sprite = gl::SpriteHoming;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
+        case PickupKind::RailgunAmmo:
+            view.sprite = gl::SpriteRailgun;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::LightningAmmo:
+            view.sprite = gl::SpriteLightning;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::VulcanAmmo:
+            view.sprite = gl::SpriteVulcan;
+            view.color = glm::vec3(1.0f);
+            break;
+        case PickupKind::KeyBlue:
+            view.sprite = gl::SpriteKey;
+            view.color = glm::vec3(0.35f, 0.55f, 1.0f);
+            break;
+        case PickupKind::KeyYellow:
+            view.sprite = gl::SpriteKey;
+            view.color = glm::vec3(1.0f, 0.9f, 0.3f);
+            break;
+        case PickupKind::KeyRed:
+            view.sprite = gl::SpriteKey;
+            view.color = glm::vec3(1.0f, 0.35f, 0.3f);
+            break;
+        case PickupKind::Count: break;
+    }
+    view.color *= pulse;
+    // A sprite is drawn larger than a glow of the same weight: the art
+    // is padded inside its square, so the shape itself covers rather
+    // less of the quad than the falloff does.
+    view.size = kind >= PickupKind::KeyBlue ? 1.6f
+                : view.sprite >= 0              ? 1.3f
+                                                : 0.85f;
+}
+
 } // namespace
 
 PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
@@ -206,76 +275,31 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
 
         rs.pickupCount = static_cast<int>(
             std::min(level.pickups.size(), static_cast<size_t>(dvk::sim::kMaxPickups)));
+        const auto pulseAt = [&](size_t phase) {
+            return 0.85f + 0.15f * std::sin(static_cast<float>(nowSeconds) * 3.0f +
+                                            static_cast<float>(phase));
+        };
         for (int i = 0; i < rs.pickupCount; ++i) {
             const dvk::Pickup& pickup = level.pickups[static_cast<size_t>(i)];
             dvk::RenderState::PickupView& view = rs.pickups[static_cast<size_t>(i)];
             view.present = !cur.game.collected[static_cast<size_t>(i)];
             view.position = pickup.position;
-            const float pulse = 0.85f + 0.15f * std::sin(static_cast<float>(nowSeconds) * 3.0f +
-                                                         static_cast<float>(i));
-            // A kind with hand-drawn art names its sprite layer and tints it;
-            // the rest keep the colour-only glow and leave `sprite` at -1,
-            // which is flares alone now that everything else has been drawn.
-            // The drawn sprites carry their own colour, so white is what shows
-            // them as they were painted - the pulse still rides on top. The key
-            // art is a white template, so there the tint is the whole point and
-            // the three keys differ by nothing else.
-            view.sprite = -1;
-            switch (pickup.kind) {
-                case dvk::PickupKind::Shield:
-                    view.sprite = dvk::gl::SpriteHealth;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::Energy:
-                    view.sprite = dvk::gl::SpriteEnergy;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::LaserUpgrade:
-                    view.sprite = dvk::gl::SpriteLaser;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::Concussion:
-                    view.sprite = dvk::gl::SpriteConcussion;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::Homing:
-                    view.sprite = dvk::gl::SpriteHoming;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::Flares: view.color = glm::vec3(1.0f, 0.8f, 0.4f); break;
-                case dvk::PickupKind::RailgunAmmo:
-                    view.sprite = dvk::gl::SpriteRailgun;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::LightningAmmo:
-                    view.sprite = dvk::gl::SpriteLightning;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::VulcanAmmo:
-                    view.sprite = dvk::gl::SpriteVulcan;
-                    view.color = glm::vec3(1.0f);
-                    break;
-                case dvk::PickupKind::KeyBlue:
-                    view.sprite = dvk::gl::SpriteKey;
-                    view.color = glm::vec3(0.35f, 0.55f, 1.0f);
-                    break;
-                case dvk::PickupKind::KeyYellow:
-                    view.sprite = dvk::gl::SpriteKey;
-                    view.color = glm::vec3(1.0f, 0.9f, 0.3f);
-                    break;
-                case dvk::PickupKind::KeyRed:
-                    view.sprite = dvk::gl::SpriteKey;
-                    view.color = glm::vec3(1.0f, 0.35f, 0.3f);
-                    break;
-                case dvk::PickupKind::Count: break;
-            }
-            view.color *= pulse;
-            // A sprite is drawn larger than a glow of the same weight: the art
-            // is padded inside its square, so the shape itself covers rather
-            // less of the quad than the falloff does.
-            view.size = pickup.kind >= dvk::PickupKind::KeyBlue ? 1.6f
-                        : view.sprite >= 0                      ? 1.3f
-                                                                : 0.85f;
+            dressPickup(view, pickup.kind, pulseAt(static_cast<size_t>(i)));
+        }
+        // Then whatever the robots have dropped. A drop does not move, so there
+        // is nothing to interpolate; its phase is keyed to its slot, which does
+        // not change while it lies there.
+        for (size_t di = 0; di < cur.robots.drops.size(); ++di) {
+            const dvk::sim::Drop& drop = cur.robots.drops[di];
+            if (!drop.alive) continue;
+            dvk::RenderState::PickupView& view =
+                rs.pickups[static_cast<size_t>(rs.pickupCount++)];
+            view.present = true;
+            view.position = drop.position;
+            dressPickup(view,
+                        drop.kind == dvk::sim::DropKind::Energy ? dvk::PickupKind::Energy
+                                                                : dvk::PickupKind::Shield,
+                        pulseAt(di));
         }
 
         // Every light that is not baked into the level, rebuilt each frame.
