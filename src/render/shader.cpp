@@ -107,4 +107,9 @@ void Shader::setInt(const char* name, int v) const {
     if (loc >= 0) glUniform1i(loc, v);
 }
 
+void Shader::setInts(const char* name, const int* values, int count) const {
+    const GLint loc = location(name);
+    if (loc >= 0 && count > 0) glUniform1iv(loc, count, values);
+}
+
 } // namespace dvk::gl

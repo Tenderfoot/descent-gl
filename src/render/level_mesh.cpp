@@ -76,6 +76,44 @@ LevelMesh::LevelMesh(const Level& level) {
     total_ = static_cast<int>(vertices.size());
     if (vertices.empty()) log::fatal("level has no wall triangles at all");
 
+    // Grates after every segment's walls, so the segment ranges above are
+    // untouched. Each is two quads back to back, one facing into each segment,
+    // so back-face culling stays on and whichever face the camera is looking
+    // at carries the normal that faces it. The UVs come from the grate's linear
+    // mapping rather than from the side, so a point on the drawn bars and the
+    // same point found by the shadow in wall.frag read the same texel.
+    grateFirst_.reserve(level.grates.size());
+    for (const Grate& grate : level.grates) {
+        grateFirst_.push_back(static_cast<GLint>(vertices.size()));
+        const SideData& sd = level.segments[static_cast<size_t>(grate.segment)]
+                                 .sides[static_cast<size_t>(grate.side)];
+        const int(*split)[3] = sd.altDiagonal ? kSplitB : kSplitA;
+        const auto uvAt = [&](const glm::vec3& p) {
+            return glm::vec2(glm::dot(glm::vec3(grate.uAxis), p) + grate.uAxis.w,
+                             glm::dot(glm::vec3(grate.vAxis), p) + grate.vAxis.w);
+        };
+
+        for (int face = 0; face < 2; ++face) {
+            for (int t = 0; t < 2; ++t) {
+                glm::vec3 p[3];
+                for (int k = 0; k < 3; ++k) {
+                    // The second face runs each triangle's corners backwards,
+                    // which flips both its winding and its normal.
+                    const int corner = split[t][face == 0 ? k : 2 - k];
+                    p[k] = grate.corners[static_cast<size_t>(corner)];
+                }
+                const glm::vec3 raw = glm::cross(p[1] - p[0], p[2] - p[0]);
+                const float len = glm::length(raw);
+                const glm::vec3 n = len > 0.0f ? raw / len
+                                               : (face == 0 ? grate.normal : -grate.normal);
+                for (int k = 0; k < 3; ++k) {
+                    vertices.push_back({p[k], n, uvAt(p[k]), static_cast<float>(grate.texture),
+                                        0.0f});
+                }
+            }
+        }
+    }
+
     glCreateVertexArrays(1, &vao_);
     glCreateBuffers(1, &vbo_);
     glNamedBufferStorage(vbo_, static_cast<GLsizeiptr>(vertices.size() * sizeof(Vertex)),
@@ -105,8 +143,8 @@ LevelMesh::LevelMesh(const Level& level) {
     glVertexArrayAttribFormat(vao_, 4, 1, GL_FLOAT, GL_FALSE, offsetof(Vertex, emissive));
     glVertexArrayAttribBinding(vao_, 4, 0);
 
-    log::info("level mesh: {} triangles in {} segment ranges, {} emitting", total_ / 3,
-              first_.size(), emissiveTotal_ / 3);
+    log::info("level mesh: {} triangles in {} segment ranges, {} emitting, {} grates", total_ / 3,
+              first_.size(), emissiveTotal_ / 3, grateFirst_.size());
 }
 
 LevelMesh::~LevelMesh() {
@@ -118,6 +156,12 @@ void LevelMesh::drawSegment(int segment) const {
     const auto i = static_cast<size_t>(segment);
     if (i >= first_.size() || count_[i] == 0) return;
     glDrawArrays(GL_TRIANGLES, first_[i], count_[i]);
+}
+
+void LevelMesh::drawGrate(int grate) const {
+    const auto i = static_cast<size_t>(grate);
+    if (i >= grateFirst_.size()) return;
+    glDrawArrays(GL_TRIANGLES, grateFirst_[i], kGrateVertices);
 }
 
 void LevelMesh::drawSegmentEmissive(int segment) const {

@@ -12,7 +12,7 @@
 
 import { OPPOSITE_SIDE, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
 import { add, distance, rebuildDerived, scale, sub } from './geometry.js';
-import { rewireDoors } from './entities.js';
+import { rewireDoors, rewireGrates } from './entities.js';
 
 // The cube corner numbering the format is built on, from src/game/level.h:
 //   0 (-x,-y,-z)  1 (+x,-y,-z)  2 (+x,+y,-z)  3 (-x,+y,-z)
@@ -54,7 +54,7 @@ function pushVertex(level, position) {
     return level.vertices.length - 1;
 }
 
-const wall = (texture = 0) => ({ neighbour: -1, door: -1, texture, emissive: 0, uv: null });
+const wall = (texture = 0) => ({ neighbour: -1, door: -1, grate: -1, texture, emissive: 0, uv: null });
 
 // A side's outward direction. sd.normal points INTO the segment, because the
 // mine is a space you are inside.
@@ -122,10 +122,10 @@ export function extrudeSide(level, si, side, depth = null) {
     const created = level.segments.length;
     const sides = [];
     for (let s = 0; s < SIDE_COUNT; ++s) sides.push(wall(seg.sides[side].texture));
-    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, texture: 0, emissive: 0, uv: null };
+    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, grate: -1, texture: 0, emissive: 0, uv: null };
 
     level.segments.push({ verts, sides, keyOrder: null });
-    seg.sides[side] = { neighbour: created, door: -1, texture: 0, emissive: 0, uv: null };
+    seg.sides[side] = { neighbour: created, door: -1, grate: -1, texture: 0, emissive: 0, uv: null };
 
     rebuildDerived(level);
     return created;
@@ -248,6 +248,8 @@ export function deleteSegment(level, si) {
 
     level.doors = level.doors.filter((d) => d.segment !== si && d.neighbour !== si &&
                                             level.segments[d.segment]?.sides[d.side]?.neighbour !== si);
+    level.grates = level.grates.filter((g) => g.segment !== si &&
+                                              level.segments[g.segment]?.sides[g.side]?.neighbour !== si);
 
     const removed = { lights: 0, pickups: 0, objects: 0 };
     for (const [key, list] of [['lights', 'lights'], ['pickups', 'pickups'], ['objects', 'objects']]) {
@@ -266,14 +268,17 @@ export function deleteSegment(level, si) {
         }
     }
     for (const door of level.doors) door.segment = shift(door.segment);
+    for (const grate of level.grates) grate.segment = shift(grate.segment);
     for (const list of [level.lights, level.pickups, level.objects]) {
         for (const entity of list) entity.segment = shift(entity.segment);
     }
     if (level.exitTrigger) level.exitTrigger.segment = shift(level.exitTrigger.segment);
     level.start.segment = shift(level.start.segment);
 
-    // Door indices on sides are positions in level.doors, which just moved.
+    // Door and grate indices on sides are positions in their lists, which
+    // just moved.
     rewireDoors(level);
+    rewireGrates(level);
 
     removed.vertices = compactVertices(level);
     rebuildDerived(level);
@@ -339,6 +344,7 @@ export function splitPortal(level, si, side) {
     const sd = level.segments[si].sides[side];
     if (sd.neighbour < 0) throw new Error('that side is already a wall');
     if (sd.door >= 0) throw new Error('remove the door before splitting the portal');
+    if (sd.grate >= 0) throw new Error('remove the grate before splitting the portal');
 
     const other = level.segments[sd.neighbour];
     const texture = 0;

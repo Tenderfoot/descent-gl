@@ -39,6 +39,12 @@ class PortalWalk;
 
 namespace dvk::gl {
 
+// How many grates one light's pass can shadow through. A light is only handed
+// the grates whose two segments are both in its set, which in any mine built
+// by hand is none or one; past this, the rest light as if open. Mirrored in
+// shaders/wall.frag.
+inline constexpr int kMaxLightGrates = 8;
+
 // Owns every GL object and draws one frame.
 //
 // Frame shape from M3 on:
@@ -438,6 +444,9 @@ private:
     void visualiseStencil();
 
     std::unique_ptr<Shader> depthShader_;
+    // The prepass for grates: wall.vert, so its depth matches the lit pass
+    // exactly, and a fragment stage that cuts out the gaps.
+    std::unique_ptr<Shader> grateDepthShader_;
     std::unique_ptr<Shader> wallShader_;
     std::unique_ptr<Shader> emissiveShader_;
     std::unique_ptr<Shader> unlitShader_;
@@ -530,6 +539,16 @@ private:
     // every frame because they move with the slabs and change with the keys.
     DoorSigns doorSigns_;
     std::unique_ptr<Shader> signShader_;
+
+    // Level::grates as the lit shader reads them, in one storage buffer for
+    // the level, plus the two segments each sits between for the CPU-side
+    // visibility and light-set tests. See Level::Grate.
+    struct GrateRef {
+        int segmentA = -1;
+        int segmentB = -1;
+    };
+    std::vector<GrateRef> grates_;
+    GLuint grateBuffer_ = 0;
 
     ShadowVolumes volumes_;
     std::vector<ShadowVolumes::Range> ranges_;   // one per light, same order

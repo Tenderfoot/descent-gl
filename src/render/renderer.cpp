@@ -18,6 +18,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -102,6 +103,7 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     glMinSampleShading(1.0f);
 
     depthShader_ = std::make_unique<Shader>("shaders/depth.vert", "shaders/depth.frag");
+    grateDepthShader_ = std::make_unique<Shader>("shaders/wall.vert", "shaders/grate_depth.frag");
     wallShader_ = std::make_unique<Shader>("shaders/wall.vert", "shaders/wall.frag");
     emissiveShader_ =
         std::make_unique<Shader>("shaders/wall_emissive.vert", "shaders/wall_emissive.frag");
@@ -261,6 +263,40 @@ void Renderer::setLevel(const Level& level) {
         }
         mineMesh_ = buildOccluder(level.vertices, triangles, segments, level.name + " walls");
         mineOccluder_.reset(&mineMesh_, glm::mat4(1.0f));
+    }
+
+    // Every grate as wall.frag reads it. Never empty: the shader declares the
+    // buffer whether or not the level has a grate, so a level without one gets
+    // a single unused entry rather than no buffer at all.
+    {
+        struct GpuGrate {
+            glm::vec4 plane;
+            glm::vec4 uAxis;
+            glm::vec4 vAxis;
+            glm::vec4 edges[4];
+            glm::ivec4 layer;
+        };
+        static_assert(sizeof(GpuGrate) == 128, "must match the std430 layout in wall.frag");
+
+        grates_.clear();
+        std::vector<GpuGrate> gpu;
+        gpu.reserve(std::max<size_t>(1, level.grates.size()));
+        for (const Grate& grate : level.grates) {
+            grates_.push_back({grate.segment, grate.neighbour});
+            GpuGrate g{};
+            g.plane = glm::vec4(grate.normal, grate.d);
+            g.uAxis = grate.uAxis;
+            g.vAxis = grate.vAxis;
+            for (size_t e = 0; e < 4; ++e) g.edges[e] = grate.edges[e];
+            g.layer = glm::ivec4(grate.texture, 0, 0, 0);
+            gpu.push_back(g);
+        }
+        if (gpu.empty()) gpu.push_back(GpuGrate{});
+
+        if (grateBuffer_) glDeleteBuffers(1, &grateBuffer_);
+        glCreateBuffers(1, &grateBuffer_);
+        glNamedBufferStorage(grateBuffer_, static_cast<GLsizeiptr>(gpu.size() * sizeof(GpuGrate)),
+                             gpu.data(), 0);
     }
 
     props_.clear();
@@ -1841,6 +1877,20 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         ++stats_.segmentsDrawn;
     }
 
+    // Grates, with their gaps cut out, from the same buffer and so the same
+    // bound VAO. Seen from either of the two segments they sit between.
+    if (!grates_.empty()) {
+        grateDepthShader_->bind();
+        walls_->bind(0);
+        grateDepthShader_->setMat4("uModel", glm::mat4(1.0f));
+        for (size_t gi = 0; gi < grates_.size(); ++gi) {
+            const GrateRef& grate = grates_[gi];
+            if (!walk.isVisible(grate.segmentA) && !walk.isVisible(grate.segmentB)) continue;
+            levelMesh_->drawGrate(static_cast<int>(gi));
+        }
+        depthShader_->bind();
+    }
+
     for (size_t pi = 0; pi < props_.size(); ++pi) {
         const Prop& prop = props_[pi];
         if (prop.segment >= 0 && !walk.isVisible(prop.segment)) continue;
@@ -1990,6 +2040,24 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             wallShader_->setFloat("uCosInner", std::cos(outer * 0.75f));
         }
 
+        // The grates this light can shine through: both of a grate's segments
+        // in its set. Every receiver in this pass - walls, props, robots, the
+        // ship - is masked by them, since they all share this shader.
+        std::array<int, kMaxLightGrates> lightGrates{};
+        int lightGrateCount = 0;
+        for (size_t gi = 0; gi < grates_.size() && lightGrateCount < kMaxLightGrates; ++gi) {
+            const GrateRef& grate = grates_[gi];
+            if (std::binary_search(light.segments.begin(), light.segments.end(),
+                                   grate.segmentA) &&
+                std::binary_search(light.segments.begin(), light.segments.end(),
+                                   grate.segmentB)) {
+                lightGrates[static_cast<size_t>(lightGrateCount++)] = static_cast<int>(gi);
+            }
+        }
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, grateBuffer_);
+        wallShader_->setInt("uGrateCount", lightGrateCount);
+        wallShader_->setInts("uGrates", lightGrates.data(), lightGrateCount);
+
         wallShader_->setInt("uLayerOverride", -1);
         wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));
         wallShader_->setMat4("uModel", glm::mat4(1.0f));
@@ -1997,6 +2065,20 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
         for (int segment : lit_) {
             levelMesh_->drawSegment(segment);
             ++stats_.lightSegmentDraws;
+        }
+
+        // The grates themselves, lit like any wall. Where the prepass cut a gap
+        // the depth there is the wall behind, and GL_EQUAL leaves it alone.
+        for (size_t gi = 0; gi < grates_.size(); ++gi) {
+            const GrateRef& grate = grates_[gi];
+            if (!walk.isVisible(grate.segmentA) && !walk.isVisible(grate.segmentB)) continue;
+            if (!std::binary_search(light.segments.begin(), light.segments.end(),
+                                    grate.segmentA) &&
+                !std::binary_search(light.segments.begin(), light.segments.end(),
+                                    grate.segmentB)) {
+                continue;
+            }
+            levelMesh_->drawGrate(static_cast<int>(gi));
         }
 
         for (size_t pi = 0; pi < props_.size(); ++pi) {

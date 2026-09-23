@@ -34,9 +34,10 @@ const KEY_COLORS = [0x4a7dff, 0xf2d43a, 0xe04a3a];
 const OBJECT_COLOR = 0xc06a4a;
 const PORTAL_COLOR = 0x39d0a0;
 const DOOR_COLOR = 0xe0913a;
+const GRATE_COLOR = 0x8fb8d8;
 
 // Groups rebuilt from the level on every build(), and cleared before it.
-const LEVEL_GROUPS = ['walls', 'portals', 'doors', 'lights', 'reach', 'objects',
+const LEVEL_GROUPS = ['walls', 'portals', 'doors', 'grates', 'lights', 'reach', 'objects',
                       'pickups', 'props', 'start', 'exit', 'vertices', 'highlight'];
 
 // Groups that do not come from the level and must survive a rebuild. Keeping
@@ -238,7 +239,8 @@ export class LevelView {
     }
 
     // Each portal once, from the lower-numbered segment, so the two sides do
-    // not z-fight. A portal carrying a door is drawn in the door colour.
+    // not z-fight. A portal carrying a door is drawn in the door colour, and
+    // one carrying a grate in the grate colour.
     //
     // The quads are pickable, and are the only way a portal can be: a portal
     // has no wall triangles, so a ray aimed at one used to pass straight
@@ -249,10 +251,12 @@ export class LevelView {
         const buckets = {
             portals: { positions: [], faces: [] },
             doors: { positions: [], faces: [] },
+            grates: { positions: [], faces: [] },
         };
 
         for (const face of portalFaces(level)) {
-            const bucket = face.door >= 0 ? buckets.doors : buckets.portals;
+            const bucket = face.door >= 0 ? buckets.doors
+                         : face.grate >= 0 ? buckets.grates : buckets.portals;
             for (const [a, b, d] of [[0, 1, 2], [0, 2, 3]]) {
                 for (const k of [a, b, d]) {
                     bucket.positions.push(face.corners[k][0], face.corners[k][1], face.corners[k][2]);
@@ -264,6 +268,7 @@ export class LevelView {
         for (const [name, color, opacity] of [
             ['portals', PORTAL_COLOR, 0.16],
             ['doors', DOOR_COLOR, 0.45],
+            ['grates', GRATE_COLOR, 0.35],
         ]) {
             const bucket = buckets[name];
             if (bucket.positions.length === 0) continue;
@@ -585,7 +590,7 @@ export class LevelView {
     pickFace(raycaster, { portals = false } = {}) {
         const meshes = [...this.groups.walls.children];
         if (portals) {
-            for (const name of ['portals', 'doors']) {
+            for (const name of ['portals', 'doors', 'grates']) {
                 if (this.groups[name].visible) meshes.push(...this.groups[name].children);
             }
         }

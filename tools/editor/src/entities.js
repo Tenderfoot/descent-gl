@@ -1,5 +1,5 @@
 // Placing and editing the things inside a mine: lights, robots and scenery,
-// pickups, doors, the exit and the player start.
+// pickups, doors, grates, the exit and the player start.
 //
 // The rule every one of these has to keep is that an entity's cached `segment`
 // says which segment actually contains it. The loader recomputes it for any
@@ -188,6 +188,7 @@ export function addDoor(level, segment, side, key = -1, hatch = false) {
                         'a portal - there must be somewhere for it to open into.');
     }
     if (sd.door >= 0) throw new Error('that portal already has a door');
+    if (sd.grate >= 0) throw new Error('that portal already has a grate');
     if (key < -1 || key >= KEY_NAMES.length) throw new Error(`no such key colour: ${key}`);
 
     level.doors.push({
@@ -202,6 +203,37 @@ export function addDoor(level, segment, side, key = -1, hatch = false) {
     });
     rewireDoors(level);
     return level.doors.length - 1;
+}
+
+// A grate fills a portal with a cut-out panel: seen, lit and shot through,
+// not flown through. The game is fatal on one anywhere but an empty portal -
+// a wall has nothing behind it to see, and a door and a grate cannot share an
+// opening - so this refuses the same things.
+//
+// `texture` is a tile layer, and it is the tile's alpha that makes the holes.
+// A tile with none is a grate you cannot see through, which is legal and
+// almost certainly not what was meant; the side panel offers every tile and
+// leaves that to the author.
+export function addGrate(level, segment, side, texture) {
+    const sd = level.segments[segment].sides[side];
+    if (sd.neighbour < 0) {
+        throw new Error(`segment ${segment} ${SIDE_NAMES[side]} is a solid wall. A grate fills ` +
+                        'a portal - there must be something on the other side of it.');
+    }
+    if (sd.door >= 0) throw new Error('that portal already has a door');
+    if (sd.grate >= 0) throw new Error('that portal already has a grate');
+    if (!Number.isInteger(texture) || texture < 0) throw new Error(`no such tile: ${texture}`);
+
+    level.grates.push({ keyOrder: null, segment, side, texture });
+    rewireGrates(level);
+    return level.grates.length - 1;
+}
+
+export function setGrateTexture(level, index, texture) {
+    const grate = level.grates[index];
+    if (!grate) throw new Error(`no grate ${index}`);
+    if (!Number.isInteger(texture) || texture < 0) throw new Error(`no such tile: ${texture}`);
+    grate.texture = texture;
 }
 
 export function setExit(level, position, radius = DEFAULTS.exitRadius) {
@@ -376,6 +408,11 @@ export function removeEntity(level, kind, index) {
         rewireDoors(level);
         return;
     }
+    if (kind === 'grate') {
+        level.grates.splice(index, 1);
+        rewireGrates(level);
+        return;
+    }
     if (kind === 'start') throw new Error('a level needs a player start');
     const list = entityList(level, kind);
     if (!list[index]) throw new Error(`no ${kind} ${index}`);
@@ -405,6 +442,24 @@ export function rewireDoors(level) {
         const other = level.segments[sd.neighbour];
         for (let os = 0; os < SIDE_COUNT; ++os) {
             if (other.sides[os].neighbour === door.segment) other.sides[os].door = di;
+        }
+    }
+}
+
+// The same for `grate`, from level.grates. loadLevel wires both ends, and the
+// side panel asks a side which grate it holds from either of them.
+export function rewireGrates(level) {
+    for (const seg of level.segments) for (const sd of seg.sides) sd.grate = -1;
+
+    for (let gi = 0; gi < level.grates.length; ++gi) {
+        const grate = level.grates[gi];
+        const sd = level.segments[grate.segment]?.sides[grate.side];
+        if (!sd || sd.neighbour < 0) continue;
+
+        sd.grate = gi;
+        const other = level.segments[sd.neighbour];
+        for (let os = 0; os < SIDE_COUNT; ++os) {
+            if (other.sides[os].neighbour === grate.segment) other.sides[os].grate = gi;
         }
     }
 }

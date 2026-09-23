@@ -21,6 +21,8 @@
     { "name": "circuit-wall" },
     { "name": "reactor-plate", "turbulence": 0.012 },
 
-    { "name": "rust-panel" }
+    { "name": "rust-panel" },
+
+    { "name": "grate-open" }
   ]
 }

@@ -10,9 +10,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import {
-    addDoor, addFloatingLight, addLight, addObject, addPickup, addSwingingLight, availableKeys,
-    ceilingAnchor, duplicateEntity, ENTITY_LISTS, entityFacing, entityList, hasReactor,
-    moveEntities, moveEntity, removeEntity, segmentCentre, setExit,
+    addDoor, addFloatingLight, addGrate, addLight, addObject, addPickup, addSwingingLight,
+    availableKeys, ceilingAnchor, duplicateEntity, ENTITY_LISTS, entityFacing, entityList,
+    hasReactor, moveEntities, moveEntity, removeEntity, segmentCentre, setExit, setGrateTexture,
 } from './entities.js';
 import {
     KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
@@ -42,6 +42,7 @@ const LAYERS = [
     ['xray', 'X-ray', false],
     ['portals', 'Portals', true],
     ['doors', 'Doors', true],
+    ['grates', 'Grates', true],
     ['lights', 'Lights', true],
     ['reach', 'Light radius', false],
     ['objects', 'Objects', true],
@@ -695,6 +696,22 @@ function renderEntityTools(container, button, hint) {
         return el;
     };
 
+    // One button per wall tile, the current one pressed, the way the side
+    // panel's texture picker lays them out. -1 presses none.
+    const tileRow = (current, onpick, title) => {
+        const tiles = document.createElement('div');
+        tiles.className = 'textures';
+        WALL_TILE_NAMES.forEach((name, tile) => {
+            const el = document.createElement('button');
+            el.textContent = name;
+            el.title = title;
+            el.setAttribute('aria-pressed', String(current === tile));
+            el.onclick = () => onpick(tile, name);
+            tiles.appendChild(el);
+        });
+        container.appendChild(tiles);
+    };
+
     const field = (label, value, attrs, onchange) => {
         const wrap = document.createElement('label');
         wrap.className = 'field';
@@ -859,7 +876,7 @@ function renderEntityTools(container, button, hint) {
     if (selection?.kind === 'side') {
         const { segment, side } = selection;
         const sd = app.level.segments[segment].sides[side];
-        if (sd.neighbour >= 0 && sd.door < 0) {
+        if (sd.neighbour >= 0 && sd.door < 0 && sd.grate < 0) {
             const keys = availableKeys(app.level);
             row(`portal → ${sd.neighbour}`);
             for (let key = -1; key < KEY_NAMES.length; ++key) {
@@ -884,6 +901,25 @@ function renderEntityTools(container, button, hint) {
                                (level) => addDoor(level, segment, side, -1, true)));
                 el.disabled = !reactor;
             }
+
+            // A grate instead of a door: one button per tile, because the
+            // tile is the grate - its alpha is where the holes are.
+            row('add a grate');
+            tileRow(-1, (tile, name) => edit(`grate ${name} on ${segment} ${SIDE_NAMES[side]}`,
+                                             (level) => addGrate(level, segment, side, tile)),
+                    'a grate of this tile: seen, lit and shot through, not flown through. ' +
+                    'The tile\u2019s transparent pixels are the holes.');
+            return;
+        }
+        if (sd.grate >= 0) {
+            const index = sd.grate;
+            const grate = app.level.grates[index];
+            row(`grate ${index}, ${WALL_TILE_NAMES[grate.texture] ?? grate.texture}`);
+            tileRow(grate.texture, (tile, name) => edit(`grate ${index} tile ${name}`,
+                                                        (level) => setGrateTexture(level, index, tile)),
+                    'use this tile for the grate');
+            button('Delete grate', '', () => edit(`delete grate ${index}`,
+                                                  (level) => removeEntity(level, 'grate', index)));
             return;
         }
         if (sd.door >= 0) {
@@ -894,7 +930,7 @@ function renderEntityTools(container, button, hint) {
                                                  (level) => removeEntity(level, 'door', sd.door)));
             return;
         }
-        return hint('That side is a solid wall. A door has to be a portal.');
+        return hint('That side is a solid wall. A door or a grate has to be a portal.');
     }
 
     if (target === null || target === undefined) {
@@ -981,6 +1017,7 @@ function renderStats() {
         ['lights', level.lights.length],
         ['objects', level.objects.length],
         ['doors', level.doors.length],
+        ['grates', level.grates.length],
         ['pickups', level.pickups.length],
     ];
     $('stats').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -1058,7 +1095,8 @@ function renderSelection() {
         const { segment, side } = selection;
         const sd = app.level.segments[segment].sides[side];
         const what = sd.neighbour >= 0
-            ? `portal → segment ${sd.neighbour}${sd.door >= 0 ? `, door ${sd.door}` : ''}`
+            ? `portal → segment ${sd.neighbour}${sd.door >= 0 ? `, door ${sd.door}` : ''}` +
+              `${sd.grate >= 0 ? `, grate ${sd.grate}` : ''}`
             : `wall, ${WALL_TILE_NAMES[sd.texture] ?? sd.texture}`;
         container.innerHTML =
             `<b>segment ${segment}, ${SIDE_NAMES[side]}</b>\n${what}\n` +
@@ -1084,7 +1122,8 @@ function renderSelection() {
         const sides = seg.sides.map((sd, i) => {
             if (sd.neighbour < 0) return `  ${SIDE_NAMES[i].padEnd(6)} wall, ${WALL_TILE_NAMES[sd.texture] ?? sd.texture}`;
             const door = sd.door >= 0 ? `, door ${sd.door}` : '';
-            return `  ${SIDE_NAMES[i].padEnd(6)} portal → ${sd.neighbour}${door}`;
+            const grate = sd.grate >= 0 ? `, grate ${sd.grate}` : '';
+            return `  ${SIDE_NAMES[i].padEnd(6)} portal → ${sd.neighbour}${door}${grate}`;
         }).join('\n');
         const c = seg.center.map((n) => n.toFixed(1)).join(' ');
         container.innerHTML = `<b>segment ${si}</b>\ncentre ${c}\nverts ${seg.verts.join(' ')}\n${escapeHtml(sides)}`;
