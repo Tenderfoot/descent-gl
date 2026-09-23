@@ -166,6 +166,7 @@ export function portalFaces(level) {
                 neighbour: sd.neighbour,
                 neighbourSide: oppositeSide(level, si, side),
                 door: sd.door,
+                grate: sd.grate ?? -1,
                 corners: sideCorners(level, si, side),
             });
         }

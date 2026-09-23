@@ -107,6 +107,57 @@ function checkDoors(level, out) {
     }
 }
 
+// Grates are resolved after doors in loadLevel, and each of these is fatal.
+function checkGrates(level, out) {
+    const n = level.segments.length;
+    const taken = new Map();   // "segment/side" of both ends -> grate index
+    for (let gi = 0; gi < level.grates.length; ++gi) {
+        const grate = level.grates[gi];
+        if (grate.segment < 0 || grate.segment >= n) {
+            out.push(finding('error', 'grate-segment',
+                `grate ${gi} is in segment ${grate.segment}, which does not exist`,
+                { segment: grate.segment }));
+            continue;
+        }
+        if (grate.side < 0 || grate.side >= SIDE_COUNT) {
+            out.push(finding('error', 'grate-side',
+                `grate ${gi} is on side ${grate.side}, which is not one of the six`,
+                { segment: grate.segment }));
+            continue;
+        }
+        const where = { segment: grate.segment, side: grate.side };
+        const sd = level.segments[grate.segment].sides[grate.side];
+        if (sd.neighbour < 0) {
+            out.push(finding('error', 'grate-on-wall',
+                `grate ${gi} is on segment ${grate.segment} side ${SIDE_NAMES[grate.side]}, which ` +
+                'is a solid wall. A grate fills a portal - there must be something on the other ' +
+                'side of it.', where));
+            continue;
+        }
+        if (sd.door >= 0) {
+            out.push(finding('error', 'grate-on-door',
+                `grate ${gi} is on segment ${grate.segment} side ${SIDE_NAMES[grate.side]}, which ` +
+                `already holds door ${sd.door}`, where));
+            continue;
+        }
+
+        // Either end of the portal counts as the same opening, so a second
+        // grate naming the far side is caught as well as one naming this side.
+        const here = `${grate.segment}/${grate.side}`;
+        if (taken.has(here)) {
+            out.push(finding('error', 'grate-duplicate',
+                `grate ${gi} is on segment ${grate.segment} side ${SIDE_NAMES[grate.side]}, which ` +
+                `already holds grate ${taken.get(here)}`, where));
+            continue;
+        }
+        taken.set(here, gi);
+        const other = level.segments[sd.neighbour];
+        for (let os = 0; os < SIDE_COUNT; ++os) {
+            if (other.sides[os].neighbour === grate.segment) taken.set(`${sd.neighbour}/${os}`, gi);
+        }
+    }
+}
+
 // A pickup or object that is not inside any segment is fatal; a light that is
 // not is a warning, because a light outside the mine lights nothing but the
 // level still loads.
@@ -309,6 +360,7 @@ export function validateLevel(level) {
     let closure = null;
     if (structurallySound) {
         checkDoors(level, findings);
+        checkGrates(level, findings);
         checkEntities(level, findings);
         closure = checkWallSurface(level, findings);
         checkOverlaps(level, findings);

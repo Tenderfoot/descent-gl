@@ -10,7 +10,7 @@
 // in-game light editor's Save button is pressed.
 
 import { BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES, SIDE_COUNT } from './format.js';
-import { rewireDoors } from './entities.js';
+import { rewireDoors, rewireGrates } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
 
 const vec3 = (j) => {
@@ -41,6 +41,7 @@ export function parseLevel(json, path = '<memory>') {
         lights: [],
         objects: [],
         doors: [],
+        grates: [],
         pickups: [],
         floatingLights: [],
         swingingLights: [],
@@ -66,6 +67,8 @@ export function parseLevel(json, path = '<memory>') {
             sides: sj.sides.map((side) => ({
                 neighbour: side.portal ?? -1,
                 door: side.door ?? -1,
+                // Derived from level.grates like `door`; see rewireGrates.
+                grate: -1,
                 texture: side.texture ?? 0,
                 emissive: Number(side.emissive ?? 0),
                 // null, not a filled array: the loader distinguishes "authored"
@@ -100,6 +103,15 @@ export function parseLevel(json, path = '<memory>') {
             openDistance: dj.openDistance ?? DEFAULTS.doorOpenDistance,
             openTime: dj.openTime ?? DEFAULTS.doorOpenTime,
             closeDelay: dj.closeDelay ?? DEFAULTS.doorCloseDelay,
+        });
+    }
+
+    for (const gj of j.grates ?? []) {
+        level.grates.push({
+            keyOrder: Object.keys(gj),
+            segment: gj.segment,
+            side: gj.side,
+            texture: gj.texture,
         });
     }
 
@@ -187,6 +199,7 @@ export function parseLevel(json, path = '<memory>') {
     // without this step the editor believed a portal with a door on it was
     // empty - and offered to add a second one.
     rewireDoors(level);
+    rewireGrates(level);
     resolveSegments(level);
     return level;
 }
@@ -257,6 +270,12 @@ export function serializeLevel(level) {
             if (d.closeDelay !== DEFAULTS.doorCloseDelay) dj.closeDelay = d.closeDelay;
             return reorder(dj, d.keyOrder);
         });
+    }
+
+    // Every field always, matching saveLevel: a grate has no defaults to omit.
+    if (level.grates.length) {
+        j.grates = level.grates.map((g) => reorder(
+            { segment: g.segment, side: g.side, texture: g.texture }, g.keyOrder));
     }
 
     if (level.lights.length) {
