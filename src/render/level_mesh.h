@@ -47,6 +47,12 @@ public:
     // shadow volumes are built from Level::walls, not from here.
     void drawSegmentEmissive(int segment) const;
 
+    // Both faces of one of Level::grates. Its segments' ranges above do not
+    // include it: a grate belongs to two segments at once, so the caller
+    // decides from either of them whether it is drawn.
+    void drawGrate(int grate) const;
+    int grateCount() const { return static_cast<int>(grateFirst_.size()); }
+
     int segmentCount() const { return static_cast<int>(first_.size()); }
     int triangleCount() const { return total_ / 3; }
     // Whether any side in the level emits at all, so the pass can be skipped
@@ -59,6 +65,8 @@ private:
     std::vector<GLsizei> count_;  // vertex count
     std::vector<GLint> emissiveFirst_;    // first emitting vertex, inside the above
     std::vector<GLsizei> emissiveCount_;
+    std::vector<GLint> grateFirst_;   // first vertex of each grate, after every segment
+    static constexpr GLsizei kGrateVertices = 12;   // two faces, two triangles each
     int total_ = 0;
     int emissiveTotal_ = 0;
 };

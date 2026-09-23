@@ -136,6 +136,14 @@ int validateAssets() {
                 }
             }
         }
+        for (size_t gi = 0; gi < level.grates.size(); ++gi) {
+            const Grate& grate = level.grates[gi];
+            if (grate.texture < 0 || grate.texture >= layers) {
+                ++outOfRange;
+                log::error("asset FAIL {}: grate {} uses texture {}, and the set has {} tile(s)",
+                           path, gi, grate.texture, layers);
+            }
+        }
         if (outOfRange > 0) {
             ++failures;
             log::fatal("{} references {} tile(s) that are not in {}. Either the level is wrong or "

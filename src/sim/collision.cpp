@@ -207,6 +207,43 @@ int resolveCollision(const Level& level, Body& body, const CollisionConfig& cfg,
             }
         }
 
+        // Grates, which are portals to everything but a body. Static, so the
+        // faces come straight from the portal rather than from per-step state
+        // the way the door slabs do; otherwise the same push, on whichever
+        // side the body is.
+        for (const Grate& grate : level.grates) {
+            if (grate.segment != body.segment && grate.neighbour != body.segment) continue;
+            glm::vec3 tri[6];
+            portalTriangles(level, grate.segment, grate.side, tri);
+            for (int t = 0; t < 2; ++t) {
+                const glm::vec3 closest = closestPointOnTriangle(body.position, tri[t * 3 + 0],
+                                                                 tri[t * 3 + 1], tri[t * 3 + 2]);
+                const glm::vec3 away = body.position - closest;
+                const float distance = glm::length(away);
+                if (distance >= body.radius) continue;
+
+                const glm::vec3 normal =
+                    distance > kEpsilon
+                        ? away / distance
+                        : (glm::dot(body.velocity, grate.normal) < 0.0f ? grate.normal
+                                                                        : -grate.normal);
+                body.position += normal * (body.radius - distance + cfg.skin);
+                reflect(body, normal, cfg.restitution);
+
+                if (log) {
+                    Contact c;
+                    c.point = closest;
+                    c.normal = normal;
+                    c.segment = body.segment;
+                    c.triangle = -1;
+                    c.depth = body.radius - distance;
+                    log->add(c);
+                }
+                ++resolvedThisPass;
+                ++total;
+            }
+        }
+
         if (resolvedThisPass == 0) break;
     }
 
@@ -253,7 +290,7 @@ namespace {
 // radii while having no business touching. Without this they shove each other
 // through solid rock, and the wall pass spends the rest of the step undoing it.
 //
-// Same segment, or one portal apart and that portal not shut.
+// Same segment, or one portal apart and that portal neither shut nor grated.
 bool canTouch(const Level& level, int segA, int segB, const SolidDoors* doors) {
     if (segA == segB) return true;
     if (segA < 0 || segB < 0 || segA >= level.segmentCount() || segB >= level.segmentCount()) {
@@ -261,7 +298,7 @@ bool canTouch(const Level& level, int segA, int segB, const SolidDoors* doors) {
     }
     const Segment& seg = level.segments[static_cast<size_t>(segA)];
     for (const SideData& sd : seg.sides) {
-        if (sd.neighbour == segB) return !doorShut(doors, segA, segB);
+        if (sd.neighbour == segB) return sd.grate < 0 && !doorShut(doors, segA, segB);
     }
     return false;
 }
@@ -623,8 +660,36 @@ RayHit sweepSphere(const Level& level, const glm::vec3& origin, const glm::vec3&
             }
         }
 
+        // Grates stop anything with a radius, which is what separates a bolt
+        // from a ray: see Level::Grate.
+        bool nearestIsGrate = false;
+        for (const Grate& grate : level.grates) {
+            if (grate.segment != segment && grate.neighbour != segment) continue;
+            glm::vec3 tri[6];
+            portalTriangles(level, grate.segment, grate.side, tri);
+            for (int t = 0; t < 2; ++t) {
+                const float d = distanceToTriangle(p, tri[t * 3 + 0], tri[t * 3 + 1],
+                                                   tri[t * 3 + 2]);
+                if (d < nearest) {
+                    nearest = d;
+                    nearestIsGrate = true;
+                    nearestIsDoor = false;
+                    nearestSegment = segment;
+                }
+            }
+        }
+
         const float gap = nearest - radius;
         if (gap <= kEpsilon * 10.0f) {
+            if (nearestIsGrate) {
+                result.hit = true;
+                result.distance = travelled;
+                result.point = p;
+                result.normal = -dir;
+                result.segment = nearestSegment;
+                result.triangle = -1;
+                return result;
+            }
             if (nearestIsDoor) {
                 result.hit = true;
                 result.distance = travelled;

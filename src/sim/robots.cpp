@@ -331,11 +331,13 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
 
 namespace {
 
-// A portal a robot cannot get through: a shut door it has no way to open.
-// Robots carry no keys, so a keyed door is a wall until the player opens it;
-// an unkeyed door opens for anything that comes near, so it is a corridor.
+// A portal a robot cannot get through: a grate, or a shut door it has no way
+// to open. Robots carry no keys, so a keyed door is a wall until the player
+// opens it; an unkeyed door opens for anything that comes near, so it is a
+// corridor.
 bool portalLockedShut(const Level& level, const SolidDoors* doors, int segment,
                       const SideData& sd) {
+    if (sd.grate >= 0) return true;
     if (sd.door < 0 || !doorShut(doors, segment, sd.neighbour)) return false;
     return level.doors[static_cast<size_t>(sd.door)].key != KeyColor::None;
 }

@@ -60,6 +60,10 @@ struct SideData {
     // and the mine's wall surface stays closed - with a slab that fills the
     // opening while it is shut.
     int door = -1;
+    // >= 0 puts a grate in this portal: index into Level::grates. Set on both
+    // sides of the portal, like `door`. The portal stays a portal to everything
+    // that walks the graph for sight, light or sound; only bodies are stopped.
+    int grate = -1;
     int texture = 0;     // layer in the wall texture array, walls only
     // How brightly this side emits, on top of whatever light reaches it. 0,
     // the default, is an ordinary wall that is only ever as bright as the
@@ -183,6 +187,44 @@ struct Door {
     std::array<glm::vec3, 4> corners{};
     glm::vec3 center{0.0f};
     glm::vec3 normal{0.0f};
+};
+
+// A see-through panel filling one portal: a grate, a mesh, a fence. Drawn
+// with its texture's alpha as a cut-out, and it shadows the same way - a light
+// on one side lays the pattern of the bars on whatever is on the other.
+//
+// Not a stencil occluder. A shadow volume is extruded from a closed mesh's
+// silhouette and knows nothing about texture alpha, and a flat quad is not
+// closed. Because a grate is flat, fixed, and exactly the size of its portal,
+// the shadow does not need rendering at all: the lit shader follows the line
+// from each fragment to the light, finds where it crosses the grate, and
+// samples the alpha there. See shaders/wall.frag.
+//
+// Bodies and anything with a radius stop at it; rays - sight, light, hitscan -
+// go through, because what a grate is for is being seen and shot through
+// while not being flown through.
+struct Grate {
+    int segment = 0;
+    int side = 0;
+    int neighbour = 0;
+    int texture = 0;     // layer in the wall texture array; its alpha is the cut-out
+
+    // Cached from the side at load.
+    std::array<glm::vec3, 4> corners{};
+    glm::vec3 normal{0.0f};   // the side's averaged plane, pointing into `segment`
+    float d = 0.0f;
+
+    // The texture mapping, as a linear function of world position:
+    //   uv = (dot(uAxis.xyz, p) + uAxis.w, dot(vAxis.xyz, p) + vAxis.w)
+    // Linear rather than per-corner UVs because the shadow has to find the
+    // same texel from an arbitrary point on the plane that the drawn quad
+    // finds by interpolation. A per-corner mapping on a warped quad has no
+    // such inverse; this one is the same function in both places.
+    glm::vec4 uAxis{0.0f};
+    glm::vec4 vAxis{0.0f};
+    // Inward-facing planes through the four edges, in the grate's plane. A
+    // point is on the grate when it is on the positive side of all four.
+    std::array<glm::vec4, 4> edges{};
 };
 
 // A door slab is oversized by this much at the frame and at the top and bottom,
@@ -326,6 +368,7 @@ struct Level {
     std::vector<int> hullFaceFirst;
     std::vector<int> hullFaceVertex;
     std::vector<Door> doors;
+    std::vector<Grate> grates;
     std::vector<Pickup> pickups;
     std::vector<FloatingLightDef> floatingLights;
     std::vector<SwingingLightDef> swingingLights;

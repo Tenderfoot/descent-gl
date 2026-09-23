@@ -487,6 +487,16 @@ Level loadLevel(const std::string& path) {
             }
         }
 
+        if (auto it = j.find("grates"); it != j.end()) {
+            for (const auto& gj : *it) {
+                Grate grate;
+                grate.segment = gj.at("segment").get<int>();
+                grate.side = gj.at("side").get<int>();
+                grate.texture = gj.at("texture").get<int>();
+                level.grates.push_back(grate);
+            }
+        }
+
         if (auto it = j.find("pickups"); it != j.end()) {
             for (const auto& pj : *it) {
                 Pickup pickup;
@@ -609,6 +619,83 @@ Level loadLevel(const std::string& path) {
         }
     }
 
+    // Grates after doors, so a portal asked to hold both is caught here.
+    for (size_t gi = 0; gi < level.grates.size(); ++gi) {
+        Grate& grate = level.grates[gi];
+        if (grate.segment < 0 || grate.segment >= level.segmentCount()) {
+            log::fatal("{}: grate {} is in segment {}, which does not exist", path, gi,
+                       grate.segment);
+        }
+        if (grate.side < 0 || grate.side >= SideCount) {
+            log::fatal("{}: grate {} is on side {}, which is not one of the six", path, gi,
+                       grate.side);
+        }
+        SideData& sd = level.segments[static_cast<size_t>(grate.segment)]
+                           .sides[static_cast<size_t>(grate.side)];
+        const char* sideName = kSideNames[static_cast<size_t>(grate.side)];
+        if (!sd.isPortal()) {
+            log::fatal("{}: grate {} is on segment {} side {}, which is a solid wall. A grate "
+                       "fills a portal - there must be something on the other side of it.",
+                       path, gi, grate.segment, sideName);
+        }
+        if (sd.door >= 0) {
+            log::fatal("{}: grate {} is on segment {} side {}, which already holds door {}", path,
+                       gi, grate.segment, sideName, sd.door);
+        }
+        if (sd.grate >= 0) {
+            log::fatal("{}: grate {} is on segment {} side {}, which already holds grate {}", path,
+                       gi, grate.segment, sideName, sd.grate);
+        }
+        sd.grate = static_cast<int>(gi);
+        grate.neighbour = sd.neighbour;
+        grate.corners = level.sideCorners(grate.segment, grate.side);
+        grate.normal = sd.normal;
+        grate.d = sd.d;
+
+        Segment& other = level.segments[static_cast<size_t>(grate.neighbour)];
+        for (int os = 0; os < SideCount; ++os) {
+            if (other.sides[static_cast<size_t>(os)].neighbour == grate.segment) {
+                other.sides[static_cast<size_t>(os)].grate = static_cast<int>(gi);
+                break;
+            }
+        }
+
+        // The texture frame: across and up in the plane, anchored at corner 0,
+        // at the walls' own density - the same layout an unauthored wall gets,
+        // made exactly linear so the shadow can invert it.
+        const std::array<glm::vec3, 4>& c = grate.corners;
+        const glm::vec3 n = grate.normal;
+        glm::vec3 across = (c[1] - c[0]) + (c[2] - c[3]);
+        across -= n * glm::dot(across, n);
+        glm::vec3 up = (c[3] - c[0]) + (c[2] - c[1]);
+        up -= n * glm::dot(up, n);
+        if (glm::length(across) < 1e-3f || glm::length(up) < 1e-3f) {
+            log::fatal("{}: grate {} on segment {} side {} has no area", path, gi, grate.segment,
+                       sideName);
+        }
+        across = glm::normalize(across);
+        up -= across * glm::dot(up, across);
+        up = glm::normalize(up);
+        const glm::vec3 uScaled = across / kWorldUnitsPerTile;
+        const glm::vec3 vScaled = up / kWorldUnitsPerTile;
+        grate.uAxis = glm::vec4(uScaled, -glm::dot(uScaled, c[0]));
+        grate.vAxis = glm::vec4(vScaled, -glm::dot(vScaled, c[0]));
+
+        for (size_t e = 0; e < 4; ++e) {
+            const glm::vec3& a = c[e];
+            const glm::vec3& b = c[(e + 1) % 4];
+            glm::vec3 inward = glm::cross(n, b - a);
+            const float len = glm::length(inward);
+            if (len < 1e-6f) {
+                log::fatal("{}: grate {} on segment {} side {} has a degenerate edge", path, gi,
+                           grate.segment, sideName);
+            }
+            inward /= len;
+            if (glm::dot(inward, sd.center - a) < 0.0f) inward = -inward;
+            grate.edges[e] = glm::vec4(inward, -glm::dot(inward, a));
+        }
+    }
+
     for (Pickup& pickup : level.pickups) {
         if (pickup.segment < 0 || pickup.segment >= level.segmentCount()) {
             pickup.segment = findSegment(level, pickup.position, pickup.segment);
@@ -681,9 +768,10 @@ Level loadLevel(const std::string& path) {
         }
     }
     log::info("level '{}': {} segments, {} portals, {} wall triangles, {} lights, {} objects, "
-              "{} doors, {} pickups",
+              "{} doors, {} grates, {} pickups",
               path, level.segments.size(), portals / 2, level.walls.size(), level.lights.size(),
-              level.objects.size(), level.doors.size(), level.pickups.size());
+              level.objects.size(), level.doors.size(), level.grates.size(),
+              level.pickups.size());
     log::info("  {} of {} sides took the alternate diagonal at the minimum-crease split",
               altDiagonals, level.segments.size() * SideCount);
     return level;
@@ -768,6 +856,10 @@ bool saveLevel(const std::string& path, const Level& level) {
         dj["openTime"] = door.openTime;
         dj["closeDelay"] = door.closeDelay;
         j["doors"].push_back(dj);
+    }
+    for (const Grate& grate : level.grates) {
+        j["grates"].push_back(
+            {{"segment", grate.segment}, {"side", grate.side}, {"texture", grate.texture}});
     }
     for (const Pickup& pickup : level.pickups) {
         j["pickups"].push_back(

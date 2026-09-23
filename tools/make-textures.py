@@ -135,12 +135,12 @@ class Tile:
         self.size = size
         self.px = bytearray(size * size * 4)
 
-    def put(self, x, y, r, g, b):
+    def put(self, x, y, r, g, b, a=255):
         i = (y * self.size + x) * 4
         self.px[i + 0] = clamp8(r)
         self.px[i + 1] = clamp8(g)
         self.px[i + 2] = clamp8(b)
-        self.px[i + 3] = 255
+        self.px[i + 3] = clamp8(a)
 
 # --------------------------------------------------------------- the generators
 
@@ -232,6 +232,28 @@ def make_grate(size):
     return tile
 
 
+def make_grate_open(size):
+    """A grate with real holes, for Level::grates: the gaps are alpha 0, so the
+    walls show through them and a light throws the bars as a shadow.
+
+    Coarser than `grate`, so the bars still read when their shadow is thrown
+    across a room. The gaps carry the bars' base colour rather than black:
+    mipmapping and bilinear filtering average RGB across the cut-out's edge,
+    and a black gap would put a dark rim on every bar."""
+    tile = Tile(size)
+    cell = max(4, size // 4)
+    bar = max(2, cell // 4)
+    for y in range(size):
+        for x in range(size):
+            if (x % cell) < bar or (y % cell) < bar:
+                across = min(x % cell, y % cell)
+                shade = 130 + (across * 70) // max(1, bar)
+                tile.put(x, y, shade, shade + 4, shade + 12)
+            else:
+                tile.put(x, y, 130, 134, 142, 0)
+    return tile
+
+
 def make_hull(size):
     """Panelled metal for the ship hull: plate seams, a little per-plate
     variation, and a warm stripe so roll is readable from the chase camera."""
@@ -265,6 +287,7 @@ GENERATORS = {
     "hazard": make_hazard,
     "grate": make_grate,
     "hull": make_hull,
+    "grate-open": make_grate_open,
 }
 
 # --------------------------------------------------------------------- the PNG

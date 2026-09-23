@@ -28,6 +28,9 @@ public:
     void setVec4(const char* name, const glm::vec4& v) const;
     void setFloat(const char* name, float v) const;
     void setInt(const char* name, int v) const;
+    // A uniform int array, from its first element: `name` is the array's own
+    // name, and `count` values are written starting at element 0.
+    void setInts(const char* name, const int* values, int count) const;
 
 private:
     // Uniform locations are looked up once. The per-light passes set half a
