@@ -395,13 +395,12 @@ bool nextWaypoint(const Level& level, const RobotState& state, int fromSegment,
     return false;
 }
 
-// A disabled robot finished by the Static Charge always drops energy, in place
-// of the type's own roll and whatever its drop chances say - including a type
+// A robot finished by the Static Charge always drops energy, in place of the
+// type's own roll and whatever its drop chances say - including a type
 // configured to drop nothing. The reactor is exempt: it is not a kill the loop
 // is about.
 void spawnDrop(const Level& level, RobotState& state, const RobotDef& def, const Robot& robot) {
-    const bool chargeFinish =
-        !def.isReactor && robot.lastHitByCharge && !robot.disabledByCharge;
+    const bool chargeFinish = !def.isReactor && robot.lastHitByCharge;
 
     DropKind kind = DropKind::Energy;
     if (!chargeFinish) {
@@ -495,7 +494,6 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         if (health0 <= kDisabledHealthFraction) {
             if (robot.mode != RobotMode::Disabled) {
                 setMode(robot, RobotMode::Disabled);
-                robot.disabledByCharge = robot.lastHitByCharge;
                 robot.awareness = 0.0f;
                 robot.burstLeft = 0;
                 // Folded in, not left to decay: with nothing flying the robot,

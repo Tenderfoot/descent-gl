@@ -162,14 +162,9 @@ struct Robot {
     glm::vec3 tumble{0.0f};
     int homeSegment = 0;
 
-    // Whether the last damage it took came from the Static Charge, and whether
-    // that was also true at the moment it went under. A robot finished by the
-    // Static Charge after something else disabled it always drops energy; see
-    // stepRobots. One the Static Charge disabled itself does not, or the beam
-    // held on a healthy robot would pay out on every kill - it passes through
-    // the disabled band on the way down.
+    // Whether the last damage it took came from the Static Charge. A robot the
+    // Static Charge finishes always drops energy; see spawnDrop.
     bool lastHitByCharge = false;
-    bool disabledByCharge = false;
 };
 
 enum class DropKind : uint8_t { Energy, Shield };
