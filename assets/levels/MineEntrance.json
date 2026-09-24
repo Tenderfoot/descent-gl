@@ -1990,16 +1990,16 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 17
@@ -2022,16 +2022,16 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 18
@@ -2054,16 +2054,16 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 19
@@ -2089,13 +2089,13 @@
           "portal": 28
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 20
@@ -2118,16 +2118,16 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 21
@@ -2150,16 +2150,16 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 22
@@ -2377,19 +2377,19 @@
           "portal": 29
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 19
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         }
       ]
     },
@@ -2406,19 +2406,19 @@
       ],
       "sides": [
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 28
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
-          "texture": 0
+          "texture": 5
         },
         {
           "portal": 30
