@@ -69,6 +69,11 @@ export class LevelView {
         this.disposables = [];
         this.wallMaterials = [];
         this.xray = false;
+        this.textured = false;
+        // Tile images by layer index. Not in `disposables`: they do not depend
+        // on the level, and a drag rebuilds every frame.
+        this.tileTextures = new Map();
+        this.textureLoader = new THREE.TextureLoader();
     }
 
     // Something for MeshLambertMaterial to respond to. Deliberately not the
@@ -119,6 +124,53 @@ export class LevelView {
             material.depthWrite = !on;
             material.needsUpdate = true;
         }
+    }
+
+    // The tile images on the walls, lit by the studio pair rather than the
+    // level's lights. It is still not the game - no shadows, no falloff, and
+    // a room the level leaves black is not black here - but it shows which
+    // art a side carries and how its UVs lie across it, which a flat colour
+    // per tile cannot.
+    setTextured(on) {
+        this.textured = on;
+        for (const material of this.wallMaterials) this.applyTileLook(material);
+    }
+
+    // The tile's image, loaded once and shared by every build. The loader
+    // flips rows the way wall_tiles.cpp does, so a tile is the same way up
+    // here as on the wall. A tile that fails to load goes back to its colour.
+    tileTexture(tile) {
+        if (this.tileTextures.has(tile)) return this.tileTextures.get(tile);
+        const name = WALL_TILE_NAMES[tile];
+        if (name === undefined) return null;
+        const texture = this.textureLoader.load(
+            `/api/textures/${encodeURIComponent(name)}`,
+            undefined,
+            undefined,
+            () => {
+                console.warn(`could not load tile '${name}'; drawing it flat`);
+                this.tileTextures.set(tile, null);
+                texture.dispose();
+                for (const material of this.wallMaterials) {
+                    if (material.userData.tile === tile) this.applyTileLook(material);
+                }
+            });
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 8;
+        this.tileTextures.set(tile, texture);
+        return texture;
+    }
+
+    applyTileLook(material) {
+        const { tile, glow } = material.userData;
+        const map = this.textured ? this.tileTexture(tile) : null;
+        material.map = map;
+        material.color.setHex(map ? 0xffffff : tileColor(tile));
+        // An emitting side glows in its own art when there is art to glow in.
+        material.emissiveMap = glow ? map : null;
+        material.emissive.setHex(glow ? (map ? 0xffffff : tileColor(tile)) : 0x000000);
+        material.needsUpdate = true;
     }
 
     build(level) {
@@ -177,12 +229,14 @@ export class LevelView {
             const glow = sd.emissive > 0;
             const key = `${tile}:${glow ? 1 : 0}`;
             if (!byTile.has(key)) {
-                byTile.set(key, { tile, glow, positions: [], normals: [], faces: [] });
+                byTile.set(key, { tile, glow, positions: [], normals: [], uvs: [], faces: [] });
             }
             const bucket = byTile.get(key);
-            for (const p of wall.p) {
+            for (let k = 0; k < 3; ++k) {
+                const p = wall.p[k];
                 bucket.positions.push(p[0], p[1], p[2]);
                 bucket.normals.push(wall.normal[0], wall.normal[1], wall.normal[2]);
+                bucket.uvs.push(wall.uv[k][0], wall.uv[k][1]);
             }
             // Per triangle, so a raycast hit becomes a segment AND a side
             // without searching. Extrude and the texture tools need the side.
@@ -193,22 +247,25 @@ export class LevelView {
             const geometry = this.track(new THREE.BufferGeometry());
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.positions, 3));
             geometry.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normals, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(bucket.uvs, 2));
 
             // DoubleSide, and the back faces are darkened by the material's own
             // lighting rather than hidden: a mine is a space you are inside,
             // so its walls face away from anyone looking at it from outside,
             // and FrontSide would render the whole level invisible until the
             // camera was in it.
+            // An emitting side carries its own light in the game, so it
+            // carries its own light here too - otherwise the one property the
+            // author just set is the one the diagram does not show. Colour,
+            // emissive and map are set by applyTileLook, which the Textures
+            // toggle calls again.
             const material = this.track(new THREE.MeshLambertMaterial({
-                color: tileColor(tile),
-                // An emitting side carries its own light in the game, so it
-                // carries its own light here too - otherwise the one property
-                // the author just set is the one the diagram does not show.
-                emissive: glow ? tileColor(tile) : 0x000000,
                 emissiveIntensity: glow ? 0.9 : 0,
                 side: THREE.DoubleSide,
                 flatShading: true,
             }));
+            material.userData = { tile, glow };
+            this.applyTileLook(material);
 
             this.wallMaterials.push(material);
 
