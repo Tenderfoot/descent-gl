@@ -98,6 +98,9 @@ void splitSides(Level& level) {
                 sd.uv = {glm::vec2(0.0f, 0.0f), glm::vec2(u, 0.0f), glm::vec2(u2, v2),
                          glm::vec2(0.0f, v)};
             }
+            for (int turn = 0; turn < sd.rotation; ++turn) {
+                for (glm::vec2& uv : sd.uv) uv = glm::vec2(uv.y, -uv.x);
+            }
 
             const int(*split)[3] = sd.altDiagonal ? kSplitB : kSplitA;
 
@@ -437,6 +440,8 @@ Level loadLevel(const std::string& path) {
                     log::fatal("{}: segment {} side {} has a negative emissive ({})", path,
                                level.segments.size(), i, sd.emissive);
                 }
+                // Any whole number of quarter turns, so -1 means a turn back.
+                sd.rotation = ((sides[i].value("rotate", 0) % 4) + 4) % 4;
                 if (auto it = sides[i].find("uv"); it != sides[i].end()) {
                     for (size_t k = 0; k < 4 && k < it->size(); ++k) {
                         sd.uv[k] = glm::vec2((*it)[k][0].get<float>(), (*it)[k][1].get<float>());
@@ -809,6 +814,7 @@ bool saveLevel(const std::string& path, const Level& level) {
                 // Omitted at the default, so a level that emits nowhere reads
                 // exactly as it did before sides could emit at all.
                 if (sd.emissive > 0.0f) side["emissive"] = sd.emissive;
+                if (sd.rotation != 0) side["rotate"] = sd.rotation;
             }
             sj["sides"].push_back(side);
         }

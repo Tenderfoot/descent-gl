@@ -27,7 +27,7 @@ import { parseLevel, resolveSegments, serializeLevel } from './level.js';
 import { add, scale, sideCorners } from './geometry.js';
 import {
     deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setEmissive,
-    setTexture, splitPortal,
+    setRotation, setTexture, snapVertex, splitPortal,
 } from './ops.js';
 import {
     centroid, groupTransform, IDENTITY_QUAT, transformPoints,
@@ -619,6 +619,13 @@ function renderTools() {
         });
         container.appendChild(textures);
 
+        const turns = sd.rotation ?? 0;
+        button(`Rotate texture (${turns * 90}°)`,
+               'Turns this wall’s texture a further 90 degrees',
+               () => edit(`rotate texture to ${((turns + 1) % 4) * 90}° on ${segment} ` +
+                          `${SIDE_NAMES[side]}`,
+                          (level) => setRotation(level, segment, side, turns + 1)));
+
         // How brightly the side emits on top of the light that reaches it.
         const emits = document.createElement('label');
         emits.className = 'field';
@@ -670,6 +677,16 @@ function renderTools() {
                 });
             }
             hint(`${chosen.length} vertices across ${segments.size} segment(s)`);
+            if (chosen.length === 2) {
+                // The one clicked last moves onto the one clicked first, so the
+                // corner already in place is the one to pick first.
+                const [onto, from] = chosen.map((item) => item.index);
+                button('Snap together',
+                       `Moves vertex ${from} onto vertex ${onto}, the one selected first, ` +
+                       'so two walls can then be joined',
+                       () => edit(`snap vertex ${from} onto ${onto}`,
+                                  (level) => snapVertex(level, from, onto)));
+            }
             button('Clear', 'Deselect all of them (Escape)',
                    () => { clearSelection(); renderTools(); renderSelection(); });
             return;

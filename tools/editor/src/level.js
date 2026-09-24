@@ -71,6 +71,8 @@ export function parseLevel(json, path = '<memory>') {
                 grate: -1,
                 texture: side.texture ?? 0,
                 emissive: Number(side.emissive ?? 0),
+                // Quarter turns, any whole number of them, as the loader reads it.
+                rotation: ((Math.trunc(Number(side.rotate ?? 0)) % 4) + 4) % 4,
                 // null, not a filled array: the loader distinguishes "authored"
                 // from "left to the planar default" and so must the writer.
                 uv: Array.isArray(side.uv) ? side.uv.map((p) => [Number(p[0]), Number(p[1])]) : null,
@@ -249,6 +251,7 @@ export function serializeLevel(level) {
                 // Omitted at the default, matching saveLevel: a level that
                 // emits nowhere writes exactly what it did before sides could.
                 if (sd.emissive > 0) side.emissive = sd.emissive;
+                if (sd.rotation) side.rotate = sd.rotation;
             }
             if (sd.uv) side.uv = sd.uv.map((p) => [p[0], p[1]]);
             return side;

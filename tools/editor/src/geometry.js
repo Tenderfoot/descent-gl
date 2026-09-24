@@ -71,6 +71,16 @@ export function defaultUv(c) {
     return [[0, 0], [u, 0], [u2, v2], [0, v]];
 }
 
+// A side's texture turned by `turns` quarter turns, in texture space rather
+// than by shifting the corners - a shift would lay a wall's tile count along
+// its height and stretch every side that is not square. The loader's rotation
+// in src/game/level.cpp. Returns new arrays; `uv` is left as it was.
+export function rotateUv(uv, turns) {
+    let out = uv.map((p) => [p[0], p[1]]);
+    for (let t = 0; t < turns; ++t) out = out.map(([u, v]) => [v, -u]);
+    return out;
+}
+
 // Fills in every field the loader derives: segment centres, and per side the
 // chosen diagonal, centre, inward normal and plane constant. Then collects the
 // wall triangles, grouped by segment the way Level::walls is.
@@ -99,7 +109,7 @@ export function rebuildDerived(level) {
 
             // An authored `uv` in the file wins; otherwise the loader's planar
             // mapping. Kept on the side so the editor can show texel density.
-            sd.effectiveUv = sd.uv ? sd.uv : defaultUv(c);
+            sd.effectiveUv = rotateUv(sd.uv ? sd.uv : defaultUv(c), sd.rotation ?? 0);
 
             const split = sd.altDiagonal ? SPLIT_B : SPLIT_A;
             const n0 = faceNormal(c[split[0][0]], c[split[0][1]], c[split[0][2]]);
