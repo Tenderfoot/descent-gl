@@ -154,7 +154,7 @@ WeaponConfig WeaponConfig::defaults() {
     lightning.damage = 36.0f;
     lightning.impactImpulse = 30.0f;   // also per second; a steady push
     lightning.fireInterval = 0.14f;    // the crackle's repeat, not a damage gate
-    lightning.ammoCost = 8;            // rounds per SECOND: 200 is 25 s of trigger
+    lightning.ammoCost = 5;            // rounds per SECOND: a full 50 is 10 s of trigger
     lightning.range = 70.0f;           // short, so it has to be flown into range
     lightning.color = glm::vec3(0.75f, 0.62f, 1.0f);
     lightning.beamWidth = 0.10f;
@@ -204,6 +204,8 @@ WeaponConfig loadWeaponConfig(const std::string& path) {
     get(j, "playerMass", cfg.playerMass);
     get(j, "headlightDrain", cfg.headlightDrain);
     get(j, "energyRecharge", cfg.energyRecharge);
+    get(j, "staticChargeRate", cfg.staticChargeRate);
+    get(j, "staticChargeCruiseSpeed", cfg.staticChargeCruiseSpeed);
     get(j, "shadowBudget", cfg.shadowBudget);
 
     log::info("weapon config '{}' loaded", path);
@@ -230,6 +232,8 @@ bool saveWeaponConfig(const std::string& path, const WeaponConfig& cfg) {
     j["playerMass"] = cfg.playerMass;
     j["headlightDrain"] = cfg.headlightDrain;
     j["energyRecharge"] = cfg.energyRecharge;
+    j["staticChargeRate"] = cfg.staticChargeRate;
+    j["staticChargeCruiseSpeed"] = cfg.staticChargeCruiseSpeed;
     j["shadowBudget"] = cfg.shadowBudget;
 
     std::ofstream out(path);

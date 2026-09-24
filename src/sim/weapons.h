@@ -18,6 +18,9 @@ enum WeaponId : int {
     WeaponCount,
 };
 
+// These are also the keys in weapons.json, so they name the weapon as the code
+// does. WeaponLightning is the Static Charge to the player - see
+// kWeaponShortNames, which is what the HUD shows.
 inline constexpr std::array<const char*, WeaponCount> kWeaponNames{
     "laser", "vulcan", "concussion", "homing", "railgun", "lightning"};
 
@@ -26,7 +29,7 @@ inline constexpr std::array<const char*, WeaponCount> kWeaponNames{
 // because both are indexed by WeaponId and a second order would be one more
 // thing to keep in step.
 inline constexpr std::array<const char*, WeaponCount> kWeaponShortNames{
-    "laser", "vulcan", "conc", "homg", "rail", "ltng"};
+    "laser", "vulcan", "conc", "homg", "rail", "static"};
 
 // Which trigger a weapon answers to. Written out per weapon rather than
 // inferred from the enum's order: "id <= WeaponVulcan" happened to be true
@@ -191,6 +194,15 @@ struct WeaponConfig {
     float playerMass = 1.5f;
     float headlightDrain = 0.5f;     // energy per second while the headlight is on
     float energyRecharge = 0.0f;     // none by default; pickups are M7's job
+
+    // The Static Charge (WeaponLightning) builds up as the ship flies: this
+    // many rounds a second at cruising speed, proportionally less below it,
+    // and never more above it - a blast that throws the ship faster than its
+    // engines can does not charge it faster. Nothing while sitting still.
+    // staticChargeCruiseSpeed is flight.json's maxSpeed; it is repeated here
+    // because stepCombat is handed this config and not that one.
+    float staticChargeRate = 1.0f;         // rounds per second at cruise
+    float staticChargeCruiseSpeed = 20.0f; // units/s
 
     // At most this many shadow-casting lights per frame. Every light still
     // lights; the ones over budget simply stop casting. See the note in

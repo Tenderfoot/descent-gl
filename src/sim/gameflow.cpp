@@ -127,7 +127,8 @@ void collectPickup(PickupKind kind, const glm::vec3& position, int segment, cons
             p.railgunAmmo += cfg.railgunPickup;
             break;
         case PickupKind::LightningAmmo:
-            p.lightningAmmo += cfg.lightningPickup;
+            p.lightningAmmo = kStaticChargeCapacity;
+            p.staticChargeCarry = 0.0f;
             break;
         case PickupKind::VulcanAmmo:
             p.vulcanAmmo += cfg.vulcanPickup;

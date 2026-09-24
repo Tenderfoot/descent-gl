@@ -99,7 +99,7 @@ void drawDebugUi(DebugUiContext& ctx) {
             }
             ImGui::Text("secondary: %s",
                         dvk::sim::kWeaponNames[static_cast<size_t>(pl.secondaryWeapon)]);
-            ImGui::Text("vulcan %d   rail %d   ltng %d", pl.vulcanAmmo, pl.railgunAmmo,
+            ImGui::Text("vulcan %d   rail %d   static %d", pl.vulcanAmmo, pl.railgunAmmo,
                         pl.lightningAmmo);
             ImGui::Text("concussion %d   homing %d   flares %d", pl.concussionAmmo, pl.homingAmmo,
                         pl.flares);

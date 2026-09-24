@@ -117,6 +117,7 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
             if (!exposed(robot.body.position, &d)) continue;
             const auto [hurt, shove] = share(d);
             robot.health -= hurt;
+            robot.lastHitByCharge = false;
             applyImpulse(robot.body, away(robot.body.position), shove, robot.mass);
             ++hits;
         }
@@ -396,6 +397,23 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         player.energy = std::min(100.0f, player.energy + cfg.energyRecharge * dt);
     }
 
+    // The Static Charge builds with the ship's own speed: the velocity channel,
+    // which the engines are clamped to, and not knockback, which is the mine
+    // throwing the ship around. A disabled ship has no power to store. Charge
+    // earned while full is lost rather than banked.
+    if (player.lightningAmmo >= kStaticChargeCapacity) {
+        player.staticChargeCarry = 0.0f;
+    } else if (!disabled && cfg.staticChargeCruiseSpeed > 0.0f) {
+        const float pace =
+            std::min(1.0f, glm::length(ship.velocity) / cfg.staticChargeCruiseSpeed);
+        player.staticChargeCarry += cfg.staticChargeRate * pace * dt;
+        const int whole = static_cast<int>(player.staticChargeCarry);
+        if (whole > 0) {
+            player.lightningAmmo = std::min(kStaticChargeCapacity, player.lightningAmmo + whole);
+            player.staticChargeCarry -= static_cast<float>(whole);
+        }
+    }
+
     const glm::mat3 basis = glm::mat3_cast(shipOrientation);
     const glm::vec3 forward = basis * glm::vec3(0.0f, 0.0f, -1.0f);
     const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
@@ -552,6 +570,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 case CombatHit::Kind::Robot: {
                     Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                     robot.health -= shot;
+                    robot.lastHitByCharge = weaponId == WeaponLightning;
                     player.lastTargetRobot = hit.index;
                     player.targetHudTime = kTargetHudTime;
                     robot.awareness = 1.0f;
@@ -756,6 +775,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             case CombatHit::Kind::Robot: {
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
+                robot.lastHitByCharge = false;
                 // Only the player's direct impact acquires a HUD target.
                 // applySplash remains intentionally unaware of target state.
                 if (p.owner < 0) {

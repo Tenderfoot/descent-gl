@@ -213,11 +213,11 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
 
         const InputBindings defaults = defaultInputBindings();
         ok &= expect(defaults[PlayerAction::SelectLaser].code == GLFW_KEY_1 &&
-                         defaults[PlayerAction::SelectVulcan].code == GLFW_KEY_2 &&
-                         defaults[PlayerAction::SelectLightning].code == GLFW_KEY_3 &&
+                         defaults[PlayerAction::SelectLightning].code == GLFW_KEY_2 &&
+                         defaults[PlayerAction::SelectVulcan].code == GLFW_KEY_3 &&
                          defaults[PlayerAction::SelectRailgun].code == GLFW_KEY_4 &&
                          defaults[PlayerAction::CycleSecondary].code == GLFW_KEY_G,
-                     "laser, vulcan, lightning and railgun sit on 1 to 4, missiles on G");
+                     "laser, static charge, vulcan and railgun sit on 1 to 4, missiles on G");
 
         rig.reset();
         sim::FireControls cycle;

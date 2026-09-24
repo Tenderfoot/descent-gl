@@ -305,7 +305,8 @@ int ScriptHost::declareLoadout(lua_State* state) {
     if (optionalNumber(state, 1, "railgun", "railgun ammo", 0.0, 9'999.0, value)) {
         host->loadout_.railgunAmmo = static_cast<int>(value);
     }
-    if (optionalNumber(state, 1, "lightning", "lightning ammo", 0.0, 9'999.0, value)) {
+    if (optionalNumber(state, 1, "lightning", "static charge", 0.0,
+                       static_cast<double>(sim::kStaticChargeCapacity), value)) {
         host->loadout_.lightningAmmo = static_cast<int>(value);
     }
     if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {

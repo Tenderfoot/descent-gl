@@ -446,8 +446,8 @@ bool verifyPlayerMenu() {
             return std::string("not shown");
         };
         const bool weaponKeys = rowValue(PlayerAction::SelectLaser) == "1" &&
-                                rowValue(PlayerAction::SelectVulcan) == "2" &&
-                                rowValue(PlayerAction::SelectLightning) == "3" &&
+                                rowValue(PlayerAction::SelectLightning) == "2" &&
+                                rowValue(PlayerAction::SelectVulcan) == "3" &&
                                 rowValue(PlayerAction::SelectRailgun) == "4" &&
                                 rowValue(PlayerAction::CycleSecondary) == "G";
         ok &= expect(weaponKeys, "controls list the four primaries on 1-4 and the missiles on G");
@@ -899,6 +899,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
             // Spend something first, so a pickup that tops up has room to.
             rig.combat.player.shields = 40.0f;
             rig.combat.player.energy = 40.0f;
+            rig.combat.player.lightningAmmo = 0;
             const sim::PlayerState before = rig.combat.player;
             const auto keysBefore = rig.game.keys;
 
