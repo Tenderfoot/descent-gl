@@ -24,10 +24,10 @@ import { GENERATED_MARK, generateMine } from './generate.js';
 import { History } from './history.js';
 import { emitJson } from './json_emit.js';
 import { parseLevel, resolveSegments, serializeLevel } from './level.js';
-import { add, scale, sideCorners } from './geometry.js';
+import { add, distance, scale, sideCorners } from './geometry.js';
 import {
     deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setEmissive,
-    setRotation, setTexture, snapVertex, splitPortal,
+    nearestSnapTarget, setRotation, setTexture, snapVertex, splitPortal,
 } from './ops.js';
 import {
     centroid, groupTransform, IDENTITY_QUAT, transformPoints,
@@ -691,8 +691,21 @@ function renderTools() {
                    () => { clearSelection(); renderTools(); renderSelection(); });
             return;
         }
-        const using = app.level.segments.filter((seg) => seg.verts.includes(chosen[0].index)).length;
-        return hint(`vertex ${chosen[0].index}, used by ${using} segment(s)`);
+        const from = chosen[0].index;
+        const using = app.level.segments.filter((seg) => seg.verts.includes(from)).length;
+        hint(`vertex ${from}, used by ${using} segment(s)`);
+        // For when the vertex to snap onto sits under this one's gizmo and
+        // cannot be clicked.
+        const onto = nearestSnapTarget(app.level, from);
+        if (onto >= 0) {
+            const away = distance(app.level.vertices[from], app.level.vertices[onto]);
+            button(`Snap to nearest vertex (${onto}, ${away.toFixed(2)} away)`,
+                   'Moves this vertex onto the closest vertex outside its own segments, ' +
+                   'so two walls can then be joined',
+                   () => edit(`snap vertex ${from} onto ${onto}`,
+                              (level) => snapVertex(level, from, onto)));
+        }
+        return;
     }
 
     // --- entity mode --------------------------------------------------------

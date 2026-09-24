@@ -337,6 +337,26 @@ export function snapVertex(level, from, onto) {
     moveVertices(level, [[from, level.vertices[onto]]]);
 }
 
+// The vertex snapVertex could put `from` on that is nearest to it, or -1 for
+// none. Skips any that share a segment with `from`, which snapVertex refuses,
+// and any already in the same place, which snapping to would not change.
+export function nearestSnapTarget(level, from) {
+    const neighbours = new Set();
+    for (const seg of level.segments) {
+        if (seg.verts.includes(from)) for (const v of seg.verts) neighbours.add(v);
+    }
+    let best = -1;
+    let bestDistance = Infinity;
+    for (let i = 0; i < level.vertices.length; ++i) {
+        if (neighbours.has(i)) continue;
+        const d = distance(level.vertices[i], level.vertices[from]);
+        if (d < EPSILON || d >= bestDistance) continue;
+        best = i;
+        bestDistance = d;
+    }
+    return best;
+}
+
 export function setTexture(level, si, side, texture) {
     const sd = level.segments[si].sides[side];
     if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
