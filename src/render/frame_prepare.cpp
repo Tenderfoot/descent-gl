@@ -27,7 +27,7 @@ constexpr float kEngineHighPitch = 1.28f;
 // radius-relative falloff t = dist/radius is zero everywhere.
 constexpr float kHeadlightRadius = std::numeric_limits<float>::infinity();
 constexpr float kHeadlightCone = 60.0f;
-constexpr float kHeadlightIntensity = 2.0f;
+constexpr float kHeadlightIntensity = 0.5f;
 constexpr float kHeadlightForward = 2.2f;
 
 // Keep the chase-camera reticle stable near walls and bounded in open space.
