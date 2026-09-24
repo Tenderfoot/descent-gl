@@ -54,7 +54,7 @@ function pushVertex(level, position) {
     return level.vertices.length - 1;
 }
 
-const wall = (texture = 0) => ({ neighbour: -1, door: -1, grate: -1, texture, emissive: 0, uv: null });
+const wall = (texture = 0) => ({ neighbour: -1, door: -1, grate: -1, texture, emissive: 0, rotation: 0, uv: null });
 
 // A side's outward direction. sd.normal points INTO the segment, because the
 // mine is a space you are inside.
@@ -122,10 +122,10 @@ export function extrudeSide(level, si, side, depth = null) {
     const created = level.segments.length;
     const sides = [];
     for (let s = 0; s < SIDE_COUNT; ++s) sides.push(wall(seg.sides[side].texture));
-    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, grate: -1, texture: 0, emissive: 0, uv: null };
+    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null };
 
     level.segments.push({ verts, sides, keyOrder: null });
-    seg.sides[side] = { neighbour: created, door: -1, grate: -1, texture: 0, emissive: 0, uv: null };
+    seg.sides[side] = { neighbour: created, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null };
 
     rebuildDerived(level);
     return created;
@@ -316,6 +316,27 @@ export function moveVertices(level, updates) {
     rebuildDerived(level);
 }
 
+// Moves vertex `from` onto vertex `onto`, so two walls meant to be joined can
+// be brought together a corner at a time.
+//
+// A move, not a weld: the two stay separate indices, because sharing an index
+// is what a portal is and joinSides is what makes one. Welding here would share
+// a vertex between two walls that are still walls. Refused when one segment
+// uses both, since that would collapse an edge of it.
+export function snapVertex(level, from, onto) {
+    for (const index of [from, onto]) {
+        if (!Number.isInteger(index) || index < 0 || index >= level.vertices.length) {
+            throw new Error(`no vertex ${index}`);
+        }
+    }
+    if (from === onto) throw new Error('pick two different vertices');
+    const shared = level.segments.findIndex((seg) => seg.verts.includes(from) && seg.verts.includes(onto));
+    if (shared >= 0) {
+        throw new Error(`segment ${shared} uses both vertices - snapping would collapse it`);
+    }
+    moveVertices(level, [[from, level.vertices[onto]]]);
+}
+
 export function setTexture(level, si, side, texture) {
     const sd = level.segments[si].sides[side];
     if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
@@ -333,6 +354,14 @@ export function setEmissive(level, si, side, emissive) {
     if (sd.neighbour >= 0) throw new Error('a portal has no surface to emit from');
     if (!(emissive >= 0)) throw new Error(`emissive must be zero or more, got ${emissive}`);
     sd.emissive = emissive;
+}
+
+// Quarter turns of the side's texture, 0-3.
+export function setRotation(level, si, side, turns) {
+    const sd = level.segments[si].sides[side];
+    if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
+    sd.rotation = ((Math.trunc(turns) % 4) + 4) % 4;
+    rebuildDerived(level);
 }
 
 // Turns a portal back into a pair of walls. The segments keep sharing their

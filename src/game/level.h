@@ -78,6 +78,11 @@ struct SideData {
     // segment, which is the same arrangement as a lamp with a fixture.
     float emissive = 0.0f;
     std::array<glm::vec2, 4> uv{};
+    // Quarter turns of the texture on this side, 0-3, applied to `uv` at load.
+    // A turn in texture space rather than a shift of the corners: shifting the
+    // corners would lay a wall's tile count along its height and stretch every
+    // side that is not square.
+    int rotation = 0;
 
     // Chosen at load time, never authored: which diagonal splits the quad.
     // false = corners 0-2, true = corners 1-3. See splitSides().
