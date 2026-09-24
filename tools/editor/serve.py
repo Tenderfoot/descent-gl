@@ -134,6 +134,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             names = [t["name"] for t in tiles if isinstance(t, dict) and "name" in t]
             return self.send_json(200, {"tiles": names})
 
+        if path.startswith("/api/textures/"):
+            # One tile's image, by name, for the textured wall view. The file
+            # comes from the manifest's optional `file` the way wall_tiles.cpp
+            # resolves it, and must be a bare name inside assets/textures/.
+            name = urllib.parse.unquote(path[len("/api/textures/"):])
+            try:
+                tiles = json.loads((TEXTURES / "tiles.json").read_text())["tiles"]
+            except (OSError, ValueError, KeyError, TypeError):
+                return self.send_json(404, {"error": "no readable assets/textures/tiles.json"})
+            entry = next((t for t in tiles if isinstance(t, dict) and t.get("name") == name), None)
+            if entry is None:
+                return self.send_json(404, {"error": "no such tile"})
+            file = entry.get("file", f"{name}.png")
+            if not isinstance(file, str) or Path(file).name != file:
+                return self.send_json(400, {"error": "tile file is not a bare name"})
+            resolved = TEXTURES / file
+            if not resolved.is_file():
+                return self.send_json(404, {"error": f"no such file: {file}"})
+            content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+            return self.send_bytes(200, resolved.read_bytes(), content_type)
+
         if path == "/api/models":
             names = sorted(p.stem for p in MODELS.glob("*.obj"))
             return self.send_json(200, {"models": names})

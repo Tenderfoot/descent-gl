@@ -112,12 +112,14 @@ export function rebuildDerived(level) {
             for (let t = 0; t < 2; ++t) {
                 const p = [];
                 const vi = [];
+                const uv = [];
                 for (let k = 0; k < 3; ++k) {
                     const corner = split[t][k];
                     p.push(c[corner]);
                     vi.push(seg.verts[SIDE_VERTICES[side][corner]]);
+                    uv.push(sd.effectiveUv[corner]);
                 }
-                walls.push({ p, vi, normal: faceNormal(p[0], p[1], p[2]), segment: si, side });
+                walls.push({ p, vi, uv, normal: faceNormal(p[0], p[1], p[2]), segment: si, side });
             }
         }
 

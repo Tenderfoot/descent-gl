@@ -39,6 +39,7 @@ const $ = (id) => document.getElementById(id);
 
 const LAYERS = [
     ['walls', 'Walls', true],
+    ['textures', 'Textures', true],
     ['xray', 'X-ray', false],
     ['portals', 'Portals', true],
     ['doors', 'Doors', true],
@@ -1186,6 +1187,7 @@ function escapeHtml(text) {
 function applyLayers() {
     for (const input of $('layers').querySelectorAll('input')) {
         if (input.dataset.group === 'xray') view.setXray(input.checked);
+        else if (input.dataset.group === 'textures') view.setTextured(input.checked);
         else view.setVisible(input.dataset.group, input.checked);
     }
     view.groups.vertices.visible = app.mode === 'vertex';
