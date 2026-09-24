@@ -42,8 +42,8 @@ enum class PlayerAction {
     // binding rather than a slot whose meaning silently shifts under every
     // saved settings file. The missiles share one key, which cycles them.
     SelectLaser,
-    SelectVulcan,
     SelectLightning,
+    SelectVulcan,
     SelectRailgun,
     CycleSecondary,
     ChaseCamera,
@@ -81,8 +81,8 @@ struct WeaponSelectAction {
 
 inline constexpr std::array<WeaponSelectAction, 4> kWeaponSelectActions{{
     {PlayerAction::SelectLaser, sim::WeaponLaser},
-    {PlayerAction::SelectVulcan, sim::WeaponVulcan},
     {PlayerAction::SelectLightning, sim::WeaponLightning},
+    {PlayerAction::SelectVulcan, sim::WeaponVulcan},
     {PlayerAction::SelectRailgun, sim::WeaponRailgun},
 }};
 

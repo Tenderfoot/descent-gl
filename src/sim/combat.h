@@ -160,11 +160,13 @@ struct PlayerState {
     int concussionAmmo = 8;
     int homingAmmo = 6;
     // The two hitscan guns carry their own rounds rather than drawing on the
-    // energy bar. Lean on purpose: the railgun is twenty shots and the beam is
-    // twenty-five seconds of trigger, so both are weapons you pick a moment for
+    // energy bar. The railgun is twenty shots, a weapon you pick a moment for
     // rather than fly on.
+    //
+    // lightningAmmo is the Static Charge: at most kStaticChargeCapacity, built
+    // up by flying (WeaponConfig::staticChargeRate) and filled by its pickup.
     int railgunAmmo = 20;
-    int lightningAmmo = 200;
+    int lightningAmmo = 50;
     int flares = 12;
     std::array<float, WeaponCount> cooldown{};
     // What a continuous weapon has spent but not yet paid for, in whole rounds.
@@ -176,6 +178,9 @@ struct PlayerState {
     // Indexed by weapon so the carry can never be attributed to the wrong gun.
     // Only the continuous weapons ever use their entry.
     std::array<float, WeaponCount> ammoCarry{};
+    // The same thing the other way round for the Static Charge: the fraction
+    // of a round flying has earned but not yet added to lightningAmmo.
+    float staticChargeCarry = 0.0f;
     float flareCooldown = 0.0f;
     // Laser alternates wingtips. One bit of state that makes the weapon read
     // as a pair of guns rather than one.
@@ -207,6 +212,10 @@ struct PlayerState {
     // fault in the program rather than like an empty gun.
     float emptyClickTimer = 0.0f;
 };
+
+// The most the Static Charge holds. Flying stops adding to it here, and its
+// pickup fills it to exactly this.
+inline constexpr int kStaticChargeCapacity = 50;
 
 // Full shields. The number the disabled threshold is a fraction of.
 inline constexpr float kPlayerMaxShields = 100.0f;

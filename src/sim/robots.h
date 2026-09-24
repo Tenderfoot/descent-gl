@@ -161,6 +161,10 @@ struct Robot {
     // jittering to a new random attitude every step.
     glm::vec3 tumble{0.0f};
     int homeSegment = 0;
+
+    // Whether the last damage it took came from the Static Charge. A robot the
+    // Static Charge finishes always drops energy; see spawnDrop.
+    bool lastHitByCharge = false;
 };
 
 enum class DropKind : uint8_t { Energy, Shield };

@@ -131,7 +131,7 @@ struct GameConfig {
     int concussionPickup = 3;
     int homingPickup = 3;
     int railgunPickup = 10;
-    int lightningPickup = 100;
+    // No Static Charge amount: its pickup fills it to kStaticChargeCapacity.
     // A quarter of what the ship starts with, matching the fraction the other
     // ammo pickups are worth against their own starting counts.
     int vulcanPickup = 500;
