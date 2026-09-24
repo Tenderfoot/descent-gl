@@ -48,7 +48,9 @@ uniform int uGrates[kMaxLightGrates];
 out vec4 oColor;
 
 // How much of this light gets through every grate between it and p: the
-// product of the alpha at each place the line from p to the light crosses one.
+// product of (1 - alpha) at each place the line from p to the light crosses
+// one. Alpha is how solid the grate is there, so a bar (alpha 1) blocks and a
+// hole (alpha 0) lets everything through.
 //
 // Shaped so that every texture() call is made on every invocation. The loop
 // count is a uniform, so the implicit derivatives - which pick the mip level,
@@ -79,7 +81,7 @@ float grateTransmission(vec3 p) {
         for (int e = 0; e < 4; ++e) {
             inside = inside && dot(g.edges[e].xyz, x) + g.edges[e].w > -kEdgeMargin;
         }
-        if (crosses && inside) transmit *= alpha;
+        if (crosses && inside) transmit *= 1.0 - alpha;
     }
     return transmit;
 }
