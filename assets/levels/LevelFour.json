@@ -5116,52 +5116,62 @@
     {
       "segment": 26,
       "side": 5,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 27,
       "side": 5,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 28,
       "side": 5,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 29,
       "side": 5,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 30,
       "side": 5,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 17,
       "side": 4,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 18,
       "side": 4,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 19,
       "side": 4,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 20,
       "side": 4,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 21,
       "side": 4,
-      "texture": 15
+      "texture": 15,
+      "uvMode": "world"
     },
     {
       "segment": 47,
