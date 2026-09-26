@@ -13,10 +13,11 @@ import {
     addDoor, addFloatingLight, addGrate, addLight, addObject, addPickup, addSwingingLight,
     availableKeys, ceilingAnchor, duplicateEntity, ENTITY_LISTS, entityFacing, entityList,
     hasReactor, moveEntities, moveEntity, removeEntity, segmentCentre, setExit, setGrateTexture,
+    setGrateUvMode,
 } from './entities.js';
 import {
-    BLOCK_TYPE, KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
-    setWallTileNames,
+    BLOCK_TYPE, KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, UV_MODES,
+    WALL_TILE_NAMES, setWallTileNames,
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkLevelName, checkName, newLevel } from './create.js';
@@ -27,7 +28,7 @@ import { parseLevel, resolveSegments, serializeLevel } from './level.js';
 import { add, distance, scale, sideCorners } from './geometry.js';
 import {
     deleteSegment, extrudeSide, joinSides, moveVertex, moveVertices, segmentDepth, setEmissive,
-    nearestSnapTarget, setRotation, setTexture, snapVertex, splitPortal,
+    nearestSnapTarget, setLevelUvMode, setRotation, setTexture, setUvMode, snapVertex, splitPortal,
 } from './ops.js';
 import {
     centroid, groupTransform, IDENTITY_QUAT, transformPoints,
@@ -507,6 +508,33 @@ function setMode(mode) {
     renderSelection();
 }
 
+// A picker for a "uvMode". `inherits` names what null falls back to and adds a
+// row for it; without it the choice is only side or world, and side is null
+// so that the default writes nothing to the file.
+function uvModeField(container, label, title, current, inherits, onpick) {
+    const wrap = document.createElement('label');
+    wrap.className = 'field';
+    wrap.title = title;
+    wrap.append(label);
+    const select = document.createElement('select');
+    const choices = inherits ? [[null, `level (${inherits})`], ...UV_MODES.map((m) => [m, m])]
+                             : UV_MODES.map((m) => [m === 'side' ? null : m, m]);
+    for (const [mode, text] of choices) {
+        const option = document.createElement('option');
+        option.value = mode ?? '';
+        option.textContent = text;
+        select.appendChild(option);
+    }
+    select.value = inherits ? (current ?? '') : (current === 'world' ? 'world' : '');
+    select.onchange = () => onpick(select.value === '' ? null : select.value);
+    wrap.appendChild(select);
+    container.appendChild(wrap);
+}
+
+const UV_MODE_TITLE = 'How the tile is laid when the side has no authored uv. side fits it to ' +
+                      'this side alone; world lays one grid through the mine, so neighbouring ' +
+                      'sides line up - for grids and grates, not for tiles with writing on them.';
+
 function renderTools() {
     const container = $('tools');
     container.innerHTML = '';
@@ -625,6 +653,16 @@ function renderTools() {
                () => edit(`rotate texture to ${((turns + 1) % 4) * 90}° on ${segment} ` +
                           `${SIDE_NAMES[side]}`,
                           (level) => setRotation(level, segment, side, turns + 1)));
+
+        uvModeField(container, 'layout', UV_MODE_TITLE, sd.uvMode ?? null,
+                    app.level.uvMode ?? 'side',
+                    (mode) => edit(`layout ${mode ?? 'level'} on ${segment} ${SIDE_NAMES[side]}`,
+                                   (level) => setUvMode(level, segment, side, mode)));
+        uvModeField(container, 'level layout',
+                    'The layout of every side and grate that does not set its own',
+                    app.level.uvMode ?? null, null,
+                    (mode) => edit(`level layout ${mode ?? 'side'}`,
+                                   (level) => setLevelUvMode(level, mode)));
 
         // How brightly the side emits on top of the light that reaches it.
         const emits = document.createElement('label');
@@ -978,6 +1016,12 @@ function renderEntityTools(container, button, hint) {
             tileRow(grate.texture, (tile, name) => edit(`grate ${index} tile ${name}`,
                                                         (level) => setGrateTexture(level, index, tile)),
                     'use this tile for the grate');
+            uvModeField(container, 'layout',
+                        'side fits the tile to this portal; world continues the grid of ' +
+                        'world-laid walls around it. Shown in the game, not here.',
+                        grate.uvMode ?? null, app.level.uvMode ?? 'side',
+                        (mode) => edit(`grate ${index} layout ${mode ?? 'level'}`,
+                                       (level) => setGrateUvMode(level, index, mode)));
             button('Delete grate', '', () => edit(`delete grate ${index}`,
                                                   (level) => removeEntity(level, 'grate', index)));
             return;

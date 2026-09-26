@@ -10,7 +10,7 @@
 //
 // Free of any three.js import, so tools/editor/tests can run it under node.
 
-import { OPPOSITE_SIDE, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
+import { OPPOSITE_SIDE, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES, UV_MODES } from './format.js';
 import { add, distance, rebuildDerived, scale, sub } from './geometry.js';
 import { rewireDoors, rewireGrates } from './entities.js';
 
@@ -54,7 +54,8 @@ function pushVertex(level, position) {
     return level.vertices.length - 1;
 }
 
-const wall = (texture = 0) => ({ neighbour: -1, door: -1, grate: -1, texture, emissive: 0, rotation: 0, uv: null });
+const wall = (texture = 0, uvMode = null) =>
+    ({ neighbour: -1, door: -1, grate: -1, texture, emissive: 0, rotation: 0, uv: null, uvMode });
 
 // A side's outward direction. sd.normal points INTO the segment, because the
 // mine is a space you are inside.
@@ -121,11 +122,14 @@ export function extrudeSide(level, si, side, depth = null) {
 
     const created = level.segments.length;
     const sides = [];
-    for (let s = 0; s < SIDE_COUNT; ++s) sides.push(wall(seg.sides[side].texture));
-    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null };
+    // The new walls take the tile and the layout of the wall they grew from,
+    // so extruding a grid corridor goes on laying the same grid.
+    const from = seg.sides[side];
+    for (let s = 0; s < SIDE_COUNT; ++s) sides.push(wall(from.texture, from.uvMode ?? null));
+    sides[OPPOSITE_SIDE[side]] = { neighbour: si, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null, uvMode: null };
 
     level.segments.push({ verts, sides, keyOrder: null });
-    seg.sides[side] = { neighbour: created, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null };
+    seg.sides[side] = { neighbour: created, door: -1, grate: -1, texture: 0, emissive: 0, rotation: 0, uv: null, uvMode: null };
 
     rebuildDerived(level);
     return created;
@@ -381,6 +385,24 @@ export function setRotation(level, si, side, turns) {
     const sd = level.segments[si].sides[side];
     if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
     sd.rotation = ((Math.trunc(turns) % 4) + 4) % 4;
+    rebuildDerived(level);
+}
+
+// How the side lays its tile when its UVs are not authored: 'side', 'world',
+// or null to take the level's.
+export function setUvMode(level, si, side, mode) {
+    const sd = level.segments[si].sides[side];
+    if (sd.neighbour >= 0) throw new Error('a portal has no texture - it is an opening');
+    if (mode !== null && !UV_MODES.includes(mode)) throw new Error(`no such uv mode: ${mode}`);
+    sd.uvMode = mode;
+    rebuildDerived(level);
+}
+
+// The level's layout, for every side and grate without one of their own.
+// null writes nothing, which the game reads as 'side'.
+export function setLevelUvMode(level, mode) {
+    if (mode !== null && !UV_MODES.includes(mode)) throw new Error(`no such uv mode: ${mode}`);
+    level.uvMode = mode;
     rebuildDerived(level);
 }
 

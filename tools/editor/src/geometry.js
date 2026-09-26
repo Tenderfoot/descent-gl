@@ -71,6 +71,15 @@ export function defaultUv(c) {
     return [[0, 0], [u, 0], [u2, v2], [0, v]];
 }
 
+// The "world" layout: world position projected onto the two axes the side
+// faces least, with fixed directions, so sides that project the same way share
+// one grid. worldUvAxes() in src/game/level.cpp.
+export function worldUv(c, normal) {
+    const [ax, ay, az] = normal.map(Math.abs);
+    const [u, v] = ay >= ax && ay >= az ? [0, 2] : ax >= az ? [2, 1] : [0, 1];
+    return c.map((p) => [p[u] / WORLD_UNITS_PER_TILE, p[v] / WORLD_UNITS_PER_TILE]);
+}
+
 // A side's texture turned by `turns` quarter turns, in texture space rather
 // than by shifting the corners - a shift would lay a wall's tile count along
 // its height and stretch every side that is not square. The loader's rotation
@@ -107,15 +116,18 @@ export function rebuildDerived(level) {
             sd.altDiagonal = preferAltDiagonal(c);
             sd.center = scale(add(add(c[0], c[1]), add(c[2], c[3])), 0.25);
 
-            // An authored `uv` in the file wins; otherwise the loader's planar
-            // mapping. Kept on the side so the editor can show texel density.
-            sd.effectiveUv = rotateUv(sd.uv ? sd.uv : defaultUv(c), sd.rotation ?? 0);
-
             const split = sd.altDiagonal ? SPLIT_B : SPLIT_A;
             const n0 = faceNormal(c[split[0][0]], c[split[0][1]], c[split[0][2]]);
             const n1 = faceNormal(c[split[1][0]], c[split[1][1]], c[split[1][2]]);
             sd.normal = normalize(add(n0, n1));
             sd.d = -dot(sd.normal, sd.center);
+
+            // An authored `uv` in the file wins; otherwise the loader's
+            // mapping, in whichever layout the side or the level asks for.
+            // Kept on the side so the editor can show texel density.
+            const world = (sd.uvMode ?? level.uvMode) === 'world';
+            const unauthored = world ? worldUv(c, sd.normal) : defaultUv(c);
+            sd.effectiveUv = rotateUv(sd.uv ? sd.uv : unauthored, sd.rotation ?? 0);
 
             if (sd.neighbour >= 0) continue;
 
