@@ -11,9 +11,9 @@
 
 import * as THREE from 'three';
 
-import { SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import { BLOCK_TYPE, SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
 import { lampPosition } from './entities.js';
-import { lightSegments, portalFaces, portalFacing, sideCorners } from './geometry.js';
+import { blockTriangles, lightSegments, portalFaces, portalFacing, sideCorners } from './geometry.js';
 
 // Flat, distinguishable, and nothing like the game's palette on purpose: this
 // is a diagram of a mine, and reading it as a screenshot would be a mistake.
@@ -498,9 +498,33 @@ export class LevelView {
         return geometry;
     }
 
+    // A block is drawn as what it is: its own size, with the game's UVs, in its
+    // tile's colour or art. Its material joins the walls' so the texture and
+    // x-ray toggles treat it as the piece of architecture it is.
+    buildBlock(object, index) {
+        const { positions, normals, uvs } = blockTriangles(object);
+        const geometry = this.track(new THREE.BufferGeometry());
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+        geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        const material = this.track(new THREE.MeshLambertMaterial({ color: tileColor(object.texture) }));
+        material.userData = { tile: object.texture, glow: false };
+        this.applyTileLook(material);
+        this.wallMaterials.push(material);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.copy(v3(object.position));
+        mesh.quaternion.copy(quatFromLevel(object.orientation));
+        mesh.userData.pick = { kind: 'object', index };
+        this.groups.objects.add(mesh);
+    }
+
     buildEntities(level) {
         for (let i = 0; i < level.objects.length; ++i) {
             const object = level.objects[i];
+            if (object.type === BLOCK_TYPE) {
+                this.buildBlock(object, i);
+                continue;
+            }
             const mesh = new THREE.Mesh(this.objectGeometry(object),
                 this.track(new THREE.MeshLambertMaterial({
                     color: OBJECT_COLOR, flatShading: true,

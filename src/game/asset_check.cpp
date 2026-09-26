@@ -144,6 +144,15 @@ int validateAssets() {
                            path, gi, grate.texture, layers);
             }
         }
+        for (size_t oi = 0; oi < level.objects.size(); ++oi) {
+            const LevelObject& obj = level.objects[oi];
+            if (obj.isBlock() && (obj.texture < 0 || obj.texture >= layers)) {
+                ++outOfRange;
+                log::error("asset FAIL {}: block object {} uses texture {}, and the set has {} "
+                           "tile(s)",
+                           path, oi, obj.texture, layers);
+            }
+        }
         if (outOfRange > 0) {
             ++failures;
             log::fatal("{} references {} tile(s) that are not in {}. Either the level is wrong or "

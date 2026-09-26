@@ -300,6 +300,10 @@ void Renderer::setLevel(const Level& level) {
     }
 
     props_.clear();
+    // After the props that point into them, and unlike the shared caches
+    // above: a block belongs to one level and is rebuilt with it.
+    blockMeshes_.clear();
+    blockOccluders_.clear();
     loadProps(level, *robotConfig_);
 
     // Reserves, not resizes: these are rebuilt every frame. A second, larger
@@ -356,6 +360,30 @@ void Renderer::loadProps(const Level& level, const sim::RobotConfig& robots) {
         // An object whose type names a robot definition is not scenery: the
         // simulation owns it and it is drawn from the robot list instead.
         if (sim::objectIsRobot(robots, obj.type)) continue;
+
+        // A block is its own mesh, not an instance of a shared one: its UVs
+        // depend on its size, and the size is baked into the positions so the
+        // model matrix stays rigid and the flat normals stay unit length.
+        if (obj.isBlock()) {
+            const ModelData model =
+                blockModel(obj.blockSize(), obj.stretchTexture ? 0.0f : kWorldUnitsPerTile);
+            blockOccluders_.push_back(buildOccluder(model.positions, model.triangles, {},
+                                                    "block object " + std::to_string(oi)));
+            blockMeshes_.push_back(toMesh(model));
+
+            Prop prop;
+            prop.mesh = &blockMeshes_.back();
+            prop.occluderMesh = &blockOccluders_.back();
+            prop.segment = obj.segment;
+            prop.objectIndex = static_cast<int>(oi);
+            prop.textureLayer = obj.texture;
+            prop.model = glm::translate(glm::mat4(1.0f), obj.position) *
+                         glm::mat4_cast(obj.orientation);
+            prop.occluder.reset(prop.occluderMesh, prop.model);
+            props_.push_back(std::move(prop));
+            continue;
+        }
+
         if (propModels_.find(obj.type) == propModels_.end()) {
             const std::string path = "assets/models/" + obj.type + ".obj";
             ModelData model = loadObj(path);

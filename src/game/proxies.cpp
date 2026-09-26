@@ -44,6 +44,8 @@ void resolveObjectProxies(Level& level) {
 
     // --- pass one: read every model and decide its shape -------------------
     for (const LevelObject& object : level.objects) {
+        // A block has no model to read; its shape is its own `size`.
+        if (object.isBlock()) continue;
         if (byType.find(object.type) != byType.end()) continue;
 
         const std::string path = "assets/models/" + object.type + ".obj";
@@ -132,6 +134,14 @@ void resolveObjectProxies(Level& level) {
 
     for (size_t i = 0; i < level.objects.size(); ++i) {
         const LevelObject& object = level.objects[i];
+        if (object.isBlock()) {
+            // A box proxy is exact for a box, so this is the drawn shape and
+            // not an approximation of it. The scale is already in the size.
+            const glm::vec3 half = object.blockSize() * 0.5f;
+            level.objectProxies[i] = sim::placeProxy(sim::boxProxy(-half, half), object.position,
+                                                     object.orientation, 1.0f);
+            continue;
+        }
         const auto cached = byType.find(object.type);
         if (cached == byType.end()) continue;
         level.objectProxies[i] = sim::placeProxy(cached->second.volume, object.position,

@@ -308,3 +308,39 @@ export function lightSegments(level, light) {
 
     return out.sort((a, b) => a - b);
 }
+
+// A block's triangles in its own space, centred on the origin: flat arrays of
+// positions, normals and UVs, three corners per triangle.
+//
+// Ported from blockModel() in src/render/model.cpp, which is cubeModel() with
+// the size folded in: the same six faces in the same order, each split across
+// its c0-c2 diagonal, U running c0 -> c1 and V running c0 -> c3. 'repeat'
+// scales a face's UVs by its edge lengths in tiles; 'stretch' leaves them 0-1.
+const BLOCK_CORNERS = [
+    [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5],
+    [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
+];
+const BLOCK_FACES = [[4, 5, 6, 7], [1, 0, 3, 2], [5, 1, 2, 6], [0, 4, 7, 3], [7, 6, 2, 3], [0, 1, 5, 4]];
+const BLOCK_UVS = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+export function blockTriangles(block) {
+    const s = block.scale ?? 1;
+    const size = block.size.map((n) => n * s);
+    const corner = (i) => BLOCK_CORNERS[i].map((n, k) => n * size[k]);
+    const positions = [];
+    const normals = [];
+    const uvs = [];
+    for (const f of BLOCK_FACES) {
+        const c = f.map(corner);
+        const tiles = block.textureMode === 'stretch'
+            ? [1, 1]
+            : [distance(c[1], c[0]) / WORLD_UNITS_PER_TILE, distance(c[3], c[0]) / WORLD_UNITS_PER_TILE];
+        const normal = faceNormal(c[0], c[1], c[2]);
+        for (const k of [0, 1, 2, 0, 2, 3]) {
+            positions.push(...c[k]);
+            normals.push(...normal);
+            uvs.push(BLOCK_UVS[k][0] * tiles[0], BLOCK_UVS[k][1] * tiles[1]);
+        }
+    }
+    return { positions, normals, uvs };
+}

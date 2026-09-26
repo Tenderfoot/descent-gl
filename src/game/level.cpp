@@ -17,10 +17,6 @@ namespace dvk {
 
 namespace {
 
-// One texture tile per this many world units, for sides with no authored UVs.
-// A 20-unit segment face therefore carries between three and four tiles.
-constexpr float kWorldUnitsPerTile = 5.5f;
-
 glm::vec3 readVec3(const nlohmann::json& j) {
     if (!j.is_array() || j.size() != 3) throw std::runtime_error("expected [x, y, z]");
     return {j[0].get<float>(), j[1].get<float>(), j[2].get<float>()};
@@ -568,6 +564,16 @@ Level loadLevel(const std::string& path) {
                     obj.orientation = glm::quat((*q)[0].get<float>(), (*q)[1].get<float>(),
                                                 (*q)[2].get<float>(), (*q)[3].get<float>());
                 }
+                if (obj.isBlock()) {
+                    if (oj.contains("size")) obj.size = readVec3(oj.at("size"));
+                    obj.texture = oj.value("texture", 0);
+                    const std::string mode = oj.value("textureMode", std::string("repeat"));
+                    if (mode != "repeat" && mode != "stretch") {
+                        throw std::runtime_error("block textureMode '" + mode +
+                                                 "' is neither 'repeat' nor 'stretch'");
+                    }
+                    obj.stretchTexture = mode == "stretch";
+                }
                 level.objects.push_back(obj);
             }
         }
@@ -758,6 +764,15 @@ Level loadLevel(const std::string& path) {
             log::fatal("{}: object '{}' at {:.1f} {:.1f} {:.1f} is not inside any segment", path,
                        obj.type, obj.position.x, obj.position.y, obj.position.z);
         }
+        // A flat or inside-out box has no volume to collide with and no closed
+        // surface to cast a shadow from.
+        const glm::vec3 size = obj.blockSize();
+        if (obj.isBlock() && !(size.x > 0.0f && size.y > 0.0f && size.z > 0.0f)) {
+            log::fatal("{}: block at {:.1f} {:.1f} {:.1f} has size {:.2f} x {:.2f} x {:.2f}; every "
+                       "edge must be longer than zero",
+                       path, obj.position.x, obj.position.y, obj.position.z, size.x, size.y,
+                       size.z);
+        }
     }
 
     // After the objects have their segments, because a proxy is only useful
@@ -845,6 +860,11 @@ bool saveLevel(const std::string& path, const Level& level) {
         oj["orientation"] = {obj.orientation.w, obj.orientation.x, obj.orientation.y,
                              obj.orientation.z};
         if (obj.scale != 1.0f) oj["scale"] = obj.scale;
+        if (obj.isBlock()) {
+            oj["size"] = {obj.size.x, obj.size.y, obj.size.z};
+            oj["texture"] = obj.texture;
+            if (obj.stretchTexture) oj["textureMode"] = "stretch";
+        }
         if (obj.health > 0.0f) oj["health"] = obj.health;
         oj["segment"] = obj.segment;
         j["objects"].push_back(oj);

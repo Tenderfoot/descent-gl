@@ -18,6 +18,7 @@
 
 #include <glm/mat4x4.hpp>
 #include <array>
+#include <deque>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -484,6 +485,10 @@ private:
     std::unordered_map<std::string, ModelData> propModels_;
     std::unordered_map<std::string, Mesh> propMeshes_;
     std::unordered_map<std::string, OccluderMesh> propOccluders_;
+    // One each per level block. Deques, because props point into them and a
+    // deque does not move what it already holds when it grows.
+    std::deque<Mesh> blockMeshes_;
+    std::deque<OccluderMesh> blockOccluders_;
     std::vector<Prop> props_;
 
     // One entry per robot type, and one occluder per robot slot. A slot's
