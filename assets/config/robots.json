@@ -196,12 +196,46 @@
       "projectileDamage": 14.0,
       "projectileSpeed": 70.0,
       "radius": 3.0999999046325684,
-      "railgun": true,
       "retreatThreshold": 0.15000000596046448,
       "retreatTime": 1.600000023841858,
       "speed": 8.5,
       "spread": 0.09000000357627869,
-      "turnRate": 1.2999999523162842
+      "turnRate": 1.2999999523162842,
+      "attachment": {
+        "breaksOn": "railgun",
+        "model": "railgun",
+        "mount": [
+          2.2,
+          2.0,
+          -1.1
+        ]
+      },
+      "special": {
+        "beamTime": 0.35,
+        "beamWidth": 0.3,
+        "color": [
+          0.55,
+          0.8,
+          1.0
+        ],
+        "cooldown": 4.0,
+        "damage": 32.0,
+        "delivery": "hitscan",
+        "enabled": true,
+        "impulse": 30.0,
+        "lightIntensity": 4.5,
+        "lightRadius": 24.0,
+        "muzzle": [
+          0.0,
+          0.0,
+          -2.75
+        ],
+        "orbSize": 0.9,
+        "pulseEnd": 0.12,
+        "pulseStart": 0.55,
+        "range": 400.0,
+        "windup": 5.0
+      }
     },
     {
       "acceleration": 0.0,

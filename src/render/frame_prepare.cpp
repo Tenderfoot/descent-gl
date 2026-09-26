@@ -403,21 +403,21 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
             addPointLight(f.position, f.segment, weapons.flareColor, weapons.flareRadius,
                           weapons.flareIntensity * fade);
         }
-        // A shoulder railgun's charge: a light at the muzzle that grows with
+        // A special attack's wind-up: a light at the muzzle that grows with
         // it, from nothing to the type's full radius and intensity, so the
-        // corridor brightens for five seconds before the shot.
+        // corridor brightens for the whole wind-up before the shot.
         for (int i = 0; i < cur.robots.count; ++i) {
             const dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(i)];
-            if (!robot.alive || !robot.gunAttached || !robot.charging) continue;
+            if (!robot.alive || !robot.attachmentOn || !robot.windingUp) continue;
             if (robot.type < 0 || robot.type >= static_cast<int>(robotConfig.types.size())) {
                 continue;
             }
-            const dvk::sim::RobotDef& def = robotConfig.types[static_cast<size_t>(robot.type)];
-            const float k = def.railgunChargeTime > 0.0f
-                                ? std::clamp(robot.chargeTime / def.railgunChargeTime, 0.0f, 1.0f)
-                                : 1.0f;
-            addPointLight(robot.muzzle, robot.body.segment, def.railgunColor,
-                          def.railgunLightRadius * k, def.railgunLightIntensity * k);
+            const dvk::sim::SpecialAttackDef& sp =
+                robotConfig.types[static_cast<size_t>(robot.type)].special;
+            const float k = sp.windup > 0.0f ? std::clamp(robot.windupTime / sp.windup, 0.0f, 1.0f)
+                                             : 1.0f;
+            addPointLight(robot.muzzle, robot.body.segment, sp.color, sp.lightRadius * k,
+                          sp.lightIntensity * k);
         }
         for (const dvk::sim::Effect& e : cur.combat.effects.items) {
             if (!e.alive || e.lightIntensity <= 0.0f) continue;

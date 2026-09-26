@@ -225,9 +225,9 @@ def railgun(rng):
     return normalise(out)
 
 
-def railgun_charge(rng):
-    # One pulse of a shoulder railgun building up. The robot re-emits this
-    # faster and louder as the charge fills - from about twice a second to
+def special_windup(rng):
+    # One pulse of a robot's special attack winding up. The robot re-emits
+    # this faster and louder as the wind-up fills - from about twice a second to
     # eight times - so it is short, rises within itself, and has a soft tail
     # that stacks into a climbing whine instead of a stutter.
     whine = sweep(0.22, 520, 1250, shape="tri")
@@ -241,8 +241,8 @@ def railgun_charge(rng):
     return normalise(out, 0.80)
 
 
-def railgun_break(rng):
-    # A shoulder railgun torn off its mount: a hard snap, a bright clang with
+def attachment_break(rng):
+    # A robot's attachment torn off its mount: a hard snap, a bright clang with
     # no pitch the other metal sounds share, the charge bank shorting out in a
     # falling fizz, and something heavy tumbling away underneath. Long enough
     # to be heard over the fight it happens in.
@@ -456,8 +456,8 @@ SOUNDS = {
     "reactor.wav": reactor,
     "countdown.wav": countdown,
     "railgun.wav": railgun,
-    "railgun_charge.wav": railgun_charge,
-    "railgun_break.wav": railgun_break,
+    "special_windup.wav": special_windup,
+    "attachment_break.wav": attachment_break,
     "lightning.wav": lightning,
     "exit.wav": exit_sound,
     "engine.wav": engine,

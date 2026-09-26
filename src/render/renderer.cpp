@@ -342,33 +342,34 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
         type.mesh = &propMeshes_.at(def.model);
         type.occluder = &propOccluders_.at(def.model);
         type.textureLayer = wallTiles_.panel;
-        if (def.railgun) {
-            const std::string gunPath = "assets/models/" + def.railgunModel + ".obj";
-            if (propModels_.find(def.railgunModel) == propModels_.end()) {
-                ModelData model = loadObj(gunPath);
+        if (def.attachment.present()) {
+            const std::string modelPath = "assets/models/" + def.attachment.model + ".obj";
+            if (propModels_.find(def.attachment.model) == propModels_.end()) {
+                ModelData model = loadObj(modelPath);
                 OccluderMesh occluder =
-                    buildOccluder(model.positions, model.triangles, {}, gunPath);
-                propMeshes_.emplace(def.railgunModel, toMesh(model));
-                propOccluders_.emplace(def.railgunModel, std::move(occluder));
-                propModels_.emplace(def.railgunModel, std::move(model));
+                    buildOccluder(model.positions, model.triangles, {}, modelPath);
+                propMeshes_.emplace(def.attachment.model, toMesh(model));
+                propOccluders_.emplace(def.attachment.model, std::move(occluder));
+                propModels_.emplace(def.attachment.model, std::move(model));
             }
-            type.gunMesh = &propMeshes_.at(def.railgunModel);
-            type.gunOccluder = &propOccluders_.at(def.railgunModel);
+            type.attachmentMesh = &propMeshes_.at(def.attachment.model);
+            type.attachmentOccluder = &propOccluders_.at(def.attachment.model);
         }
         robotTypes_.push_back(type);
     }
 
     robotOccluders_.resize(sim::kMaxRobots);
     robotOccluderType_.assign(sim::kMaxRobots, -1);
-    gunOccluders_.resize(sim::kMaxRobots * 2);
-    gunOccluderType_.assign(sim::kMaxRobots * 2, -1);
+    attachmentOccluders_.resize(sim::kMaxRobots * 2);
+    attachmentOccluderType_.assign(sim::kMaxRobots * 2, -1);
 }
 
-// Every place that draws or shadows a gun asks this rather than indexing
-// robotTypes_ itself, so a GunView with a bad type is skipped everywhere alike.
-const Mesh* Renderer::gunMesh(int type) const {
+// Every place that draws or shadows an attachment asks this rather than
+// indexing robotTypes_ itself, so a view with a bad type is skipped everywhere
+// alike.
+const Mesh* Renderer::attachmentMesh(int type) const {
     if (type < 0 || type >= static_cast<int>(robotTypes_.size())) return nullptr;
-    return robotTypes_[static_cast<size_t>(type)].gunMesh;
+    return robotTypes_[static_cast<size_t>(type)].attachmentMesh;
 }
 
 bool Renderer::propAlive(const Prop& prop, const RenderState& rs) {
@@ -538,17 +539,18 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
         }
     }
 
-    for (int i = 0; i < rs.gunCount; ++i) {
-        const RenderState::GunView& gun = rs.guns[static_cast<size_t>(i)];
-        const auto key = static_cast<size_t>(gun.key);
-        if (key >= gunOccluders_.size() || !gunMesh(gun.type)) continue;
+    for (int i = 0; i < rs.attachmentCount; ++i) {
+        const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+        const auto key = static_cast<size_t>(part.key);
+        if (key >= attachmentOccluders_.size() || !attachmentMesh(part.type)) continue;
         const glm::mat4 model =
-            glm::translate(glm::mat4(1.0f), gun.position) * glm::mat4_cast(gun.orientation);
-        if (gunOccluderType_[key] != gun.type) {
-            gunOccluders_[key].reset(robotTypes_[static_cast<size_t>(gun.type)].gunOccluder, model);
-            gunOccluderType_[key] = gun.type;
+            glm::translate(glm::mat4(1.0f), part.position) * glm::mat4_cast(part.orientation);
+        if (attachmentOccluderType_[key] != part.type) {
+            attachmentOccluders_[key].reset(
+                robotTypes_[static_cast<size_t>(part.type)].attachmentOccluder, model);
+            attachmentOccluderType_[key] = part.type;
         } else {
-            gunOccluders_[key].setTransform(model);
+            attachmentOccluders_[key].setTransform(model);
         }
     }
 }
@@ -1714,13 +1716,13 @@ void Renderer::buildBillboards(const RenderState& rs, const PortalWalk& walk) {
                 billboards_.add(robot.position + basis * eye, right, up, eyeSize, eyeColor);
             }
 
-            // A shoulder railgun's charge: an orb at the muzzle that grows from
-            // nothing to full size over the charge, so how long is left can be
+            // A special attack's wind-up: an orb at the muzzle that grows from
+            // nothing to full size over the wind-up, so how long is left can be
             // read off it from across a room.
-            if (robot.charge > 0.0f && def.railgunChargeTime > 0.0f) {
-                const float k = std::min(1.0f, robot.charge / def.railgunChargeTime);
-                billboards_.add(robot.muzzle, right, up, def.railgunOrbSize * k,
-                                def.railgunColor * (0.6f + 0.6f * k));
+            if (robot.windup > 0.0f && def.special.windup > 0.0f) {
+                const float k = std::min(1.0f, robot.windup / def.special.windup);
+                billboards_.add(robot.muzzle, right, up, def.special.orbSize * k,
+                                def.special.color * (0.6f + 0.6f * k));
             }
         }
     }
@@ -1882,15 +1884,17 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                 ++stats_.shadowCasters;
             }
 
-            for (int i = 0; i < rs.gunCount; ++i) {
-                const RenderState::GunView& gun = rs.guns[static_cast<size_t>(i)];
-                const auto key = static_cast<size_t>(gun.key);
-                if (key >= gunOccluders_.size() || !gunOccluders_[key].mesh()) continue;
-                if (gun.segment >= 0 && !std::binary_search(light.segments.begin(),
-                                                            light.segments.end(), gun.segment)) {
+            for (int i = 0; i < rs.attachmentCount; ++i) {
+                const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+                const auto key = static_cast<size_t>(part.key);
+                if (key >= attachmentOccluders_.size() || !attachmentOccluders_[key].mesh()) {
                     continue;
                 }
-                volumes_.add(gunOccluders_[key], light.position);
+                if (part.segment >= 0 && !std::binary_search(light.segments.begin(),
+                                                             light.segments.end(), part.segment)) {
+                    continue;
+                }
+                volumes_.add(attachmentOccluders_[key], light.position);
                 ++stats_.shadowCasters;
             }
 
@@ -1992,12 +1996,12 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
     }
 
-    for (int i = 0; i < rs.gunCount; ++i) {
-        const RenderState::GunView& gun = rs.guns[static_cast<size_t>(i)];
-        const Mesh* mesh = gunMesh(gun.type);
+    for (int i = 0; i < rs.attachmentCount; ++i) {
+        const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+        const Mesh* mesh = attachmentMesh(part.type);
         if (!mesh) continue;
-        depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), gun.position) *
-                                            glm::mat4_cast(gun.orientation));
+        depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), part.position) *
+                                            glm::mat4_cast(part.orientation));
         mesh->draw();
     }
 
@@ -2208,24 +2212,24 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
         }
 
-        // Shoulder railguns, on and off their robots. The same panel tile and
-        // the same disabled tint as the robot they hang on, so an attached gun
+        // Attachments, on and off their robots. The same panel tile and the
+        // same disabled tint as the robot they hang on, so an attachment still on
         // reads as part of it.
-        for (int i = 0; i < rs.gunCount; ++i) {
-            const RenderState::GunView& gun = rs.guns[static_cast<size_t>(i)];
-            const Mesh* mesh = gunMesh(gun.type);
+        for (int i = 0; i < rs.attachmentCount; ++i) {
+            const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+            const Mesh* mesh = attachmentMesh(part.type);
             if (!mesh) continue;
-            if (gun.segment >= 0 && !std::binary_search(light.segments.begin(),
-                                                        light.segments.end(), gun.segment)) {
+            if (part.segment >= 0 && !std::binary_search(light.segments.begin(),
+                                                         light.segments.end(), part.segment)) {
                 continue;
             }
             wallShader_->setInt("uLayerOverride",
-                                robotTypes_[static_cast<size_t>(gun.type)].textureLayer);
-            wallShader_->setVec3("uAlbedoTint", gun.disabledTime > 0.0f
-                                                    ? disabledTint(gun.disabledTime)
+                                robotTypes_[static_cast<size_t>(part.type)].textureLayer);
+            wallShader_->setVec3("uAlbedoTint", part.disabledTime > 0.0f
+                                                    ? disabledTint(part.disabledTime)
                                                     : glm::vec3(1.0f));
-            wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), gun.position) *
-                                                glm::mat4_cast(gun.orientation));
+            wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), part.position) *
+                                                glm::mat4_cast(part.orientation));
             mesh->draw();
         }
         wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));

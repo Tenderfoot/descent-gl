@@ -25,10 +25,10 @@ uint32_t g_spreadCounter = 0;
 // See the muzzle flash comment in fire(): short, but not one step.
 constexpr float kMuzzleFlashTime = 0.05f;
 
-// How far past a robot's hull a shot may meet its shoulder railgun and still
-// count as hitting the gun. The gun sits partly inside the hull's sphere, and
+// How far past a robot's hull a shot may meet its attachment and still count
+// as hitting the attachment. One can sit partly inside the hull's sphere, and
 // without this a shot aimed squarely at it lands on the robot instead.
-constexpr float kGunPreference = 1.5f;
+constexpr float kAttachmentPreference = 1.5f;
 
 float nextUnit() {
     g_spreadCounter = g_spreadCounter * 1664525u + 1013904223u;
@@ -183,6 +183,35 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
     }
 }
 
+
+// The player's weapon landing on a robot's attachment, when it is the weapon
+// that attachment breaks to: knocks it loose and spends the shot on it. The
+// hull under it is not hurt, but the robot knows exactly who did it. False for
+// every other hit, which the caller treats as an ordinary hit on the robot.
+//
+// One rule for both kinds of fire, so an attachment that breaks to a missile
+// breaks the same way as one that breaks to the railgun. `events` null means
+// the hit is silent and unlit - the lightning gun's per-step trace.
+bool breakAttachment(const Level& level, CombatState& state, RobotState& robots,
+                     const CombatHit& hit, int weaponId, const glm::vec3& push,
+                     const glm::vec3& shooter, const glm::vec3& color, const SolidDoors* doors,
+                     EventQueue* events) {
+    if (!hit.attachment || weaponId < 0) return false;
+    Robot& robot = robots.robots[static_cast<size_t>(hit.index)];
+    if (!robot.attachmentOn || robot.attachmentBreaksOn != weaponId) return false;
+
+    knockAttachmentLoose(level, robots, hit.index, push, doors);
+    state.player.lastTargetRobot = hit.index;
+    state.player.targetHudTime = kTargetHudTime;
+    robot.awareness = 1.0f;
+    robot.lastKnown = shooter;
+    robot.hasLastKnown = true;
+    if (events) {
+        spawnEffect(state, hit.point, hit.segment, color, 3.2f, 0.4f, 18.0f, 5.0f);
+        emit(events, Cue::AttachmentBreak, hit.point, hit.segment);
+    }
+    return true;
+}
 } // namespace
 
 void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& out) {
@@ -251,7 +280,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         body.point = contact;
         body.segment = bodySegment;
         body.index = index;
-        body.gun = false;
+        body.attachment = false;
     };
 
     // The same decision for a volume that is not a sphere. Kept beside
@@ -270,7 +299,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         body.point = origin + direction * along;
         body.segment = bodySegment;
         body.index = index;
-        body.gun = false;
+        body.attachment = false;
     };
 
     // The player, for robot fire. Checked first so that where a robot's bolt
@@ -287,15 +316,16 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
             consider(robot.body.position, robot.body.radius, robot.body.segment,
                      CombatHit::Kind::Robot, i);
 
-            // The shoulder railgun is a box of its own. Where it sits inside
-            // the hull's sphere a shot aimed at the gun meets the sphere
-            // first, so the gun wins anything within kGunPreference of the
+            // An attachment is a box of its own. Where it sits inside the
+            // hull's sphere a shot aimed at it meets the sphere first, so the
+            // attachment wins anything within kAttachmentPreference of the
             // hull: the player hits what they can see they are aiming at.
-            if (!robot.gunAttached) continue;
-            const float along = rayProxyDistance(robot.gunProxy, origin, direction, params.radius);
+            if (!robot.attachmentOn) continue;
+            const float along =
+                rayProxyDistance(robot.attachmentProxy, origin, direction, params.radius);
             if (along < 0.0f || along > maxDistance) continue;
             const bool hullHere = haveBody && body.kind == CombatHit::Kind::Robot && body.index == i;
-            const bool wins = hullHere  ? along <= bestBody + kGunPreference
+            const bool wins = hullHere  ? along <= bestBody + kAttachmentPreference
                               : haveBody ? along < bestBody
                                          : along <= bestBody;
             if (!wins) continue;
@@ -306,7 +336,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
             body.point = origin + direction * along;
             body.segment = robot.body.segment;
             body.index = i;
-            body.gun = true;
+            body.attachment = true;
         }
     }
 
@@ -597,21 +627,9 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             switch (hit.kind) {
                 case CombatHit::Kind::Robot: {
                     Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
-                    if (hit.gun && weaponId == WeaponRailgun) {
-                        // The one shot that takes a shoulder railgun off. It
-                        // spends itself on the gun: the hull under it is not
-                        // hurt, but the robot knows exactly who did it.
-                        knockGunLoose(level, *robots, hit.index, shotDir * def.impactImpulse, doors);
-                        player.lastTargetRobot = hit.index;
-                        player.targetHudTime = kTargetHudTime;
-                        robot.awareness = 1.0f;
-                        robot.lastKnown = ship.position;
-                        robot.hasLastKnown = true;
-                        if (audible) {
-                            spawnEffect(state, hit.point, hit.segment, color, 3.2f, 0.4f, 18.0f,
-                                        5.0f);
-                            emit(events, Cue::RailgunBreak, hit.point, hit.segment);
-                        }
+                    if (breakAttachment(level, state, *robots, hit, weaponId,
+                                        shotDir * def.impactImpulse, ship.position, color, doors,
+                                        audible ? events : nullptr)) {
                         break;
                     }
                     robot.health -= shot;
@@ -670,6 +688,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
         Projectile& p = state.projectiles.items[static_cast<size_t>(slot)];
         p.kind = projectileFor(weaponId);
+        p.weapon = weaponId;
         p.position = origin;
         p.velocity = spreadDirection(forward, right, up, def.spread) * def.speed;
         if (weaponInheritsVelocity(weaponId)) p.velocity += ship.velocity;
@@ -818,6 +837,14 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 continue;
 
             case CombatHit::Kind::Robot: {
+                if (breakAttachment(level, state, *robots, hit, p.weapon, dir * p.impactImpulse,
+                                    ship.position, p.color, doors, events)) {
+                    // Spent on the attachment, but a missile still goes off:
+                    // its splash reaches the robot as any blast would.
+                    killProjectile(level, state, robots, &ship, p, hit.point, p.segment,
+                                   cfg.playerMass, doors, props, events);
+                    continue;
+                }
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
                 robot.lastHitByCharge = false;

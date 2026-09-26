@@ -416,8 +416,8 @@ private:
     void loadProps(const Level& level, const sim::RobotConfig& robots);
     void loadRobotMeshes(const sim::RobotConfig& robots);
     void updateRobotOccluders(const RenderState& rs);
-    // The shoulder railgun a robot type carries, or null for one with none.
-    const Mesh* gunMesh(int type) const;
+    // The attachment a robot type carries, or null for one with none.
+    const Mesh* attachmentMesh(int type) const;
     void gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
                       const glm::vec3& eye, const PortalWalk& walk, int shadowBudget);
     void buildBillboards(const RenderState& rs, const PortalWalk& walk);
@@ -500,18 +500,18 @@ private:
         const Mesh* mesh = nullptr;
         const OccluderMesh* occluder = nullptr;
         int textureLayer = 0;
-        // The shoulder railgun, for a type that carries one; null otherwise.
-        const Mesh* gunMesh = nullptr;
-        const OccluderMesh* gunOccluder = nullptr;
+        // The attachment, for a type that carries one; null otherwise.
+        const Mesh* attachmentMesh = nullptr;
+        const OccluderMesh* attachmentOccluder = nullptr;
     };
     std::vector<RobotType> robotTypes_;
     std::vector<Occluder> robotOccluders_;
     std::vector<int> robotOccluderType_;
-    // One per RenderState::GunView key, rebuilt only when the gun in it
-    // changes type - so a gun coming loose moves to its loose key once and
-    // costs one rebuild, not one a frame.
-    std::vector<Occluder> gunOccluders_;
-    std::vector<int> gunOccluderType_;
+    // One per RenderState::AttachmentView key, rebuilt only when the
+    // attachment in it changes type - so one coming loose moves to its loose
+    // key once and costs one rebuild, not one a frame.
+    std::vector<Occluder> attachmentOccluders_;
+    std::vector<int> attachmentOccluderType_;
     const sim::RobotConfig* robotConfig_ = nullptr;
 
     // Every light being drawn this frame: the level's, then the headlight if

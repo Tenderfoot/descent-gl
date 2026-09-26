@@ -29,9 +29,9 @@ struct RobotConfig;
 void resolveObjectProxies(Level& level);
 
 // The same seam for what a robot carries rather than what a level places: sizes
-// each shoulder railgun's hitbox from its own model, so the box the player
-// shoots at is the gun they can see. Called once, straight after the robot
-// config is loaded - see RobotDef::railgunVolume.
+// each robot attachment's hitbox from its own model, so the box the player
+// shoots at is the thing they can see. Called once, straight after the robot
+// config is loaded - see AttachmentDef::volume.
 void resolveRobotAttachments(sim::RobotConfig& robots);
 
 } // namespace dvk

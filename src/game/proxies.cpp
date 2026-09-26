@@ -152,21 +152,22 @@ void resolveObjectProxies(Level& level) {
 
 void resolveRobotAttachments(sim::RobotConfig& robots) {
     for (sim::RobotDef& def : robots.types) {
-        if (!def.railgun) continue;
-        const std::string path = "assets/models/" + def.railgunModel + ".obj";
+        if (!def.attachment.present()) continue;
+        const std::string path = "assets/models/" + def.attachment.model + ".obj";
         const gl::ModelData model = gl::loadObj(path);
         glm::vec3 lo(0.0f);
         glm::vec3 hi(0.0f);
         if (!gl::modelBounds(model, lo, hi)) {
-            log::warn("model '{}' has no vertices; '{}' keeps its configured railgun hitbox", path,
+            log::warn("model '{}' has no vertices; '{}' keeps a unit attachment hitbox", path,
                       def.name);
             continue;
         }
-        // A box and not the model's hull: the gun is a receiver with a barrel
-        // out of its front, which is not convex, and it is small and moving
-        // fast enough that the difference is not something a player can aim at.
-        def.railgunVolume = sim::boxProxy(lo, hi);
-        log::info("railgun hitbox for '{}': {:.1f} x {:.1f} x {:.1f}", def.name, hi.x - lo.x,
+        // A box and not the model's hull: an attachment is a small thing on
+        // a moving robot, likely not convex - the railgun is a receiver with
+        // a barrel out of its front - and the difference is not something a
+        // player can aim at.
+        def.attachment.volume = sim::boxProxy(lo, hi);
+        log::info("attachment hitbox for '{}': {:.1f} x {:.1f} x {:.1f}", def.name, hi.x - lo.x,
                   hi.y - lo.y, hi.z - lo.z);
     }
 }

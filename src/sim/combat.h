@@ -75,6 +75,9 @@ struct Projectile {
     int target = -1;       // homing only: a destructible level object
     int targetRobot = -1;  // homing only: a robot, preferred over `target`
     int owner = -1;        // -1 is the player
+    // The player weapon that fired it, or -1 for robot fire and flares. What
+    // lets a bolt be the weapon that breaks a robot's attachment off.
+    int weapon = -1;
 };
 
 // A flare that has landed and is now a light.
@@ -326,10 +329,10 @@ struct CombatHit {
     // to everything that reads this - but which door it was is the one thing
     // the flow needs in order to let the shot open it.
     int door = -1;
-    // A Kind::Robot hit that landed on the robot's shoulder railgun rather
-    // than its hull. Every other reader treats it as a hit on the robot; the
-    // player's railgun is the one shot that knocks the gun loose.
-    bool gun = false;
+    // A Kind::Robot hit that landed on the robot's attachment rather than its
+    // hull. Every reader treats it as a hit on the robot, except for the one
+    // weapon that knocks the attachment loose - see AttachmentDef::breaksOn.
+    bool attachment = false;
 };
 
 struct CombatTraceParams {

@@ -111,10 +111,11 @@ struct RenderState {
         // drives the red pulse, and it comes from the simulation rather than a
         // render clock so every robot's pulse is its own.
         float disabledTime = 0.0f;
-        // Seconds into a shoulder railgun's charge, and where its orb sits.
-        // Zero when no charge is running, which includes having no gun. The
-        // renderer turns it into a fraction with the type's charge time.
-        float charge = 0.0f;
+        // Seconds into a special attack's wind-up, and where its orb sits.
+        // Zero when no wind-up is running, which includes having nothing to
+        // wind up. The renderer turns it into a fraction with the type's
+        // SpecialAttackDef::windup.
+        float windup = 0.0f;
         glm::vec3 muzzle{0.0f};
     };
     std::array<RobotView, sim::kMaxRobots> robots{};
@@ -123,11 +124,11 @@ struct RenderState {
     std::array<int, sim::kMaxRobots> robotSegments{};
     int robotCount = 0;
 
-    // Shoulder railguns, on their robots and knocked loose, as one list: they
-    // are the same mesh and are lit and shadowed the same way either way.
-    // `key` is stable per gun - the robot slot while attached, kMaxRobots plus
-    // that slot once loose - so the renderer can keep one occluder per gun.
-    struct GunView {
+    // Robot attachments, on their robots and knocked loose, as one list:
+    // they are the same mesh and are lit and shadowed the same way either way.
+    // `key` is stable per attachment - the robot slot while on, kMaxRobots plus
+    // that slot once loose - so the renderer can keep one occluder for each.
+    struct AttachmentView {
         glm::vec3 position{0.0f};
         glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
         int type = 0;
@@ -135,8 +136,8 @@ struct RenderState {
         int key = 0;
         float disabledTime = 0.0f;
     };
-    std::array<GunView, sim::kMaxRobots * 2> guns{};
-    int gunCount = 0;
+    std::array<AttachmentView, sim::kMaxRobots * 2> attachments{};
+    int attachmentCount = 0;
 
     // Pickups still on the floor, as emissive markers: the level's own first,
     // in its order, then whatever the robots have dropped.
@@ -289,39 +290,40 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         view.orientation =
             prev.alive ? glm::slerp(prev.orientation, cur.orientation, t) : cur.orientation;
         // The robot's model matrix above is interpolated, so the muzzle and
-        // the gun are too, or the gun would lag its shoulder by a step.
-        view.muzzle = prev.alive && prev.gunAttached ? glm::mix(prev.muzzle, cur.muzzle, t)
-                                                     : cur.muzzle;
-        view.charge = cur.charging ? cur.chargeTime : 0.0f;
+        // the attachment are too, or the attachment would lag its robot.
+        const bool hadAttachment = prev.alive && prev.attachmentOn;
+        view.muzzle = hadAttachment ? glm::mix(prev.muzzle, cur.muzzle, t) : cur.muzzle;
+        view.windup = cur.windingUp ? cur.windupTime : 0.0f;
         r.robotSegments[static_cast<size_t>(i)] = cur.body.segment;
         r.robots[static_cast<size_t>(r.robotCount++)] = view;
 
-        if (cur.gunAttached) {
-            RenderState::GunView gun;
-            gun.position = prev.alive && prev.gunAttached ? glm::mix(prev.gunOrigin, cur.gunOrigin, t)
-                                                          : cur.gunOrigin;
-            gun.orientation = view.orientation;
-            gun.type = cur.type;
-            gun.segment = cur.body.segment;
-            gun.key = i;
-            gun.disabledTime = view.disabledTime;
-            r.guns[static_cast<size_t>(r.gunCount++)] = gun;
+        if (cur.attachmentOn) {
+            RenderState::AttachmentView part;
+            part.position = hadAttachment
+                                ? glm::mix(prev.attachmentOrigin, cur.attachmentOrigin, t)
+                                : cur.attachmentOrigin;
+            part.orientation = view.orientation;
+            part.type = cur.type;
+            part.segment = cur.body.segment;
+            part.key = i;
+            part.disabledTime = view.disabledTime;
+            r.attachments[static_cast<size_t>(r.attachmentCount++)] = part;
         }
     }
 
     for (int i = 0; i < sim::kMaxRobots; ++i) {
-        const sim::LooseGun& cur = b.robots.looseGuns[static_cast<size_t>(i)];
+        const sim::LooseAttachment& cur = b.robots.looseAttachments[static_cast<size_t>(i)];
         if (!cur.alive) continue;
-        const sim::LooseGun& prev = a.robots.looseGuns[static_cast<size_t>(i)];
-        RenderState::GunView gun;
-        gun.position = prev.alive ? glm::mix(prev.body.position, cur.body.position, t)
-                                  : cur.body.position;
-        gun.orientation = prev.alive ? glm::slerp(prev.orientation, cur.orientation, t)
-                                     : cur.orientation;
-        gun.type = cur.type;
-        gun.segment = cur.body.segment;
-        gun.key = sim::kMaxRobots + i;
-        r.guns[static_cast<size_t>(r.gunCount++)] = gun;
+        const sim::LooseAttachment& prev = a.robots.looseAttachments[static_cast<size_t>(i)];
+        RenderState::AttachmentView part;
+        part.position = prev.alive ? glm::mix(prev.body.position, cur.body.position, t)
+                                   : cur.body.position;
+        part.orientation = prev.alive ? glm::slerp(prev.orientation, cur.orientation, t)
+                                      : cur.orientation;
+        part.type = cur.type;
+        part.segment = cur.body.segment;
+        part.key = sim::kMaxRobots + i;
+        r.attachments[static_cast<size_t>(r.attachmentCount++)] = part;
     }
 
     // Debris rides the bolt list: small emissive things the unlit pass draws
