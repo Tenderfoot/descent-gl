@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace dvk {
@@ -22,9 +23,11 @@ constexpr float kEngineHighPitch = 1.28f;
 
 // The headlight is the player's primary way of seeing the mine: broad, soft,
 // and slightly ahead of the hull so the cone does not begin inside the ship.
-constexpr float kHeadlightRadius = 62.0f;
+// Unlimited range: the flood fill follows every open portal, and in the
+// radius-relative falloff t = dist/radius is zero everywhere.
+constexpr float kHeadlightRadius = std::numeric_limits<float>::infinity();
 constexpr float kHeadlightCone = 60.0f;
-constexpr float kHeadlightIntensity = 2.0f;
+constexpr float kHeadlightIntensity = 0.5f;
 constexpr float kHeadlightForward = 2.2f;
 
 // Keep the chase-camera reticle stable near walls and bounded in open space.
