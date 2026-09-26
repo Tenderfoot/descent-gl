@@ -143,7 +143,13 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
     ShellEffect effect;
     switch (action) {
         case MenuAction::ChooseLevel:
-            menu_.showLevelSelect();
+            menu_.showLevelGroups();
+            break;
+        case MenuAction::ChooseCampaign:
+            menu_.showLevelSelect(LevelGroup::Campaign);
+            break;
+        case MenuAction::ChooseOtherMaps:
+            menu_.showLevelSelect(LevelGroup::Other);
             break;
         case MenuAction::OpenSettings:
             menu_.showSettings(settings_);
@@ -185,6 +191,8 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
                 if (!applySettingsEdits(now)) menu_.closeSettings();
             } else if (menu_.screen() == MenuScreen::Settings) {
                 menu_.closeSettings();
+            } else if (menu_.screen() == MenuScreen::LevelSelect) {
+                menu_.showLevelGroups();
             } else {
                 menu_.showMain();
             }

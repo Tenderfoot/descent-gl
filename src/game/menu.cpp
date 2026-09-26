@@ -21,6 +21,13 @@ constexpr std::array<ButtonDefinition, 3> kMainButtons{{
     {MenuAction::Quit, "quit"},
 }};
 
+// Row order matches LevelGroup, so a group is its own row.
+constexpr std::array<ButtonDefinition, 3> kLevelGroupButtons{{
+    {MenuAction::ChooseCampaign, "campaign"},
+    {MenuAction::ChooseOtherMaps, "other maps"},
+    {MenuAction::Back, "back"},
+}};
+
 constexpr std::array<ButtonDefinition, 5> kPauseButtons{{
     {MenuAction::Resume, "resume"},
     {MenuAction::OpenSettings, "settings"},
@@ -99,6 +106,8 @@ constexpr std::array<std::pair<int, int>, 4> kWindowSizes{{
 std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
     switch (screen) {
         case MenuScreen::Main: return {kMainButtons.data(), static_cast<int>(kMainButtons.size())};
+        case MenuScreen::LevelGroups:
+            return {kLevelGroupButtons.data(), static_cast<int>(kLevelGroupButtons.size())};
         case MenuScreen::Pause:
             return {kPauseButtons.data(), static_cast<int>(kPauseButtons.size())};
         case MenuScreen::Settings:
@@ -237,8 +246,9 @@ void addScrollArrows(MenuView& result, const ListLayout& layout, int first, int 
 
 }
 
-void PlayerMenu::setLevels(std::vector<LevelEntry> levels) {
+void PlayerMenu::setLevels(std::vector<LevelEntry> levels, int campaignCount) {
     levels_ = std::move(levels);
+    campaignCount_ = std::clamp(campaignCount, 0, static_cast<int>(levels_.size()));
     // A level's comment is written for whoever opens the file - mine01's is a
     // paragraph about where the keys are. The list wants a blurb, so keep the
     // first sentence and drop the rest. The renderer still cuts what does not
@@ -248,9 +258,27 @@ void PlayerMenu::setLevels(std::vector<LevelEntry> levels) {
         if (stop != std::string::npos) entry.comment.resize(stop + 1);
     }
     const int count = static_cast<int>(levels_.size());
-    levelSelection_ = std::clamp(levelSelection_, 0, count);
-    levelScroll_ = std::clamp(levelScroll_, 0, std::max(count - 1, 0));
     chosenLevel_ = count == 0 ? -1 : std::clamp(chosenLevel_, 0, count - 1);
+    group_ = groupOf(chosenLevel_);
+    const int size = groupSize();
+    levelSelection_ = std::clamp(levelSelection_, 0, size);
+    levelScroll_ = std::clamp(levelScroll_, 0, std::max(size - 1, 0));
+}
+
+LevelGroup PlayerMenu::groupOf(int level) const {
+    // Nothing chosen goes with the campaign when there is one: it is where a
+    // player who has not picked anything should be pointed.
+    if (level < 0) return campaignCount_ > 0 ? LevelGroup::Campaign : LevelGroup::Other;
+    return level < campaignCount_ ? LevelGroup::Campaign : LevelGroup::Other;
+}
+
+int PlayerMenu::groupBegin() const {
+    return group_ == LevelGroup::Campaign ? 0 : campaignCount_;
+}
+
+int PlayerMenu::groupSize() const {
+    return group_ == LevelGroup::Campaign ? campaignCount_
+                                          : static_cast<int>(levels_.size()) - campaignCount_;
 }
 
 void PlayerMenu::setSelectedLevel(int index) {
@@ -260,8 +288,9 @@ void PlayerMenu::setSelectedLevel(int index) {
         return;
     }
     chosenLevel_ = std::clamp(index, 0, static_cast<int>(levels_.size()) - 1);
-    levelSelection_ = chosenLevel_;
-    levelScroll_ = chosenLevel_;
+    group_ = groupOf(chosenLevel_);
+    levelSelection_ = chosenLevel_ - groupBegin();
+    levelScroll_ = levelSelection_;
 }
 
 void PlayerMenu::setLevelRecord(const std::string& path, int completions, int bestSeconds) {
@@ -292,14 +321,31 @@ void PlayerMenu::showMain() {
     selection_ = 0;
 }
 
-void PlayerMenu::showLevelSelect() {
+void PlayerMenu::showLevelGroups() {
+    // Coming back up from a list lands on the row that opened it; coming from
+    // the main menu, group_ is the loaded level's, so confirming all the way
+    // down still starts what a plain run starts.
+    screen_ = MenuScreen::LevelGroups;
+    selection_ = static_cast<int>(group_);
+}
+
+void PlayerMenu::showLevelSelect(LevelGroup group) {
     screen_ = MenuScreen::LevelSelect;
-    // Not reset: the cursor stays on the level that was last picked, so
-    // backing out of a run and coming here again does not start over at the
-    // top of the list. The window opens on that level - view() clamps it to
-    // the end of the list, and how many rows fit is not known here.
-    levelSelection_ = std::clamp(levelSelection_, 0, static_cast<int>(levels_.size()));
-    levelScroll_ = std::min(levelSelection_, std::max(static_cast<int>(levels_.size()) - 1, 0));
+    group_ = group;
+    // The cursor opens on the level that was last picked if this group holds
+    // it, so backing out of a run and coming here again does not start over
+    // at the top of the list. The window opens on that row - view() clamps it
+    // to the end of the list, and how many rows fit is not known here.
+    const int size = groupSize();
+    levelSelection_ = chosenLevel_ >= 0 && groupOf(chosenLevel_) == group_
+                          ? chosenLevel_ - groupBegin()
+                          : 0;
+    levelSelection_ = std::clamp(levelSelection_, 0, size);
+    levelScroll_ = std::min(levelSelection_, std::max(size - 1, 0));
+}
+
+void PlayerMenu::showLevelSelect() {
+    showLevelSelect(groupOf(chosenLevel_));
 }
 
 void PlayerMenu::showPause() {
@@ -380,10 +426,11 @@ void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int ro
 }
 
 // How many things the cursor can sit on. For the level list that is one per
-// level plus "back", which is more than the rows on screen when the list is
-// long: the cursor moves through the whole list and the window follows it.
+// level in the open group plus "back", which is more than the rows on screen
+// when the list is long: the cursor moves through the whole list and the
+// window follows it.
 int PlayerMenu::buttonCount() const {
-    if (screen_ == MenuScreen::LevelSelect) return static_cast<int>(levels_.size()) + 1;
+    if (screen_ == MenuScreen::LevelSelect) return groupSize() + 1;
     if (screen_ == MenuScreen::Controls) return static_cast<int>(kPlayerActionCount) + 2;
     return buttonsFor(screen_).second;
 }
@@ -496,7 +543,7 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     // moves the cursor; the wheel and the arrows move the window. Whichever
     // moved last is the one that wins when the two disagree, so a row never
     // slides out from under the pointer that is pointing at it.
-    const int listCount = levelList  ? static_cast<int>(levels_.size())
+    const int listCount = levelList  ? groupSize()
                           : controlList ? static_cast<int>(kPlayerActionCount)
                                         : 0;
     int* const scroll = levelList ? &levelScroll_ : (controlList ? &controlScroll_ : nullptr);
@@ -518,8 +565,10 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         if (button.scrollRows != 0) continue;
         if (!button.bounds.contains(input.pointer)) continue;
         // On the level list a button is not its own index: the rows show a
-        // window into the list, and "back" sits past the end of it.
-        if (levelList) cursor = button.levelIndex >= 0 ? button.levelIndex : count - 1;
+        // window into the group, and "back" sits past the end of it.
+        if (levelList) {
+            cursor = button.levelIndex >= 0 ? button.levelIndex - groupBegin() : count - 1;
+        }
         else if (controlList) cursor = button.actionIndex;
         else cursor = i;
     }
@@ -585,8 +634,8 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
     }
     if (input.confirm) {
         if (levelList) {
-            if (levelSelection_ >= static_cast<int>(levels_.size())) return MenuAction::Back;
-            chosenLevel_ = levelSelection_;
+            if (levelSelection_ >= groupSize()) return MenuAction::Back;
+            chosenLevel_ = groupBegin() + levelSelection_;
             return MenuAction::Start;
         }
         if (controlList) {
@@ -627,16 +676,19 @@ MenuView PlayerMenu::view(int width, int height) const {
     const float gap = std::clamp(screenHeight * 0.018f, 10.0f, 18.0f);
 
     if (screen_ == MenuScreen::LevelSelect) {
-        const int levelCount = static_cast<int>(levels_.size());
-        result.title = "select level";
+        const bool campaign = group_ == LevelGroup::Campaign;
+        const int begin = groupBegin();
+        const int levelCount = groupSize();
+        result.title = campaign ? "campaign" : "other maps";
         result.levelCount = levelCount;
         if (levelCount == 0) {
-            result.subtitle = "no levels in assets/levels";
+            result.subtitle = campaign ? "no levels in assets/config/campaign.json"
+                                       : "no other levels in assets/levels";
         } else if (levelSelection_ < levelCount) {
-            const LevelEntry& entry = levels_[static_cast<size_t>(levelSelection_)];
+            const LevelEntry& entry = levels_[static_cast<size_t>(begin + levelSelection_)];
             result.subtitle = entry.comment.empty() ? entry.name.c_str() : entry.comment.c_str();
         } else {
-            result.subtitle = "back to the main menu";
+            result.subtitle = "back to campaign or other maps";
         }
 
         // The list lives between the subtitle and the bottom of the panel
@@ -654,7 +706,7 @@ MenuView PlayerMenu::view(int width, int height) const {
             const int index = first + i;
             MenuButtonView& button = result.buttons[static_cast<size_t>(i)];
             button.action = MenuAction::Start;
-            const LevelEntry& level = levels_[static_cast<size_t>(index)];
+            const LevelEntry& level = levels_[static_cast<size_t>(begin + index)];
             button.label = level.name.c_str();
             if (level.completions > 0) {
                 if (level.bestSeconds >= 0) {
@@ -664,7 +716,7 @@ MenuView PlayerMenu::view(int width, int height) const {
                     std::snprintf(button.value.data(), button.value.size(), "%s", "complete");
                 }
             }
-            button.levelIndex = index;
+            button.levelIndex = begin + index;
             button.bounds = {layout.left,
                              layout.top + static_cast<float>(i) * (layout.rowHeight + layout.gap),
                              layout.rowWidth, layout.rowHeight};
@@ -736,6 +788,10 @@ MenuView PlayerMenu::view(int width, int height) const {
         case MenuScreen::Main:
             result.title = "descent";
             result.subtitle = "into the dark";
+            break;
+        case MenuScreen::LevelGroups:
+            result.title = "play";
+            result.subtitle = "choose a set of maps";
             break;
         case MenuScreen::Pause:
             result.title = "paused";

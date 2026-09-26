@@ -82,6 +82,7 @@ constexpr double kMaxFrameTime = 0.25;
 constexpr const char* kFlightConfigPath = "assets/config/flight.json";
 constexpr const char* kDefaultLevelPath = "assets/levels/mine01.json";
 constexpr const char* kLevelDir = "assets/levels";
+constexpr const char* kCampaignPath = "assets/config/campaign.json";
 constexpr const char* kWeaponConfigPath = "assets/config/weapons.json";
 constexpr const char* kRobotConfigPath = "assets/config/robots.json";
 constexpr const char* kSoundDir = "assets/sounds";
@@ -285,8 +286,8 @@ int main(int argc, char** argv) {
     dvk::sim::FlightConfig flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
     const dvk::sim::FlightConfig flightDefaults;
 
-    std::vector<dvk::LevelEntry> levelEntries = dvk::discoverLevels(kLevelDir, levelFile);
-    for (dvk::LevelEntry& entry : levelEntries) {
+    dvk::LevelCatalog catalog = dvk::discoverCatalog(kLevelDir, kCampaignPath);
+    for (dvk::LevelEntry& entry : catalog.levels) {
         if (const dvk::LevelRecord* record =
                 progress.find(dvk::levelProgressId(entry.path))) {
             entry.completions = record->wins;
@@ -296,7 +297,7 @@ int main(int argc, char** argv) {
 
     dvk::Shell shell(window, input, audio, session, loaded, std::move(settings), settingsPath,
                      std::move(progress), progressPath, vsyncAllowed);
-    shell.menu().setLevels(std::move(levelEntries));
+    shell.menu().setLevels(std::move(catalog.levels), catalog.campaignCount);
     // The list opens on the level that is loaded, so confirming twice from the
     // main menu starts what a plain run has always started.
     for (int i = 0; i < static_cast<int>(shell.menu().levels().size()); ++i) {

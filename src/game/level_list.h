@@ -33,4 +33,17 @@ std::vector<std::string> filesWithExtension(const char* directory, const char* e
 std::vector<LevelEntry> discoverLevels(const char* directory = "assets/levels",
                                        const std::string& preferred = "");
 
+// The levels split the way the player menu offers them: the campaign first, in
+// the order `campaignFile` lists it, then every other level in `directory` by
+// path. The campaign file names levels by stem, as {"levels": ["TheBeginning",
+// ...]}. A campaign level whose file is missing is still listed, under its
+// stem, for the same reason a broken one is: the loader says what is wrong.
+// A missing or unreadable campaign file is a campaign of nothing, and every
+// level in the directory is one of the others.
+struct LevelCatalog {
+    std::vector<LevelEntry> levels;
+    int campaignCount = 0;   // levels[0, campaignCount) is the campaign
+};
+LevelCatalog discoverCatalog(const char* directory, const char* campaignFile);
+
 }
