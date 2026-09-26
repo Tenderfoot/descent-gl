@@ -78,6 +78,10 @@ struct Projectile {
     // The player weapon that fired it, or -1 for robot fire and flares. What
     // lets a bolt be the weapon that breaks a robot's attachment off.
     int weapon = -1;
+    // Robot fire only. A homing bolt that steers after the player rather than
+    // after a robot or an object, and one the player's own fire can hit.
+    bool targetPlayer = false;
+    bool shootable = false;
 };
 
 // A flare that has landed and is now a light.
@@ -314,7 +318,7 @@ struct PropState;
 // What a shot ran into first. Kind::None means it reached its full length
 // without touching anything.
 struct CombatHit {
-    enum class Kind : uint8_t { None, Wall, Robot, Object, Player, Prop };
+    enum class Kind : uint8_t { None, Wall, Robot, Object, Player, Prop, Missile };
 
     Kind kind = Kind::None;
     float distance = 0.0f;
@@ -322,7 +326,8 @@ struct CombatHit {
     glm::vec3 normal{0.0f};   // walls and doors only, out of the surface
     int segment = -1;         // the segment the hit is in
     int index = -1;           // robot slot for Robot, Level::objects index for Object,
-                              // floating-light slot for Prop
+                              // floating-light slot for Prop, projectile slot for
+                              // Missile - a shootable robot bolt the player hit
     // Which Level::doors entry a Kind::Wall hit actually landed on, or -1 for
     // the mine itself. A door slab stops a shot exactly as rock does and wants
     // none of the handling a separate kind would drag in - it is still a wall

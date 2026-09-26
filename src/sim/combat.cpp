@@ -30,6 +30,10 @@ constexpr float kMuzzleFlashTime = 0.05f;
 // without this a shot aimed squarely at it lands on the robot instead.
 constexpr float kAttachmentPreference = 1.5f;
 
+// How much bigger a shootable missile is to the player's fire than it is in
+// flight. See traceCombatRay.
+constexpr float kShootableMargin = 0.6f;
+
 float nextUnit() {
     g_spreadCounter = g_spreadCounter * 1664525u + 1013904223u;
     return static_cast<float>((g_spreadCounter >> 8) & 0xFFFFFFu) / 16777215.0f;
@@ -212,6 +216,25 @@ bool breakAttachment(const Level& level, CombatState& state, RobotState& robots,
     }
     return true;
 }
+
+// A shootable robot missile hit by the player's fire: it goes off where it
+// is, with the full blast it would have had on arrival. That blast is
+// applySplash's like any other, so it hurts the robots around it - including
+// the one that fired it, which is the reward for shooting it down close to
+// home - and it hurts the player too if they let it get that close.
+void shootDownMissile(const Level& level, CombatState& state, RobotState* robots, Body& ship,
+                      int index, float playerMass, const SolidDoors* doors, PropState* props,
+                      EventQueue* events) {
+    Projectile& missile = state.projectiles.items[static_cast<size_t>(index)];
+    if (!missile.alive) return;
+    // Without a splash of its own it would vanish with only the flash
+    // killProjectile gives a bolt, so it makes the noise itself.
+    if (missile.splashRadius <= 0.0f) {
+        emit(events, Cue::Explosion, missile.position, missile.segment);
+    }
+    killProjectile(level, state, robots, &ship, missile, missile.position, missile.segment,
+                   playerMass, doors, props, events);
+}
 } // namespace
 
 void initObjects(const Level& level, const RobotConfig& robots, ObjectHealth& out) {
@@ -337,6 +360,18 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
             body.segment = robot.body.segment;
             body.index = i;
             body.attachment = true;
+        }
+    }
+
+    // Shootable robot missiles, for the player's fire. A little fatter than
+    // they fly, because a missile coming at you head-on is a small thing to
+    // hit and shooting it down is meant to be an answer, not a trick shot.
+    if (params.owner < 0) {
+        for (int i = 0; i < kMaxProjectiles; ++i) {
+            const Projectile& missile = state.projectiles.items[static_cast<size_t>(i)];
+            if (!missile.alive || !missile.shootable || missile.owner < 0) continue;
+            consider(missile.position, missile.radius + kShootableMargin, missile.segment,
+                     CombatHit::Kind::Missile, i);
         }
     }
 
@@ -675,6 +710,10 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                     }
                     break;
                 }
+                case CombatHit::Kind::Missile:
+                    shootDownMissile(level, state, robots, ship, hit.index, cfg.playerMass, doors,
+                                     props, events);
+                    break;
                 case CombatHit::Kind::Player:
                 case CombatHit::Kind::None:
                     break;
@@ -780,11 +819,14 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             continue;
         }
 
-        // Where a homing missile is steering: a live robot first, else a
-        // destructible object. A target that has died is simply flown past.
+        // Where a homing missile is steering: the player, for a robot's; a
+        // live robot first, else a destructible object, for the player's. A
+        // target that has died is simply flown past.
         const glm::vec3* homingGoal = nullptr;
         if (p.kind == ProjectileKind::Homing) {
-            if (robots && p.targetRobot >= 0 && p.targetRobot < robots->count &&
+            if (p.targetPlayer) {
+                homingGoal = &ship.position;
+            } else if (robots && p.targetRobot >= 0 && p.targetRobot < robots->count &&
                 robots->robots[static_cast<size_t>(p.targetRobot)].alive) {
                 homingGoal = &robots->robots[static_cast<size_t>(p.targetRobot)].body.position;
             } else if (p.target >= 0 && state.objects.alive[static_cast<size_t>(p.target)]) {
@@ -913,6 +955,15 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                                cfg.playerMass, doors, props, events);
                 continue;
             }
+
+            case CombatHit::Kind::Missile:
+                // Both go off: the missile where it was, and the bolt that
+                // hit it at the point it did.
+                shootDownMissile(level, state, robots, ship, hit.index, cfg.playerMass, doors,
+                                 props, events);
+                killProjectile(level, state, robots, &ship, p, hit.point, p.segment,
+                               cfg.playerMass, doors, props, events);
+                continue;
 
             case CombatHit::Kind::None:
                 break;

@@ -101,6 +101,9 @@ void readSpecial(const nlohmann::json& j, SpecialAttackDef& sp) {
     get(j, "splashRadius", sp.splashRadius);
     get(j, "splashDamage", sp.splashDamage);
     get(j, "splashImpulse", sp.splashImpulse);
+    get(j, "homing", sp.homing);
+    get(j, "turnRate", sp.turnRate);
+    get(j, "shootable", sp.shootable);
 }
 
 nlohmann::json writeSpecial(const SpecialAttackDef& sp) {
@@ -131,6 +134,9 @@ nlohmann::json writeSpecial(const SpecialAttackDef& sp) {
         j["splashRadius"] = sp.splashRadius;
         j["splashDamage"] = sp.splashDamage;
         j["splashImpulse"] = sp.splashImpulse;
+        j["homing"] = sp.homing;
+        j["turnRate"] = sp.turnRate;
+        j["shootable"] = sp.shootable;
     }
     return j;
 }
@@ -281,6 +287,41 @@ RobotConfig RobotConfig::defaults() {
     railBrute.special.beamWidth = 0.3f;
     railBrute.special.beamTime = 0.35f;
     cfg.types.push_back(railBrute);
+
+    // The gunner with a missile pod on its right shoulder: after a three
+    // second wind-up, one homing missile. Slower than the ship's own missiles
+    // and turning well under what the ship can, so it can be outflown; and
+    // shootable, so it can be shot down - where its blast hurts the gunner
+    // that fired it as readily as anything else. The pod comes off to the
+    // railgun, like the brute's gun: one rule for the player to learn.
+    RobotDef missileGunner = gunner;
+    missileGunner.name = "gunner_missile";
+    missileGunner.attachment.model = "missile_pod";
+    missileGunner.attachment.mount = glm::vec3(1.3f, 2.05f, 0.0f);
+    missileGunner.attachment.breaksOn = WeaponRailgun;
+    missileGunner.special.enabled = true;
+    missileGunner.special.delivery = SpecialDelivery::Projectile;
+    missileGunner.special.muzzle = glm::vec3(0.0f, 0.0f, -1.4f);
+    missileGunner.special.windup = 3.0f;
+    missileGunner.special.cooldown = 5.0f;
+    missileGunner.special.damage = 18.0f;
+    missileGunner.special.impulse = 12.0f;
+    missileGunner.special.color = glm::vec3(1.0f, 0.45f, 0.2f);
+    missileGunner.special.orbSize = 0.6f;
+    missileGunner.special.lightRadius = 18.0f;
+    missileGunner.special.lightIntensity = 3.5f;
+    missileGunner.special.pulseStart = 0.45f;
+    missileGunner.special.pulseEnd = 0.15f;
+    missileGunner.special.projectileSpeed = 36.0f;
+    missileGunner.special.projectileRadius = 0.55f;
+    missileGunner.special.projectileLifetime = 7.0f;
+    missileGunner.special.splashRadius = 9.0f;
+    missileGunner.special.splashDamage = 14.0f;
+    missileGunner.special.splashImpulse = 22.0f;
+    missileGunner.special.homing = true;
+    missileGunner.special.turnRate = 1.4f;
+    missileGunner.special.shootable = true;
+    cfg.types.push_back(missileGunner);
 
     RobotDef reactor;
     reactor.name = "reactor";
@@ -680,7 +721,10 @@ void fireSpecial(const Level& level, const RobotDef& def, Robot& robot, int slot
             const int bolt = combat.projectiles.spawn();
             if (bolt < 0) return;
             Projectile& p = combat.projectiles.items[static_cast<size_t>(bolt)];
-            p.kind = ProjectileKind::Laser;
+            p.kind = sp.homing ? ProjectileKind::Homing : ProjectileKind::Laser;
+            p.turnRate = sp.turnRate;
+            p.targetPlayer = sp.homing;
+            p.shootable = sp.shootable;
             p.position = origin;
             p.velocity = dir * sp.projectileSpeed;
             p.color = sp.color;
@@ -695,7 +739,7 @@ void fireSpecial(const Level& level, const RobotDef& def, Robot& robot, int slot
             p.lightRadius = sp.lightRadius * 0.6f;
             p.lightIntensity = sp.lightIntensity * 0.5f;
             p.owner = slot;
-            emit(events, Cue::RobotFire, origin, segment);
+            emit(events, sp.homing ? Cue::HomingFire : Cue::RobotFire, origin, segment);
             return;
         }
         case SpecialDelivery::Hitscan:
@@ -740,6 +784,7 @@ void fireSpecial(const Level& level, const RobotDef& def, Robot& robot, int slot
             emit(events, Cue::WallImpact, end, hit.segment);
             break;
         case CombatHit::Kind::Robot:
+        case CombatHit::Kind::Missile:
         case CombatHit::Kind::None:
             break;
     }

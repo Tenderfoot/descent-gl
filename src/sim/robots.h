@@ -111,6 +111,14 @@ struct SpecialAttackDef {
     float splashRadius = 0.0f;
     float splashDamage = 0.0f;
     float splashImpulse = 0.0f;
+    // Steers after the player at up to `turnRate` rad/s for its whole life.
+    // Tuned below what the ship can out-turn, so a hard strafe or a tight
+    // corner makes it overshoot: flying is an answer as well as shooting.
+    bool homing = false;
+    float turnRate = 1.4f;
+    // The player's fire can hit it, and it goes off where it was hit - with
+    // its full blast, which hurts whatever is near it, robots included.
+    bool shootable = false;
 };
 
 // Per-type data, from assets/config/robots.json.
