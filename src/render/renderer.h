@@ -219,6 +219,16 @@ struct HudData {
     // beside it, rather than a number the player is expected to read off the
     // energy bar at the moment their guns stop answering.
     bool energyDepleted = false;
+
+    // Robot missiles homing on the ship. `incomingMissiles` counts every one
+    // in flight; the nearest is marked on screen, or pointed at from the edge
+    // when it is off screen or behind. `missileMarker` is false where there is
+    // no scene camera to project it through - the automap - which leaves the
+    // warning line on its own.
+    int incomingMissiles = 0;
+    glm::vec3 nearestMissile{0.0f};
+    float nearestMissileDistance = 0.0f;
+    bool missileMarker = false;
 };
 
 // The automap, gathered by the game layer for the same reason `HudData` is: the

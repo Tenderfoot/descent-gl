@@ -896,6 +896,72 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     hud_.rect(rx - thin * 0.5f, ry - gap - arm, thin, arm, reticle);
     hud_.rect(rx - thin * 0.5f, ry + gap, thin, arm, reticle);
 
+    // The nearest robot missile coming for the ship. On screen, a pulsing
+    // bracket around it with its distance, so the player can put the reticle
+    // on it; off screen or behind, an arrow at the edge of the screen in its
+    // direction, so they know which way to turn or to break. It pulses faster
+    // than the other warnings, because it is closing.
+    if (hud.missileMarker && hud.phase < 2) {
+        const float pulse = 0.6f + 0.4f * std::sin(hud.elapsed * 11.0f);
+        const glm::vec4 hot(1.0f, 0.45f, 0.2f, 0.95f * pulse);
+        const glm::vec4 clip = viewProj * glm::vec4(hud.nearestMissile, 1.0f);
+        const float margin = 18.0f * s;
+        bool onScreen = false;
+        float mx = 0.0f;
+        float my = 0.0f;
+        if (clip.w > 1e-3f) {
+            mx = (clip.x / clip.w * 0.5f + 0.5f) * w;
+            my = (0.5f - clip.y / clip.w * 0.5f) * h;
+            onScreen = mx >= margin && mx <= w - margin && my >= margin && my <= h - margin;
+        }
+        if (onScreen) {
+            const float half = 6.0f * s;
+            const float leg = 3.0f * s;
+            // Four corners, each an L of two rects.
+            for (int corner = 0; corner < 4; ++corner) {
+                const float sx = (corner & 1) ? 1.0f : -1.0f;
+                const float sy = (corner & 2) ? 1.0f : -1.0f;
+                const float x = mx + sx * half;
+                const float y = my + sy * half;
+                hud_.rect(sx > 0.0f ? x - leg : x, y - thin * 0.5f, leg, thin, hot);
+                hud_.rect(x - thin * 0.5f, sy > 0.0f ? y - leg : y, thin, leg, hot);
+            }
+            char label[16];
+            std::snprintf(label, sizeof(label), "%dm",
+                          static_cast<int>(hud.nearestMissileDistance + 0.5f));
+            hud_.text(label, mx - hud_.textWidth(label, s) * 0.5f, my + half + 2.0f * s, s, hot);
+        } else {
+            // Which way it is, from the centre of the screen. Behind the eye
+            // the projection mirrors, so the direction flips back round.
+            glm::vec2 dir(clip.x, -clip.y);
+            if (clip.w < 0.0f) dir = -dir;
+            if (glm::length(dir) < 1e-4f) dir = glm::vec2(0.0f, 1.0f);   // dead behind: down
+            dir = glm::normalize(dir);
+            // Out to the edge of a box inset by the margin, along that line.
+            const float reachX = std::abs(dir.x) > 1e-4f ? (cx - margin) / std::abs(dir.x) : 1e9f;
+            const float reachY = std::abs(dir.y) > 1e-4f ? (cy - margin) / std::abs(dir.y) : 1e9f;
+            const float reach = std::min(reachX, reachY);
+            const float ax = cx + dir.x * reach;
+            const float ay = cy + dir.y * reach;
+            // A stepped triangle pointing outward along whichever axis it is
+            // nearer to: the tip is the narrowest step, at the screen edge.
+            constexpr int kSteps = 5;
+            const float step = 1.6f * s;
+            const bool horizontal = std::abs(dir.x) >= std::abs(dir.y);
+            const float out = horizontal ? (dir.x > 0.0f ? 1.0f : -1.0f)
+                                         : (dir.y > 0.0f ? 1.0f : -1.0f);
+            for (int i = 0; i < kSteps; ++i) {
+                const float along = (static_cast<float>(i) - kSteps * 0.5f) * step * out;
+                const float span = step * 2.0f * static_cast<float>(kSteps - i);
+                if (horizontal) {
+                    hud_.rect(ax + along, ay - span * 0.5f, step, span, hot);
+                } else {
+                    hud_.rect(ax - span * 0.5f, ay + along, span, step, hot);
+                }
+            }
+        }
+    }
+
     // Shields and energy, bottom left.
     const float barW = 44.0f * s;
     const float barH = 4.0f * s;
@@ -1284,6 +1350,12 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         // swapping places as they come and go.
         if (hud.shipDisabled) {
             warn("field generator disabled", glm::vec4(1.0f, 0.35f, 0.3f, 1.0f));
+        }
+        // Above the energy line: running out of energy can wait, and a
+        // missile will not.
+        if (hud.incomingMissiles > 0) {
+            warn(hud.incomingMissiles > 1 ? "incoming missiles" : "incoming missile",
+                 glm::vec4(1.0f, 0.45f, 0.2f, 1.0f));
         }
         if (hud.energyDepleted) {
             warn("energy depleted", glm::vec4(1.0f, 0.8f, 0.3f, 1.0f));

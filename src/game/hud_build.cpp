@@ -11,7 +11,10 @@
 #include "sim/robots.h"
 #include "sim/weapons.h"
 
+#include <glm/geometric.hpp>
+
 #include <algorithm>
+#include <limits>
 
 namespace dvk {
 
@@ -102,6 +105,22 @@ gl::HudData buildHud(const HudBuildContext& ctx, HudScratch& scratch) {
     hud.shipDisabled = state.ship.disabled;
     hud.shipDisabledTime = state.game.elapsed;
     hud.energyDepleted = sim::playerEnergyDepleted(player);
+
+    // Every robot missile that is coming for the ship, and the nearest of
+    // them: that is the one the player has to deal with first, whether by
+    // shooting it or by getting out of its way.
+    float nearest = std::numeric_limits<float>::max();
+    for (const sim::Projectile& p : state.combat.projectiles.items) {
+        if (!p.alive || p.owner < 0 || !p.targetPlayer) continue;
+        ++hud.incomingMissiles;
+        const float d = glm::length(p.position - ctx.render.shipPos);
+        if (d < nearest) {
+            nearest = d;
+            hud.nearestMissile = p.position;
+        }
+    }
+    hud.nearestMissileDistance = hud.incomingMissiles > 0 ? nearest : 0.0f;
+    hud.missileMarker = hud.incomingMissiles > 0 && ctx.aimVisible;
 
     // Both the bar and the word come from `seen` rather than from the
     // illumination query, even though the latter is the better-behaved number.
