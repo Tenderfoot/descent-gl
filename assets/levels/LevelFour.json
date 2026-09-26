@@ -5269,7 +5269,7 @@
     {
       "segment": 97,
       "side": 4,
-      "key": "red"
+      "key": "purple"
     },
     {
       "segment": 43,
@@ -5365,7 +5365,7 @@
       "segment": 32
     },
     {
-      "kind": "key_red",
+      "kind": "key_purple",
       "position": [
         9.999999999999996,
         128.4880613909936,

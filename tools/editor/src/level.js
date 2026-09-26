@@ -10,8 +10,8 @@
 // in-game light editor's Save button is pressed.
 
 import {
-    BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES,
-    SIDE_COUNT, SIDE_NAMES, UV_MODES,
+    BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, LEGACY_KEY_NAMES,
+    LEGACY_PICKUP_NAMES, PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, UV_MODES,
 } from './format.js';
 import { rewireDoors, rewireGrates } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
@@ -118,7 +118,7 @@ export function parseLevel(json, path = '<memory>') {
             keyOrder: Object.keys(dj),
             segment: dj.segment,
             side: dj.side,
-            key: KEY_NAMES.indexOf(dj.key ?? 'none'),   // -1 is KeyColor::None
+            key: KEY_NAMES.indexOf(LEGACY_KEY_NAMES[dj.key] ?? dj.key ?? 'none'),   // -1 is KeyColor::None
             hatch: dj.hatch === true,                   // sealed until the reactor goes
             openDistance: dj.openDistance ?? DEFAULTS.doorOpenDistance,
             openTime: dj.openTime ?? DEFAULTS.doorOpenTime,
@@ -137,7 +137,7 @@ export function parseLevel(json, path = '<memory>') {
     }
 
     for (const pj of j.pickups ?? []) {
-        const kind = PICKUP_NAMES.indexOf(pj.kind);
+        const kind = PICKUP_NAMES.indexOf(LEGACY_PICKUP_NAMES[pj.kind] ?? pj.kind);
         if (kind < 0) throw new Error(`pickup has unknown kind '${pj.kind}'`);
         level.pickups.push({
             keyOrder: Object.keys(pj),

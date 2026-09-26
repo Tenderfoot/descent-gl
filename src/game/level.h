@@ -49,9 +49,15 @@ inline constexpr std::array<const char*, SideCount> kSideNames{"left",   "top", 
 
 // One face of a segment: either a wall to be drawn, or a portal into a
 // neighbour.
-enum class KeyColor : int { None = -1, Blue = 0, Yellow, Red, Count };
+enum class KeyColor : int { None = -1, Blue = 0, Yellow, Purple, Count };
 
-inline constexpr std::array<const char*, 3> kKeyNames{"blue", "yellow", "red"};
+inline constexpr std::array<const char*, 3> kKeyNames{"blue", "yellow", "purple"};
+
+// The purple key was red until red read as "stop" rather than "key". Levels and
+// scripts written before then still say red, so the loaders and Lua accept the
+// old names as aliases for purple; nothing writes them any more.
+inline constexpr const char* kLegacyPurpleKeyName = "red";
+inline constexpr const char* kLegacyPurplePickupName = "key_red";
 
 // How a side's texture is laid out when its UVs are not authored.
 //
@@ -299,19 +305,19 @@ std::array<glm::vec3, 4> doorSlabQuad(const Door& door, const DoorFrame& frame, 
 
 // The three keys are last on purpose, and anything new goes in front of them:
 // the automap, the render size and the loop test all ask "is this a key" as
-// `kind >= PickupKind::KeyBlue`, and a kind appended after KeyRed would quietly
+// `kind >= PickupKind::KeyBlue`, and a kind appended after KeyPurple would quietly
 // become a key to all three. Saved levels name their kind rather than number
 // it, so inserting here does not invalidate a level file.
 enum class PickupKind : int {
     Shield = 0, Energy, LaserUpgrade, Concussion, Homing, Flares,
     RailgunAmmo, LightningAmmo, VulcanAmmo,
-    KeyBlue, KeyYellow, KeyRed, Count,
+    KeyBlue, KeyYellow, KeyPurple, Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)> kPickupNames{
     "shield", "energy", "laser", "concussion", "homing", "flares",
     "railgun", "lightning", "vulcan",
-    "key_blue", "key_yellow", "key_red"};
+    "key_blue", "key_yellow", "key_purple"};
 
 struct Pickup {
     PickupKind kind = PickupKind::Shield;

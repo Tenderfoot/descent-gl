@@ -3957,7 +3957,7 @@
     {
       "segment": 63,
       "side": 3,
-      "key": "red"
+      "key": "purple"
     },
     {
       "segment": 52,
@@ -3978,7 +3978,7 @@
   ],
   "pickups": [
     {
-      "kind": "key_red",
+      "kind": "key_purple",
       "position": [
         209.3377075314691,
         17.561747821437297,
