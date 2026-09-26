@@ -123,9 +123,9 @@ void dressPickup(RenderState::PickupView& view, PickupKind kind, float pulse) {
             view.sprite = gl::SpriteKey;
             view.color = glm::vec3(1.0f, 0.9f, 0.3f);
             break;
-        case PickupKind::KeyRed:
+        case PickupKind::KeyPurple:
             view.sprite = gl::SpriteKey;
-            view.color = glm::vec3(1.0f, 0.35f, 0.3f);
+            view.color = glm::vec3(0.75f, 0.4f, 1.0f);
             break;
         case PickupKind::Count: break;
     }

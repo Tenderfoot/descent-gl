@@ -4367,7 +4367,7 @@
     {
       "segment": 60,
       "side": 5,
-      "key": "red"
+      "key": "purple"
     }
   ],
   "objects": [
@@ -4702,7 +4702,7 @@
       "segment": 34
     },
     {
-      "kind": "key_red",
+      "kind": "key_purple",
       "position": [
         -486.9798330792681,
         249.6160749450997,

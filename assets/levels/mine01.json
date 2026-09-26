@@ -1728,7 +1728,7 @@
     {
       "segment": 24,
       "side": 2,
-      "key": "red"
+      "key": "purple"
     }
   ],
   "lights": [
@@ -2316,7 +2316,7 @@
       "segment": 17
     },
     {
-      "kind": "key_red",
+      "kind": "key_purple",
       "position": [
         130.0,
         47.0,

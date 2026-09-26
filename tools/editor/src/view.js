@@ -30,7 +30,7 @@ function tileColor(tile) {
 }
 
 const PICKUP_COLOR = 0x6ad0e0;
-const KEY_COLORS = [0x4a7dff, 0xf2d43a, 0xe04a3a];
+const KEY_COLORS = [0x4a7dff, 0xf2d43a, 0xa04ae0];
 const OBJECT_COLOR = 0xc06a4a;
 const PORTAL_COLOR = 0x39d0a0;
 const DOOR_COLOR = 0xe0913a;

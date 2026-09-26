@@ -35,11 +35,16 @@ export const SIDE_VERTICES = [
 
 export const OPPOSITE_SIDE = [SIDE_RIGHT, SIDE_BOTTOM, SIDE_LEFT, SIDE_TOP, SIDE_FRONT, SIDE_BACK];
 
-export const KEY_NAMES = ['blue', 'yellow', 'red'];
+export const KEY_NAMES = ['blue', 'yellow', 'purple'];
+
+// The purple key was red. Older level files still say so, and load as purple;
+// saving writes the new name.
+export const LEGACY_KEY_NAMES = { red: 'purple' };
+export const LEGACY_PICKUP_NAMES = { key_red: 'key_purple' };
 
 export const PICKUP_NAMES = [
     'shield', 'energy', 'laser', 'concussion', 'homing', 'flares',
-    'key_blue', 'key_yellow', 'key_red',
+    'key_blue', 'key_yellow', 'key_purple',
 ];
 
 // The tile set in layer order, so a level file's `texture: 2` means the same

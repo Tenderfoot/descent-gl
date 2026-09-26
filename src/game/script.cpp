@@ -435,6 +435,9 @@ int ScriptHost::declarePickup(lua_State* state) {
         for (size_t k = 0; k < kPickupNames.size(); ++k) {
             if (std::strcmp(kind, kPickupNames[k]) == 0) matched = static_cast<int>(k);
         }
+        if (std::strcmp(kind, kLegacyPurplePickupName) == 0) {
+            matched = static_cast<int>(PickupKind::KeyPurple);
+        }
         if (matched < 0) return luaL_error(state, "unknown pickup kind '%s'", kind);
         hook.kind = matched;
 
@@ -586,6 +589,9 @@ int ScriptHost::queryRobotsAlive(lua_State* state) {
 
 int ScriptHost::queryHasKey(lua_State* state) {
     const char* color = luaL_checkstring(state, 1);
+    if (std::strcmp(color, kLegacyPurpleKeyName) == 0) {
+        color = kKeyNames[static_cast<size_t>(KeyColor::Purple)];
+    }
     const sim::GameState& game = self(state)->queryGame(state, "has_key");
     for (size_t i = 0; i < kKeyNames.size(); ++i) {
         if (std::strcmp(color, kKeyNames[i]) != 0) continue;

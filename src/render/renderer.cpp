@@ -595,7 +595,7 @@ KeyStyle keyStyle(KeyColor key) {
     switch (key) {
         case KeyColor::Blue:   return {{0.16f, 0.45f, 0.95f, 1.0f}, "BLUE KEY REQUIRED"};
         case KeyColor::Yellow: return {{0.95f, 0.80f, 0.12f, 1.0f}, "YELLOW KEY REQUIRED"};
-        case KeyColor::Red:    return {{0.90f, 0.16f, 0.14f, 1.0f}, "RED KEY REQUIRED"};
+        case KeyColor::Purple: return {{0.62f, 0.22f, 0.95f, 1.0f}, "PURPLE KEY REQUIRED"};
         default:               return {{0.6f, 0.6f, 0.6f, 1.0f}, ""};
     }
 }
@@ -1209,7 +1209,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     {
         const glm::vec4 colors[3] = {{0.35f, 0.55f, 1.0f, 1.0f},
                                      {1.0f, 0.9f, 0.3f, 1.0f},
-                                     {1.0f, 0.35f, 0.3f, 1.0f}};
+                                     {0.75f, 0.4f, 1.0f, 1.0f}};
         const float size = 6.0f * s;
         for (int k = 0; k < 3; ++k) {
             const float x = w - left - (3 - k) * (size + 3.0f * s);

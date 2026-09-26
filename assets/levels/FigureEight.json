@@ -825,7 +825,7 @@
   },
   "pickups": [
     {
-      "kind": "key_red",
+      "kind": "key_purple",
       "position": [
         2.667483228241469,
         95.39365890063259,
@@ -847,7 +847,7 @@
     {
       "segment": 0,
       "side": 5,
-      "key": "red"
+      "key": "purple"
     },
     {
       "segment": 0,

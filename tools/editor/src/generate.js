@@ -65,7 +65,7 @@ const PICKUP_SHIELD = 0;
 const PICKUP_ENERGY = 1;
 const PICKUP_CONCUSSION = 3;
 const PICKUP_FLARES = 5;
-const PICKUP_KEY = [6, 7, 8];   // blue, yellow, red - the order `KEY_NAMES` uses
+const PICKUP_KEY = [6, 7, 8];   // blue, yellow, purple - the order `KEY_NAMES` uses
 
 // Lattice directions, paired with the side each one leaves through.
 // src/game/level.h: left -x, top +y, right +x, bottom -y, back -z, front +z.

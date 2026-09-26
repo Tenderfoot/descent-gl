@@ -26,7 +26,7 @@ glm::vec3 keyColor(PickupKind kind) {
     switch (kind) {
         case PickupKind::KeyBlue: return glm::vec3(0.35f, 0.55f, 1.0f);
         case PickupKind::KeyYellow: return glm::vec3(1.0f, 0.9f, 0.3f);
-        case PickupKind::KeyRed: return glm::vec3(1.0f, 0.35f, 0.3f);
+        case PickupKind::KeyPurple: return glm::vec3(0.75f, 0.4f, 1.0f);
         default: break;
     }
     return glm::vec3(1.0f);

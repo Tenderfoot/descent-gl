@@ -111,7 +111,7 @@ pickup {
 }
 
 pickup {
-  kind = "key_red",
+  kind = "key_purple",
   on_pickup = function()
     comm("last_key_mine_1")
   end,

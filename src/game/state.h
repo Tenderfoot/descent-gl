@@ -123,7 +123,7 @@ struct RenderState {
     struct PickupView {
         glm::vec3 position{0.0f};
         // Multiplies the sprite where there is one, so the white key template
-        // comes out blue, yellow or red; the whole colour where there is not.
+        // comes out blue, yellow or purple; the whole colour where there is not.
         glm::vec3 color{1.0f};
         float size = 1.0f;
         // A layer of the pickup sprite array, or -1 for the procedural glow
@@ -138,7 +138,7 @@ struct RenderState {
     std::array<float, sim::kMaxDoors> doorOpenness{};
     int doorCount = 0;
 
-    // Blue, yellow, red: which keys the player is carrying. HudData carries the
+    // Blue, yellow, purple: which keys the player is carrying. HudData carries the
     // same three flags for the readout, but this is not a readout - the signage
     // on a locked door is part of the world, and the renderer has to know what
     // the door would do if the player flew at it.

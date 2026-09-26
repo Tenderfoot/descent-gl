@@ -104,7 +104,7 @@ void collectPickup(PickupKind kind, const glm::vec3& position, int segment, cons
     // gets its own, more emphatic noise.
     const bool isKey = kind == PickupKind::KeyBlue ||
                        kind == PickupKind::KeyYellow ||
-                       kind == PickupKind::KeyRed;
+                       kind == PickupKind::KeyPurple;
     emit(events, isKey ? Cue::KeyPickup : Cue::Pickup, position, segment);
     PlayerState& p = combat.player;
     switch (kind) {
@@ -142,7 +142,7 @@ void collectPickup(PickupKind kind, const glm::vec3& position, int segment, cons
         case PickupKind::KeyYellow:
             state.keys[1] = true;
             break;
-        case PickupKind::KeyRed:
+        case PickupKind::KeyPurple:
             state.keys[2] = true;
             break;
         case PickupKind::Count:

@@ -93,7 +93,7 @@ struct GameState {
 
     std::array<DoorState, kMaxDoors> doors{};
     std::array<bool, kMaxPickups> collected{};
-    std::array<bool, 3> keys{};     // blue, yellow, red
+    std::array<bool, 3> keys{};     // blue, yellow, purple
 
     // What the player has found, for the automap. Knowledge, not world state:
     // nothing here feeds back into the simulation, and a level plays out

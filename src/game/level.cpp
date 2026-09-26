@@ -535,6 +535,7 @@ Level loadLevel(const std::string& path) {
                 for (int k = 0; k < 3; ++k) {
                     if (key == kKeyNames[static_cast<size_t>(k)]) door.key = static_cast<KeyColor>(k);
                 }
+                if (key == kLegacyPurpleKeyName) door.key = KeyColor::Purple;
                 door.requiresReactor = dj.value("hatch", false);
                 door.openDistance = dj.value("openDistance", door.openDistance);
                 door.openTime = dj.value("openTime", door.openTime);
@@ -562,6 +563,7 @@ Level loadLevel(const std::string& path) {
                 for (size_t k = 0; k < kPickupNames.size(); ++k) {
                     if (kind == kPickupNames[k]) pickup.kind = static_cast<PickupKind>(k);
                 }
+                if (kind == kLegacyPurplePickupName) pickup.kind = PickupKind::KeyPurple;
                 pickup.position = readVec3(pj.at("position"));
                 pickup.segment = pj.value("segment", -1);
                 level.pickups.push_back(pickup);
