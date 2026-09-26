@@ -5260,6 +5260,16 @@
       "segment": 97,
       "side": 4,
       "key": "red"
+    },
+    {
+      "segment": 43,
+      "side": 1,
+      "key": "none"
+    },
+    {
+      "segment": 73,
+      "side": 3,
+      "key": "none"
     }
   ],
   "objects": [
