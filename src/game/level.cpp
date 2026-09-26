@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <glm/common.hpp>
 #include <glm/geometric.hpp>
 
 #include <algorithm>
@@ -62,6 +63,45 @@ std::array<glm::vec3, 4> Level::sideCorners(int segment, int side) const {
 
 namespace {
 
+// The world axes a UvMode::World surface facing `normal` samples its texture
+// along, scaled to the walls' density. The axis the surface faces most is
+// dropped and the other two are used as they are, with fixed directions and a
+// fixed order: every surface that projects along the same axis reads the same
+// coordinate, so any tile, symmetric or not, runs on unbroken across the seam
+// between them. Walls take v from world up, so a wall's texture stands the way
+// the image does. The price of the fixed directions is that of two walls facing
+// each other one sees the tile mirrored, which only shows on a texture with
+// writing on it - and that is the kind of texture this mode is not for.
+void worldUvAxes(const glm::vec3& normal, glm::vec3& uAxis, glm::vec3& vAxis) {
+    const glm::vec3 a = glm::abs(normal);
+    if (a.y >= a.x && a.y >= a.z) {
+        uAxis = glm::vec3(1.0f, 0.0f, 0.0f);   // floor or ceiling: x across, z along
+        vAxis = glm::vec3(0.0f, 0.0f, 1.0f);
+    } else if (a.x >= a.z) {
+        uAxis = glm::vec3(0.0f, 0.0f, 1.0f);   // facing along x
+        vAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+    } else {
+        uAxis = glm::vec3(1.0f, 0.0f, 0.0f);   // facing along z
+        vAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+    }
+    uAxis /= kWorldUnitsPerTile;
+    vAxis /= kWorldUnitsPerTile;
+}
+
+UvMode readUvMode(const nlohmann::json& j, UvMode fallback, const std::string& path,
+                  const std::string& where) {
+    const auto it = j.find("uvMode");
+    if (it == j.end()) return fallback;
+    const std::string mode = it->get<std::string>();
+    if (mode == "side") return UvMode::Side;
+    if (mode == "world") return UvMode::World;
+    log::fatal("{}: {} has uvMode '{}'; it is \"side\" or \"world\"", path, where, mode);
+}
+
+const char* uvModeName(UvMode mode) {
+    return mode == UvMode::World ? "world" : "side";
+}
+
 void splitSides(Level& level) {
     level.wallFirst.assign(level.segments.size(), 0);
     level.wallCount.assign(level.segments.size(), 0);
@@ -83,10 +123,27 @@ void splitSides(Level& level) {
             sd.altDiagonal = preferAltDiagonal(c);
             sd.center = (c[0] + c[1] + c[2] + c[3]) * 0.25f;
 
+            const int(*split)[3] = sd.altDiagonal ? kSplitB : kSplitA;
+
+            const glm::vec3 n0 = faceNormal(c[split[0][0]], c[split[0][1]], c[split[0][2]]);
+            const glm::vec3 n1 = faceNormal(c[split[1][0]], c[split[1][1]], c[split[1][2]]);
+            sd.normal = glm::normalize(n0 + n1);
+            sd.d = -glm::dot(sd.normal, sd.center);
+
             // Unauthored UVs get a planar mapping at a fixed world size per
             // tile, so texel density is the same on a corridor wall and on the
             // room's raised ceiling without anyone having to type coordinates.
-            if (sd.uv[1] == glm::vec2(0.0f) && sd.uv[2] == glm::vec2(0.0f)) {
+            const bool unauthored = sd.uv[1] == glm::vec2(0.0f) && sd.uv[2] == glm::vec2(0.0f);
+            if (unauthored && sd.uvMode == UvMode::World) {
+                // Linear in position, so the two triangles interpolate it
+                // exactly and the grid stays straight on a warped quad.
+                glm::vec3 uAxis;
+                glm::vec3 vAxis;
+                worldUvAxes(sd.normal, uAxis, vAxis);
+                for (size_t k = 0; k < 4; ++k) {
+                    sd.uv[k] = glm::vec2(glm::dot(uAxis, c[k]), glm::dot(vAxis, c[k]));
+                }
+            } else if (unauthored) {
                 const float u = glm::length(c[1] - c[0]) / kWorldUnitsPerTile;
                 const float v = glm::length(c[3] - c[0]) / kWorldUnitsPerTile;
                 const float u2 = glm::length(c[2] - c[3]) / kWorldUnitsPerTile;
@@ -97,13 +154,6 @@ void splitSides(Level& level) {
             for (int turn = 0; turn < sd.rotation; ++turn) {
                 for (glm::vec2& uv : sd.uv) uv = glm::vec2(uv.y, -uv.x);
             }
-
-            const int(*split)[3] = sd.altDiagonal ? kSplitB : kSplitA;
-
-            const glm::vec3 n0 = faceNormal(c[split[0][0]], c[split[0][1]], c[split[0][2]]);
-            const glm::vec3 n1 = faceNormal(c[split[1][0]], c[split[1][1]], c[split[1][2]]);
-            sd.normal = glm::normalize(n0 + n1);
-            sd.d = -glm::dot(sd.normal, sd.center);
 
             if (sd.isPortal()) continue;
 
@@ -408,6 +458,8 @@ Level loadLevel(const std::string& path) {
             level.scriptPath = resolved.string();
         }
 
+        level.uvMode = readUvMode(j, UvMode::Side, path, "the level");
+
         for (const auto& v : j.at("vertices")) level.vertices.push_back(readVec3(v));
 
         for (const auto& sj : j.at("segments")) {
@@ -438,6 +490,9 @@ Level loadLevel(const std::string& path) {
                 }
                 // Any whole number of quarter turns, so -1 means a turn back.
                 sd.rotation = ((sides[i].value("rotate", 0) % 4) + 4) % 4;
+                sd.uvMode = readUvMode(sides[i], level.uvMode, path,
+                                       std::format("segment {} side {}", level.segments.size(),
+                                                   kSideNames[i]));
                 if (auto it = sides[i].find("uv"); it != sides[i].end()) {
                     for (size_t k = 0; k < 4 && k < it->size(); ++k) {
                         sd.uv[k] = glm::vec2((*it)[k][0].get<float>(), (*it)[k][1].get<float>());
@@ -494,6 +549,8 @@ Level loadLevel(const std::string& path) {
                 grate.segment = gj.at("segment").get<int>();
                 grate.side = gj.at("side").get<int>();
                 grate.texture = gj.at("texture").get<int>();
+                grate.uvMode = readUvMode(gj, level.uvMode, path,
+                                          std::format("grate {}", level.grates.size()));
                 level.grates.push_back(grate);
             }
         }
@@ -687,10 +744,22 @@ Level loadLevel(const std::string& path) {
         across = glm::normalize(across);
         up -= across * glm::dot(up, across);
         up = glm::normalize(up);
-        const glm::vec3 uScaled = across / kWorldUnitsPerTile;
-        const glm::vec3 vScaled = up / kWorldUnitsPerTile;
-        grate.uAxis = glm::vec4(uScaled, -glm::dot(uScaled, c[0]));
-        grate.vAxis = glm::vec4(vScaled, -glm::dot(vScaled, c[0]));
+        if (grate.uvMode == UvMode::World) {
+            // The same projection a world-mapped wall gets, anchored at the
+            // world origin rather than at a corner, so the bars continue the
+            // grid of the walls around the portal. Still linear, so the shadow
+            // inverts it the same way.
+            glm::vec3 uWorld;
+            glm::vec3 vWorld;
+            worldUvAxes(n, uWorld, vWorld);
+            grate.uAxis = glm::vec4(uWorld, 0.0f);
+            grate.vAxis = glm::vec4(vWorld, 0.0f);
+        } else {
+            const glm::vec3 uScaled = across / kWorldUnitsPerTile;
+            const glm::vec3 vScaled = up / kWorldUnitsPerTile;
+            grate.uAxis = glm::vec4(uScaled, -glm::dot(uScaled, c[0]));
+            grate.vAxis = glm::vec4(vScaled, -glm::dot(vScaled, c[0]));
+        }
 
         for (size_t e = 0; e < 4; ++e) {
             const glm::vec3& a = c[e];
@@ -814,6 +883,10 @@ bool saveLevel(const std::string& path, const Level& level) {
         }
     }
 
+    // Omitted at the default, so a level that never asked for world mapping
+    // saves exactly as it did before there was a choice.
+    if (level.uvMode != UvMode::Side) j["uvMode"] = uvModeName(level.uvMode);
+
     for (const glm::vec3& v : level.vertices) j["vertices"].push_back({v.x, v.y, v.z});
 
     for (const Segment& seg : level.segments) {
@@ -830,6 +903,9 @@ bool saveLevel(const std::string& path, const Level& level) {
                 // exactly as it did before sides could emit at all.
                 if (sd.emissive > 0.0f) side["emissive"] = sd.emissive;
                 if (sd.rotation != 0) side["rotate"] = sd.rotation;
+                // Only where it differs from the level's, which is how it was
+                // most likely authored.
+                if (sd.uvMode != level.uvMode) side["uvMode"] = uvModeName(sd.uvMode);
             }
             sj["sides"].push_back(side);
         }
@@ -884,8 +960,10 @@ bool saveLevel(const std::string& path, const Level& level) {
         j["doors"].push_back(dj);
     }
     for (const Grate& grate : level.grates) {
-        j["grates"].push_back(
-            {{"segment", grate.segment}, {"side", grate.side}, {"texture", grate.texture}});
+        nlohmann::json gj = {
+            {"segment", grate.segment}, {"side", grate.side}, {"texture", grate.texture}};
+        if (grate.uvMode != level.uvMode) gj["uvMode"] = uvModeName(grate.uvMode);
+        j["grates"].push_back(gj);
     }
     for (const Pickup& pickup : level.pickups) {
         j["pickups"].push_back(

@@ -53,6 +53,20 @@ enum class KeyColor : int { None = -1, Blue = 0, Yellow, Red, Count };
 
 inline constexpr std::array<const char*, 3> kKeyNames{"blue", "yellow", "red"};
 
+// How a side's texture is laid out when its UVs are not authored.
+//
+// Side, the default, fits the tile to the side itself: anchored at corner 0,
+// running along the side's own edges. Each side is right on its own and
+// nothing lines up with its neighbours, which rock hides and a grid does not.
+//
+// World projects world position onto the plane of the two axes the side faces
+// least, so the texture is one grid laid through the whole mine: sides that
+// share a dominant axis continue each other exactly, and the lines stay
+// straight on a warped quad. The cost is stretch on a slope, up to about 1.4x
+// at 45 degrees, and a change of grid where neighbouring sides fall either
+// side of 45 degrees and pick different axes.
+enum class UvMode { Side, World };
+
 struct SideData {
     int neighbour = -1;  // >= 0 makes this a portal into that segment
     // >= 0 makes this portal a door: index into Level::doors. A door is a
@@ -83,6 +97,9 @@ struct SideData {
     // corners would lay a wall's tile count along its height and stretch every
     // side that is not square.
     int rotation = 0;
+    // Resolved at load: the side's "uvMode", or the level's when it has none.
+    // Ignored when `uv` is authored.
+    UvMode uvMode = UvMode::Side;
 
     // Chosen at load time, never authored: which diagonal splits the quad.
     // false = corners 0-2, true = corners 1-3. See splitSides().
@@ -213,6 +230,9 @@ struct Grate {
     int side = 0;
     int neighbour = 0;
     int texture = 0;     // layer in the wall texture array; its alpha is the cut-out
+    // The grate's "uvMode", or the level's. World lines the grate up with the
+    // world-mapped walls around it.
+    UvMode uvMode = UvMode::Side;
 
     // Cached from the side at load.
     std::array<glm::vec3, 4> corners{};
@@ -377,6 +397,8 @@ struct Level {
     // Resolved at load against the level file's directory. Empty means this
     // level has no script.
     std::string scriptPath;
+    // The level's "uvMode": what a side or grate without one of its own gets.
+    UvMode uvMode = UvMode::Side;
     std::vector<glm::vec3> vertices;
     std::vector<Segment> segments;
     std::vector<Light> lights;
