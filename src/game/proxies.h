@@ -4,6 +4,10 @@ namespace dvk {
 
 struct Level;
 
+namespace sim {
+struct RobotConfig;
+}
+
 // Resolves every level object's collision proxy from the model it names.
 //
 // This is the seam between the assets and the simulation, and it lives in the
@@ -23,5 +27,11 @@ struct Level;
 // model's bounds - but resolving them anyway keeps this function independent of
 // the robot config, which `loadLevel` does not have and should not need.
 void resolveObjectProxies(Level& level);
+
+// The same seam for what a robot carries rather than what a level places: sizes
+// each robot attachment's hitbox from its own model, so the box the player
+// shoots at is the thing they can see. Called once, straight after the robot
+// config is loaded - see AttachmentDef::volume.
+void resolveRobotAttachments(sim::RobotConfig& robots);
 
 } // namespace dvk

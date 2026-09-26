@@ -342,11 +342,34 @@ void Renderer::loadRobotMeshes(const sim::RobotConfig& robots) {
         type.mesh = &propMeshes_.at(def.model);
         type.occluder = &propOccluders_.at(def.model);
         type.textureLayer = wallTiles_.panel;
+        if (def.attachment.present()) {
+            const std::string modelPath = "assets/models/" + def.attachment.model + ".obj";
+            if (propModels_.find(def.attachment.model) == propModels_.end()) {
+                ModelData model = loadObj(modelPath);
+                OccluderMesh occluder =
+                    buildOccluder(model.positions, model.triangles, {}, modelPath);
+                propMeshes_.emplace(def.attachment.model, toMesh(model));
+                propOccluders_.emplace(def.attachment.model, std::move(occluder));
+                propModels_.emplace(def.attachment.model, std::move(model));
+            }
+            type.attachmentMesh = &propMeshes_.at(def.attachment.model);
+            type.attachmentOccluder = &propOccluders_.at(def.attachment.model);
+        }
         robotTypes_.push_back(type);
     }
 
     robotOccluders_.resize(sim::kMaxRobots);
     robotOccluderType_.assign(sim::kMaxRobots, -1);
+    attachmentOccluders_.resize(sim::kMaxRobots * 2);
+    attachmentOccluderType_.assign(sim::kMaxRobots * 2, -1);
+}
+
+// Every place that draws or shadows an attachment asks this rather than
+// indexing robotTypes_ itself, so a view with a bad type is skipped everywhere
+// alike.
+const Mesh* Renderer::attachmentMesh(int type) const {
+    if (type < 0 || type >= static_cast<int>(robotTypes_.size())) return nullptr;
+    return robotTypes_[static_cast<size_t>(type)].attachmentMesh;
 }
 
 bool Renderer::propAlive(const Prop& prop, const RenderState& rs) {
@@ -513,6 +536,21 @@ void Renderer::updateRobotOccluders(const RenderState& rs) {
             robotOccluderType_[slot] = view.type;
         } else {
             robotOccluders_[slot].setTransform(model);
+        }
+    }
+
+    for (int i = 0; i < rs.attachmentCount; ++i) {
+        const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+        const auto key = static_cast<size_t>(part.key);
+        if (key >= attachmentOccluders_.size() || !attachmentMesh(part.type)) continue;
+        const glm::mat4 model =
+            glm::translate(glm::mat4(1.0f), part.position) * glm::mat4_cast(part.orientation);
+        if (attachmentOccluderType_[key] != part.type) {
+            attachmentOccluders_[key].reset(
+                robotTypes_[static_cast<size_t>(part.type)].attachmentOccluder, model);
+            attachmentOccluderType_[key] = part.type;
+        } else {
+            attachmentOccluders_[key].setTransform(model);
         }
     }
 }
@@ -857,6 +895,72 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     hud_.rect(rx + gap, ry - thin * 0.5f, arm, thin, reticle);
     hud_.rect(rx - thin * 0.5f, ry - gap - arm, thin, arm, reticle);
     hud_.rect(rx - thin * 0.5f, ry + gap, thin, arm, reticle);
+
+    // The nearest robot missile coming for the ship. On screen, a pulsing
+    // bracket around it with its distance, so the player can put the reticle
+    // on it; off screen or behind, an arrow at the edge of the screen in its
+    // direction, so they know which way to turn or to break. It pulses faster
+    // than the other warnings, because it is closing.
+    if (hud.missileMarker && hud.phase < 2) {
+        const float pulse = 0.6f + 0.4f * std::sin(hud.elapsed * 11.0f);
+        const glm::vec4 hot(1.0f, 0.45f, 0.2f, 0.95f * pulse);
+        const glm::vec4 clip = viewProj * glm::vec4(hud.nearestMissile, 1.0f);
+        const float margin = 18.0f * s;
+        bool onScreen = false;
+        float mx = 0.0f;
+        float my = 0.0f;
+        if (clip.w > 1e-3f) {
+            mx = (clip.x / clip.w * 0.5f + 0.5f) * w;
+            my = (0.5f - clip.y / clip.w * 0.5f) * h;
+            onScreen = mx >= margin && mx <= w - margin && my >= margin && my <= h - margin;
+        }
+        if (onScreen) {
+            const float half = 6.0f * s;
+            const float leg = 3.0f * s;
+            // Four corners, each an L of two rects.
+            for (int corner = 0; corner < 4; ++corner) {
+                const float sx = (corner & 1) ? 1.0f : -1.0f;
+                const float sy = (corner & 2) ? 1.0f : -1.0f;
+                const float x = mx + sx * half;
+                const float y = my + sy * half;
+                hud_.rect(sx > 0.0f ? x - leg : x, y - thin * 0.5f, leg, thin, hot);
+                hud_.rect(x - thin * 0.5f, sy > 0.0f ? y - leg : y, thin, leg, hot);
+            }
+            char label[16];
+            std::snprintf(label, sizeof(label), "%dm",
+                          static_cast<int>(hud.nearestMissileDistance + 0.5f));
+            hud_.text(label, mx - hud_.textWidth(label, s) * 0.5f, my + half + 2.0f * s, s, hot);
+        } else {
+            // Which way it is, from the centre of the screen. Behind the eye
+            // the projection mirrors, so the direction flips back round.
+            glm::vec2 dir(clip.x, -clip.y);
+            if (clip.w < 0.0f) dir = -dir;
+            if (glm::length(dir) < 1e-4f) dir = glm::vec2(0.0f, 1.0f);   // dead behind: down
+            dir = glm::normalize(dir);
+            // Out to the edge of a box inset by the margin, along that line.
+            const float reachX = std::abs(dir.x) > 1e-4f ? (cx - margin) / std::abs(dir.x) : 1e9f;
+            const float reachY = std::abs(dir.y) > 1e-4f ? (cy - margin) / std::abs(dir.y) : 1e9f;
+            const float reach = std::min(reachX, reachY);
+            const float ax = cx + dir.x * reach;
+            const float ay = cy + dir.y * reach;
+            // A stepped triangle pointing outward along whichever axis it is
+            // nearer to: the tip is the narrowest step, at the screen edge.
+            constexpr int kSteps = 5;
+            const float step = 1.6f * s;
+            const bool horizontal = std::abs(dir.x) >= std::abs(dir.y);
+            const float out = horizontal ? (dir.x > 0.0f ? 1.0f : -1.0f)
+                                         : (dir.y > 0.0f ? 1.0f : -1.0f);
+            for (int i = 0; i < kSteps; ++i) {
+                const float along = (static_cast<float>(i) - kSteps * 0.5f) * step * out;
+                const float span = step * 2.0f * static_cast<float>(kSteps - i);
+                if (horizontal) {
+                    hud_.rect(ax + along, ay - span * 0.5f, step, span, hot);
+                } else {
+                    hud_.rect(ax - span * 0.5f, ay + along, span, step, hot);
+                }
+            }
+        }
+    }
 
     // Shields and energy, bottom left.
     const float barW = 44.0f * s;
@@ -1246,6 +1350,12 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         // swapping places as they come and go.
         if (hud.shipDisabled) {
             warn("field generator disabled", glm::vec4(1.0f, 0.35f, 0.3f, 1.0f));
+        }
+        // Above the energy line: running out of energy can wait, and a
+        // missile will not.
+        if (hud.incomingMissiles > 0) {
+            warn(hud.incomingMissiles > 1 ? "incoming missiles" : "incoming missile",
+                 glm::vec4(1.0f, 0.45f, 0.2f, 1.0f));
         }
         if (hud.energyDepleted) {
             warn("energy depleted", glm::vec4(1.0f, 0.8f, 0.3f, 1.0f));
@@ -1677,6 +1787,15 @@ void Renderer::buildBillboards(const RenderState& rs, const PortalWalk& walk) {
             for (const glm::vec3& eye : def.eyes) {
                 billboards_.add(robot.position + basis * eye, right, up, eyeSize, eyeColor);
             }
+
+            // A special attack's wind-up: an orb at the muzzle that grows from
+            // nothing to full size over the wind-up, so how long is left can be
+            // read off it from across a room.
+            if (robot.windup > 0.0f && def.special.windup > 0.0f) {
+                const float k = std::min(1.0f, robot.windup / def.special.windup);
+                billboards_.add(robot.muzzle, right, up, def.special.orbSize * k,
+                                def.special.color * (0.6f + 0.6f * k));
+            }
         }
     }
 
@@ -1837,6 +1956,20 @@ void Renderer::buildShadowVolumes(const RenderState& rs, const PortalWalk& walk)
                 ++stats_.shadowCasters;
             }
 
+            for (int i = 0; i < rs.attachmentCount; ++i) {
+                const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+                const auto key = static_cast<size_t>(part.key);
+                if (key >= attachmentOccluders_.size() || !attachmentOccluders_[key].mesh()) {
+                    continue;
+                }
+                if (part.segment >= 0 && !std::binary_search(light.segments.begin(),
+                                                             light.segments.end(), part.segment)) {
+                    continue;
+                }
+                volumes_.add(attachmentOccluders_[key], light.position);
+                ++stats_.shadowCasters;
+            }
+
             for (size_t si = 0; si < doorSlabs_.size(); ++si) {
                 const DoorSlab& slab = doorSlabs_[si];
                 if (slab.segmentA < 0) continue;
@@ -1933,6 +2066,15 @@ void Renderer::depthPrepass(const RenderState& rs, const PortalWalk& walk) {
         depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
                                             glm::mat4_cast(view.orientation));
         robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
+    }
+
+    for (int i = 0; i < rs.attachmentCount; ++i) {
+        const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+        const Mesh* mesh = attachmentMesh(part.type);
+        if (!mesh) continue;
+        depthShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), part.position) *
+                                            glm::mat4_cast(part.orientation));
+        mesh->draw();
     }
 
     for (const DoorSlab& slab : doorSlabs_) {
@@ -2140,6 +2282,27 @@ void Renderer::lightPasses(const RenderState& rs, const PortalWalk& walk) {
             wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), view.position) *
                                                 glm::mat4_cast(view.orientation));
             robotTypes_[static_cast<size_t>(view.type)].mesh->draw();
+        }
+
+        // Attachments, on and off their robots. The same panel tile and the
+        // same disabled tint as the robot they hang on, so an attachment still on
+        // reads as part of it.
+        for (int i = 0; i < rs.attachmentCount; ++i) {
+            const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+            const Mesh* mesh = attachmentMesh(part.type);
+            if (!mesh) continue;
+            if (part.segment >= 0 && !std::binary_search(light.segments.begin(),
+                                                         light.segments.end(), part.segment)) {
+                continue;
+            }
+            wallShader_->setInt("uLayerOverride",
+                                robotTypes_[static_cast<size_t>(part.type)].textureLayer);
+            wallShader_->setVec3("uAlbedoTint", part.disabledTime > 0.0f
+                                                    ? disabledTint(part.disabledTime)
+                                                    : glm::vec3(1.0f));
+            wallShader_->setMat4("uModel", glm::translate(glm::mat4(1.0f), part.position) *
+                                                glm::mat4_cast(part.orientation));
+            mesh->draw();
         }
         wallShader_->setVec3("uAlbedoTint", glm::vec3(1.0f));
 

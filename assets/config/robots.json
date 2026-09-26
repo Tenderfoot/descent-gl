@@ -97,6 +97,95 @@
       "turnRate": 2.0
     },
     {
+      "acceleration": 22.0,
+      "aggression": 0.550000011920929,
+      "attackRange": 75.0,
+      "burstCount": 4,
+      "burstPause": 1.600000023841858,
+      "color": [
+        0.5,
+        0.75,
+        0.949999988079071
+      ],
+      "dropEnergy": 0.0,
+      "dropNothing": 1.0,
+      "dropShield": 0.0,
+      "eyeColor": [
+        0.5,
+        0.8999999761581421,
+        1.0
+      ],
+      "eyeSize": 0.3400000035762787,
+      "energy": 100.0,
+      "eyes": [
+        [
+          -0.7649999856948853,
+          0.6150000095367432,
+          -1.440000057220459
+        ],
+        [
+          0.7649999856948853,
+          0.6150000095367432,
+          -1.440000057220459
+        ]
+      ],
+      "fireInterval": 0.2199999988079071,
+      "health": 48.0,
+      "isReactor": false,
+      "lead": 0.75,
+      "model": "gunner",
+      "name": "gunner_missile",
+      "projectileDamage": 8.0,
+      "projectileSpeed": 105.0,
+      "radius": 2.200000047683716,
+      "retreatThreshold": 0.30000001192092896,
+      "retreatTime": 1.600000023841858,
+      "speed": 13.0,
+      "spread": 0.04500000178813934,
+      "turnRate": 2.0,
+      "attachment": {
+        "breaksOn": "railgun",
+        "model": "missile_pod",
+        "mount": [
+          1.3,
+          2.05,
+          0.0
+        ]
+      },
+      "special": {
+        "color": [
+          1.0,
+          0.45,
+          0.2
+        ],
+        "cooldown": 5.0,
+        "damage": 18.0,
+        "delivery": "projectile",
+        "enabled": true,
+        "homing": true,
+        "impulse": 12.0,
+        "lightIntensity": 3.5,
+        "lightRadius": 18.0,
+        "muzzle": [
+          0.0,
+          0.0,
+          -1.4
+        ],
+        "orbSize": 0.6,
+        "projectileLifetime": 7.0,
+        "projectileRadius": 0.55,
+        "projectileSpeed": 36.0,
+        "pulseEnd": 0.15,
+        "pulseStart": 0.45,
+        "shootable": true,
+        "splashDamage": 14.0,
+        "splashImpulse": 22.0,
+        "splashRadius": 9.0,
+        "turnRate": 1.4,
+        "windup": 3.0
+      }
+    },
+    {
       "acceleration": 14.0,
       "aggression": 0.949999988079071,
       "attackRange": 55.0,
@@ -148,6 +237,94 @@
       "speed": 8.5,
       "spread": 0.09000000357627869,
       "turnRate": 1.2999999523162842
+    },
+    {
+      "acceleration": 14.0,
+      "aggression": 0.949999988079071,
+      "attackRange": 55.0,
+      "burstCount": 2,
+      "burstPause": 2.0,
+      "color": [
+        0.949999988079071,
+        0.699999988079071,
+        0.30000001192092896
+      ],
+      "dropEnergy": 0.0,
+      "dropNothing": 1.0,
+      "dropShield": 0.0,
+      "eyeColor": [
+        1.0,
+        0.75,
+        0.25
+      ],
+      "eyeSize": 0.46000000834465027,
+      "energy": 100.0,
+      "eyes": [
+        [
+          -0.9599999785423279,
+          1.815000057220459,
+          -1.8200000524520874
+        ],
+        [
+          0.9599999785423279,
+          1.815000057220459,
+          -1.8200000524520874
+        ],
+        [
+          0.0,
+          2.015000104904175,
+          -1.9900000095367432
+        ]
+      ],
+      "fireInterval": 0.5,
+      "health": 95.0,
+      "isReactor": false,
+      "lead": 0.550000011920929,
+      "model": "brute",
+      "name": "brute_railgun",
+      "projectileDamage": 14.0,
+      "projectileSpeed": 70.0,
+      "radius": 3.0999999046325684,
+      "retreatThreshold": 0.15000000596046448,
+      "retreatTime": 1.600000023841858,
+      "speed": 8.5,
+      "spread": 0.09000000357627869,
+      "turnRate": 1.2999999523162842,
+      "attachment": {
+        "breaksOn": "railgun",
+        "model": "railgun",
+        "mount": [
+          2.2,
+          2.0,
+          -1.1
+        ]
+      },
+      "special": {
+        "beamTime": 0.35,
+        "beamWidth": 0.3,
+        "color": [
+          0.55,
+          0.8,
+          1.0
+        ],
+        "cooldown": 4.0,
+        "damage": 32.0,
+        "delivery": "hitscan",
+        "enabled": true,
+        "impulse": 30.0,
+        "lightIntensity": 4.5,
+        "lightRadius": 24.0,
+        "muzzle": [
+          0.0,
+          0.0,
+          -2.75
+        ],
+        "orbSize": 0.9,
+        "pulseEnd": 0.12,
+        "pulseStart": 0.55,
+        "range": 400.0,
+        "windup": 5.0
+      }
     },
     {
       "acceleration": 0.0,

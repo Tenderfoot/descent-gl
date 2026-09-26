@@ -219,6 +219,16 @@ struct HudData {
     // beside it, rather than a number the player is expected to read off the
     // energy bar at the moment their guns stop answering.
     bool energyDepleted = false;
+
+    // Robot missiles homing on the ship. `incomingMissiles` counts every one
+    // in flight; the nearest is marked on screen, or pointed at from the edge
+    // when it is off screen or behind. `missileMarker` is false where there is
+    // no scene camera to project it through - the automap - which leaves the
+    // warning line on its own.
+    int incomingMissiles = 0;
+    glm::vec3 nearestMissile{0.0f};
+    float nearestMissileDistance = 0.0f;
+    bool missileMarker = false;
 };
 
 // The automap, gathered by the game layer for the same reason `HudData` is: the
@@ -416,6 +426,8 @@ private:
     void loadProps(const Level& level, const sim::RobotConfig& robots);
     void loadRobotMeshes(const sim::RobotConfig& robots);
     void updateRobotOccluders(const RenderState& rs);
+    // The attachment a robot type carries, or null for one with none.
+    const Mesh* attachmentMesh(int type) const;
     void gatherLights(const Level& level, const std::vector<Light>& dynamicLights,
                       const glm::vec3& eye, const PortalWalk& walk, int shadowBudget);
     void buildBillboards(const RenderState& rs, const PortalWalk& walk);
@@ -498,10 +510,18 @@ private:
         const Mesh* mesh = nullptr;
         const OccluderMesh* occluder = nullptr;
         int textureLayer = 0;
+        // The attachment, for a type that carries one; null otherwise.
+        const Mesh* attachmentMesh = nullptr;
+        const OccluderMesh* attachmentOccluder = nullptr;
     };
     std::vector<RobotType> robotTypes_;
     std::vector<Occluder> robotOccluders_;
     std::vector<int> robotOccluderType_;
+    // One per RenderState::AttachmentView key, rebuilt only when the
+    // attachment in it changes type - so one coming loose moves to its loose
+    // key once and costs one rebuild, not one a frame.
+    std::vector<Occluder> attachmentOccluders_;
+    std::vector<int> attachmentOccluderType_;
     const sim::RobotConfig* robotConfig_ = nullptr;
 
     // Every light being drawn this frame: the level's, then the headlight if

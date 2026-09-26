@@ -3,6 +3,8 @@
 #include "sim/body.h"
 #include "sim/occluders.h"
 #include "sim/events.h"
+#include "sim/proxy.h"
+#include "sim/weapons.h"
 
 #include <array>
 #include <glm/gtc/quaternion.hpp>
@@ -35,6 +37,89 @@ enum class RobotMode : uint8_t {
 
 inline constexpr std::array<const char*, static_cast<size_t>(RobotMode::Count)> kRobotModeNames{
     "idle", "alert", "chase", "attack", "retreat", "disabled"};
+
+// A second model hung on a robot: the brute's shoulder railgun, and whatever
+// comes after it. It is drawn, lit and shadowed as its own mesh, and it has a
+// hitbox of its own, so it can be aimed at. A direct hit from `breaksOn` knocks
+// it loose - it tumbles off and stays where it lands - and whatever special
+// attack it carried goes with it.
+struct AttachmentDef {
+    // Names a mesh in assets/models/. Empty means the type has no attachment.
+    std::string model;
+    // Where the model's origin sits, in the robot's model space.
+    glm::vec3 mount{0.0f};
+    // The hitbox, in the attachment's own space. resolveRobotAttachments sets
+    // it from the model's bounds when the config is loaded, so the box the
+    // player shoots at is the thing they can see.
+    ProxyVolume volume = sphereProxy(1.0f);
+    // The player weapon whose direct hit knocks it off. Only a direct hit:
+    // splash never does, and any other weapon hitting it hits the robot.
+    int breaksOn = WeaponRailgun;
+
+    bool present() const { return !model.empty(); }
+};
+
+// How a special attack's shot travels, once the wind-up is over.
+//
+//   Hitscan     one trace from the muzzle, like the player's railgun.
+//   Projectile  one bolt from the muzzle, swept through the mine like any
+//               other robot fire.
+enum class SpecialDelivery : uint8_t { Hitscan, Projectile };
+
+inline constexpr std::array<const char*, 2> kSpecialDeliveryNames{"hitscan", "projectile"};
+
+// A telegraphed attack, fired from a robot's attachment and lost with it.
+//
+// It runs alongside the robot's ordinary bursts. It starts only in Attack with
+// the player in sight, winds up for `windup` seconds - an orb at the muzzle and
+// a light there, both growing from nothing, and a pulse that repeats faster and
+// louder - and then always fires: at the player if the robot can see them, at
+// where it last saw them if not. There is no lead and no spread. The wind-up is
+// the warning, and the answers to it are to break the attachment off, to get
+// something solid in the way, or to take the hit.
+struct SpecialAttackDef {
+    bool enabled = false;
+    SpecialDelivery delivery = SpecialDelivery::Hitscan;
+    // Where the shot leaves, in the ATTACHMENT's model space.
+    glm::vec3 muzzle{0.0f};
+    float windup = 5.0f;
+    // After a shot, before the next wind-up may start.
+    float cooldown = 4.0f;
+    // What lands on the player. The impulse is a velocity change at mass 1,
+    // into the ship's knockback channel, so it is the knockback damping that
+    // bleeds it off.
+    float damage = 30.0f;
+    float impulse = 20.0f;
+    glm::vec3 color{1.0f};
+    // The orb and its light at the end of the wind-up.
+    float orbSize = 0.9f;
+    float lightRadius = 24.0f;
+    float lightIntensity = 4.5f;
+    // Seconds between wind-up pulses at the start and at the end of it.
+    float pulseStart = 0.55f;
+    float pulseEnd = 0.12f;
+
+    // Hitscan only: how far it reaches, and its tracer.
+    float range = 400.0f;
+    float beamWidth = 0.3f;
+    float beamTime = 0.35f;
+
+    // Projectile only.
+    float projectileSpeed = 60.0f;
+    float projectileRadius = 0.5f;
+    float projectileLifetime = 6.0f;
+    float splashRadius = 0.0f;
+    float splashDamage = 0.0f;
+    float splashImpulse = 0.0f;
+    // Steers after the player at up to `turnRate` rad/s for its whole life.
+    // Tuned below what the ship can out-turn, so a hard strafe or a tight
+    // corner makes it overshoot: flying is an answer as well as shooting.
+    bool homing = false;
+    float turnRate = 1.4f;
+    // The player's fire can hit it, and it goes off where it was hit - with
+    // its full blast, which hurts whatever is near it, robots included.
+    bool shootable = false;
+};
 
 // Per-type data, from assets/config/robots.json.
 //
@@ -100,6 +185,13 @@ struct RobotDef {
     // also gives it shadow casting, damage, death and debris for free - and
     // one code path that is exercised by every other robot in the level.
     bool isReactor = false;
+
+    // A separate model hung on the robot, and the special attack it carries.
+    // See AttachmentDef and SpecialAttackDef. A type with neither is an
+    // ordinary robot.
+    AttachmentDef attachment;
+    SpecialAttackDef special;
+
     float dropNothing = 0.35f;
     float dropEnergy = 0.35f;
     float dropShield = 0.30f;
@@ -165,6 +257,40 @@ struct Robot {
     // Whether the last damage it took came from the Static Charge. A robot the
     // Static Charge finishes always drops energy; see spawnDrop.
     bool lastHitByCharge = false;
+
+    // The attachment, for a type that has one. See AttachmentDef.
+    bool attachmentOn = false;
+    // Copied from the type at spawn, for the same reason `mass` is: the shot
+    // that breaks it off is judged by stepCombat, which has the RobotState
+    // but not the RobotConfig.
+    int attachmentBreaksOn = -1;
+    // The attachment model's origin in world space, and its hitbox, placed
+    // from the robot's own transform every step. Kept on the robot because
+    // the renderer draws it here and the combat trace hits it here, and
+    // neither has the robot config to work it out.
+    glm::vec3 attachmentOrigin{0.0f};
+    PlacedProxy attachmentProxy;
+
+    // The special attack. See SpecialAttackDef. A wind-up only ends by
+    // firing, or by the attachment or the robot being lost.
+    bool windingUp = false;
+    float windupTime = 0.0f;       // seconds into the current wind-up
+    float specialCooldown = 0.0f;
+    float pulseTimer = 0.0f;
+    // Where the shot will leave from, in world space; the orb and its light
+    // sit here too. Kept up to date for the same reason as attachmentOrigin.
+    glm::vec3 muzzle{0.0f};
+};
+
+// An attachment that has been shot off, or whose robot died under it. It
+// tumbles away and settles, and stays where it ends up: a wreck the player
+// made, not an effect.
+struct LooseAttachment {
+    bool alive = false;
+    int type = 0;            // the robot type it came off, for its model
+    Body body;               // at the attachment's own origin
+    glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 spin{0.0f};    // rad/s in its own frame, bled off as it settles
 };
 
 enum class DropKind : uint8_t { Energy, Shield };
@@ -196,6 +322,9 @@ struct RobotState {
     std::array<Robot, kMaxRobots> robots{};
     std::array<Drop, kMaxDrops> drops{};
     std::array<Debris, kMaxDebris> debris{};
+    // Indexed by robot slot: a robot has at most one attachment to lose, so
+    // the slot it came off is the one it lives in and nothing is allocated.
+    std::array<LooseAttachment, kMaxRobots> looseAttachments{};
     int count = 0;
 
     // Distance in portals from every segment to the player's. One breadth-first
@@ -242,5 +371,12 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 RobotState& state, CombatState& combat, Body& player, float dt,
                 const SolidDoors* doors = nullptr, EventQueue* events = nullptr,
                 const PropState* props = nullptr, const OccluderSet* occluders = nullptr);
+
+// Knocks a robot's attachment loose: it leaves the robot as a LooseAttachment
+// carrying the robot's motion plus `push`, and any wind-up it was holding goes
+// with it. Does nothing to a robot with no attachment on. Public because the
+// shot that does it is the player's, and that is stepCombat's.
+void knockAttachmentLoose(const Level& level, RobotState& state, int slot, const glm::vec3& push,
+                          const SolidDoors* doors = nullptr);
 
 } // namespace dvk::sim

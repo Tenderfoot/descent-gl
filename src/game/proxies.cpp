@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/level.h"
 #include "render/model_data.h"
+#include "sim/robots.h"
 
 #include <glm/vec3.hpp>
 
@@ -146,6 +147,28 @@ void resolveObjectProxies(Level& level) {
         if (cached == byType.end()) continue;
         level.objectProxies[i] = sim::placeProxy(cached->second.volume, object.position,
                                                  object.orientation, object.scale);
+    }
+}
+
+void resolveRobotAttachments(sim::RobotConfig& robots) {
+    for (sim::RobotDef& def : robots.types) {
+        if (!def.attachment.present()) continue;
+        const std::string path = "assets/models/" + def.attachment.model + ".obj";
+        const gl::ModelData model = gl::loadObj(path);
+        glm::vec3 lo(0.0f);
+        glm::vec3 hi(0.0f);
+        if (!gl::modelBounds(model, lo, hi)) {
+            log::warn("model '{}' has no vertices; '{}' keeps a unit attachment hitbox", path,
+                      def.name);
+            continue;
+        }
+        // A box and not the model's hull: an attachment is a small thing on
+        // a moving robot, likely not convex - the railgun is a receiver with
+        // a barrel out of its front - and the difference is not something a
+        // player can aim at.
+        def.attachment.volume = sim::boxProxy(lo, hi);
+        log::info("attachment hitbox for '{}': {:.1f} x {:.1f} x {:.1f}", def.name, hi.x - lo.x,
+                  hi.y - lo.y, hi.z - lo.z);
     }
 }
 

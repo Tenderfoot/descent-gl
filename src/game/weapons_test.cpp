@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "game/input_actions.h"
 #include "game/level.h"
+#include "game/proxies.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
 #include "sim/props.h"
@@ -96,6 +97,7 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
     rig.level = loadLevel(levelPath);
     rig.cfg = sim::loadWeaponConfig(weaponConfigPath);
     rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
+    resolveRobotAttachments(rig.robotCfg);
     bool ok = true;
 
     // --- every weapon fires, costs what it should, and respects its rate ----

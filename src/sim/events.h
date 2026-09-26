@@ -49,6 +49,12 @@ enum class Cue : uint8_t {
     ReactorDestroyed,
     CountdownWarn,      // one per second while the mine comes apart
     Exit,
+    // A robot's special attack winding up. One short pulse, re-emitted faster
+    // and louder as the wind-up fills, so it follows the robot and stops when
+    // the wind-up does. A hitscan special's shot is RailgunFire, a projectile
+    // special's is RobotFire, both placed at the muzzle.
+    SpecialWindup,
+    AttachmentBreak,    // a robot's attachment knocked off it
     Count,
 };
 
@@ -58,7 +64,7 @@ inline constexpr std::array<const char*, static_cast<size_t>(Cue::Count)> kCueNa
     "explosion",   "robot_hit",    "robot_fire",      "robot_alert",      "robot_death",
     "object_destroyed", "player_hurt", "player_death", "door_open",       "door_close",
     "door_locked", "pickup",       "key_pickup",      "reactor_destroyed", "countdown_warn",
-    "exit",
+    "exit",        "special_windup", "attachment_break",
 };
 
 // A sound that wants playing. `segment` is carried because the emitter knows it

@@ -39,6 +39,108 @@ void getVec3(const nlohmann::json& j, const char* key, glm::vec3& out) {
     }
 }
 
+nlohmann::json vec3Json(const glm::vec3& v) { return {v.x, v.y, v.z}; }
+
+// A player weapon by its weapons.json key, or `fallback` for a name that is not
+// one - with a warning, since a typo here makes an attachment unbreakable.
+int weaponByName(const std::string& name, int fallback) {
+    for (size_t i = 0; i < kWeaponNames.size(); ++i) {
+        if (name == kWeaponNames[i]) return static_cast<int>(i);
+    }
+    log::warn("robot config: '{}' is not a weapon; keeping '{}'", name,
+              kWeaponNames[static_cast<size_t>(fallback)]);
+    return fallback;
+}
+
+void readAttachment(const nlohmann::json& j, AttachmentDef& a) {
+    get(j, "model", a.model);
+    getVec3(j, "mount", a.mount);
+    if (auto it = j.find("breaksOn"); it != j.end() && it->is_string()) {
+        a.breaksOn = weaponByName(it->get<std::string>(), a.breaksOn);
+    }
+}
+
+nlohmann::json writeAttachment(const AttachmentDef& a) {
+    nlohmann::json j;
+    j["model"] = a.model;
+    j["mount"] = vec3Json(a.mount);
+    j["breaksOn"] = kWeaponNames[static_cast<size_t>(a.breaksOn)];
+    return j;
+}
+
+void readSpecial(const nlohmann::json& j, SpecialAttackDef& sp) {
+    get(j, "enabled", sp.enabled);
+    if (auto it = j.find("delivery"); it != j.end() && it->is_string()) {
+        const std::string name = it->get<std::string>();
+        bool known = false;
+        for (size_t i = 0; i < kSpecialDeliveryNames.size(); ++i) {
+            if (name == kSpecialDeliveryNames[i]) {
+                sp.delivery = static_cast<SpecialDelivery>(i);
+                known = true;
+            }
+        }
+        if (!known) log::warn("robot config: '{}' is not a special attack delivery", name);
+    }
+    getVec3(j, "muzzle", sp.muzzle);
+    get(j, "windup", sp.windup);
+    get(j, "cooldown", sp.cooldown);
+    get(j, "damage", sp.damage);
+    get(j, "impulse", sp.impulse);
+    getVec3(j, "color", sp.color);
+    get(j, "orbSize", sp.orbSize);
+    get(j, "lightRadius", sp.lightRadius);
+    get(j, "lightIntensity", sp.lightIntensity);
+    get(j, "pulseStart", sp.pulseStart);
+    get(j, "pulseEnd", sp.pulseEnd);
+    get(j, "range", sp.range);
+    get(j, "beamWidth", sp.beamWidth);
+    get(j, "beamTime", sp.beamTime);
+    get(j, "projectileSpeed", sp.projectileSpeed);
+    get(j, "projectileRadius", sp.projectileRadius);
+    get(j, "projectileLifetime", sp.projectileLifetime);
+    get(j, "splashRadius", sp.splashRadius);
+    get(j, "splashDamage", sp.splashDamage);
+    get(j, "splashImpulse", sp.splashImpulse);
+    get(j, "homing", sp.homing);
+    get(j, "turnRate", sp.turnRate);
+    get(j, "shootable", sp.shootable);
+}
+
+nlohmann::json writeSpecial(const SpecialAttackDef& sp) {
+    nlohmann::json j;
+    j["enabled"] = sp.enabled;
+    j["delivery"] = kSpecialDeliveryNames[static_cast<size_t>(sp.delivery)];
+    j["muzzle"] = vec3Json(sp.muzzle);
+    j["windup"] = sp.windup;
+    j["cooldown"] = sp.cooldown;
+    j["damage"] = sp.damage;
+    j["impulse"] = sp.impulse;
+    j["color"] = vec3Json(sp.color);
+    j["orbSize"] = sp.orbSize;
+    j["lightRadius"] = sp.lightRadius;
+    j["lightIntensity"] = sp.lightIntensity;
+    j["pulseStart"] = sp.pulseStart;
+    j["pulseEnd"] = sp.pulseEnd;
+    // Only the delivery's own numbers, for the same reason the whole block
+    // is only written for a type that has one.
+    if (sp.delivery == SpecialDelivery::Hitscan) {
+        j["range"] = sp.range;
+        j["beamWidth"] = sp.beamWidth;
+        j["beamTime"] = sp.beamTime;
+    } else {
+        j["projectileSpeed"] = sp.projectileSpeed;
+        j["projectileRadius"] = sp.projectileRadius;
+        j["projectileLifetime"] = sp.projectileLifetime;
+        j["splashRadius"] = sp.splashRadius;
+        j["splashDamage"] = sp.splashDamage;
+        j["splashImpulse"] = sp.splashImpulse;
+        j["homing"] = sp.homing;
+        j["turnRate"] = sp.turnRate;
+        j["shootable"] = sp.shootable;
+    }
+    return j;
+}
+
 void setMode(Robot& robot, RobotMode mode) {
     if (robot.mode == mode) return;
     robot.previousMode = robot.mode;
@@ -64,6 +166,15 @@ void steer(Robot& robot, const glm::vec3& desired, const RobotDef& def, float dt
     const float maxChange = def.acceleration * dt;
     const float length = glm::length(delta);
     robot.body.velocity += length > maxChange ? delta * (maxChange / length) : delta;
+}
+
+// Puts a robot's attachment where the robot now is: its origin, its muzzle
+// and its hitbox, all from the one transform the renderer also uses.
+void placeAttachment(Robot& robot, const RobotDef& def) {
+    robot.attachmentOrigin = robot.body.position + robot.orientation * def.attachment.mount;
+    robot.muzzle = robot.attachmentOrigin + robot.orientation * def.special.muzzle;
+    robot.attachmentProxy =
+        placeProxy(def.attachment.volume, robot.attachmentOrigin, robot.orientation, 1.0f);
 }
 
 } // namespace
@@ -150,6 +261,68 @@ RobotConfig RobotConfig::defaults() {
                   glm::vec3(0.0f, 2.015f, -1.99f)};
     cfg.types.push_back(brute);
 
+    // The same brute with a railgun over its right shoulder. A type of its own
+    // rather than a flag on a level object, so a level asks for one by name
+    // and the level format does not change. Its `model` is the plain brute:
+    // the gun is drawn as a separate mesh because it can come off.
+    RobotDef railBrute = brute;
+    railBrute.name = "brute_railgun";
+    railBrute.attachment.model = "railgun";
+    railBrute.attachment.mount = glm::vec3(2.2f, 2.0f, -1.1f);
+    railBrute.attachment.breaksOn = WeaponRailgun;
+    railBrute.special.enabled = true;
+    railBrute.special.delivery = SpecialDelivery::Hitscan;
+    railBrute.special.muzzle = glm::vec3(0.0f, 0.0f, -2.75f);
+    railBrute.special.windup = 5.0f;
+    railBrute.special.cooldown = 4.0f;
+    railBrute.special.damage = 32.0f;
+    railBrute.special.impulse = 30.0f;
+    railBrute.special.color = glm::vec3(0.55f, 0.8f, 1.0f);
+    railBrute.special.orbSize = 0.9f;
+    railBrute.special.lightRadius = 24.0f;
+    railBrute.special.lightIntensity = 4.5f;
+    railBrute.special.pulseStart = 0.55f;
+    railBrute.special.pulseEnd = 0.12f;
+    railBrute.special.range = 400.0f;
+    railBrute.special.beamWidth = 0.3f;
+    railBrute.special.beamTime = 0.35f;
+    cfg.types.push_back(railBrute);
+
+    // The gunner with a missile pod on its right shoulder: after a three
+    // second wind-up, one homing missile. Slower than the ship's own missiles
+    // and turning well under what the ship can, so it can be outflown; and
+    // shootable, so it can be shot down - where its blast hurts the gunner
+    // that fired it as readily as anything else. The pod comes off to the
+    // railgun, like the brute's gun: one rule for the player to learn.
+    RobotDef missileGunner = gunner;
+    missileGunner.name = "gunner_missile";
+    missileGunner.attachment.model = "missile_pod";
+    missileGunner.attachment.mount = glm::vec3(1.3f, 2.05f, 0.0f);
+    missileGunner.attachment.breaksOn = WeaponRailgun;
+    missileGunner.special.enabled = true;
+    missileGunner.special.delivery = SpecialDelivery::Projectile;
+    missileGunner.special.muzzle = glm::vec3(0.0f, 0.0f, -1.4f);
+    missileGunner.special.windup = 3.0f;
+    missileGunner.special.cooldown = 5.0f;
+    missileGunner.special.damage = 18.0f;
+    missileGunner.special.impulse = 12.0f;
+    missileGunner.special.color = glm::vec3(1.0f, 0.45f, 0.2f);
+    missileGunner.special.orbSize = 0.6f;
+    missileGunner.special.lightRadius = 18.0f;
+    missileGunner.special.lightIntensity = 3.5f;
+    missileGunner.special.pulseStart = 0.45f;
+    missileGunner.special.pulseEnd = 0.15f;
+    missileGunner.special.projectileSpeed = 36.0f;
+    missileGunner.special.projectileRadius = 0.55f;
+    missileGunner.special.projectileLifetime = 7.0f;
+    missileGunner.special.splashRadius = 9.0f;
+    missileGunner.special.splashDamage = 14.0f;
+    missileGunner.special.splashImpulse = 22.0f;
+    missileGunner.special.homing = true;
+    missileGunner.special.turnRate = 1.4f;
+    missileGunner.special.shootable = true;
+    cfg.types.push_back(missileGunner);
+
     RobotDef reactor;
     reactor.name = "reactor";
     reactor.model = "reactor";
@@ -235,6 +408,12 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "dropNothing", def.dropNothing);
             get(tj, "dropEnergy", def.dropEnergy);
             get(tj, "dropShield", def.dropShield);
+            if (auto a = tj.find("attachment"); a != tj.end() && a->is_object()) {
+                readAttachment(*a, def.attachment);
+            }
+            if (auto sp = tj.find("special"); sp != tj.end() && sp->is_object()) {
+                readSpecial(*sp, def.special);
+            }
             if (auto e = tj.find("eyes"); e != tj.end() && e->is_array()) {
                 def.eyes.clear();
                 for (const auto& ej : *e) {
@@ -283,6 +462,10 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["dropNothing"] = def.dropNothing;
         tj["dropEnergy"] = def.dropEnergy;
         tj["dropShield"] = def.dropShield;
+        // Only for a type that carries them, so the other types' entries do
+        // not fill up with the tuning of things they do not have.
+        if (def.attachment.present()) tj["attachment"] = writeAttachment(def.attachment);
+        if (def.special.enabled) tj["special"] = writeSpecial(def.special);
         for (const glm::vec3& e : def.eyes) tj["eyes"].push_back({e.x, e.y, e.z});
         j["types"].push_back(tj);
     }
@@ -295,6 +478,47 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
     out << j.dump(2) << '\n';
     log::info("robot config saved to '{}'", path);
     return true;
+}
+
+void knockAttachmentLoose(const Level& level, RobotState& state, int slot, const glm::vec3& push,
+                          const SolidDoors* doors) {
+    if (slot < 0 || slot >= state.count) return;
+    Robot& robot = state.robots[static_cast<size_t>(slot)];
+    if (!robot.attachmentOn) return;
+    robot.attachmentOn = false;
+    robot.windingUp = false;
+    robot.windupTime = 0.0f;
+
+    LooseAttachment& loose = state.looseAttachments[static_cast<size_t>(slot)];
+    loose = LooseAttachment{};
+    loose.alive = true;
+    loose.type = robot.type;
+    loose.body.radius = 0.9f;
+    loose.body.mass = 0.6f;
+    // An attachment can reach past the robot's collision sphere, so against a
+    // wall its origin can be in the rock. Walked out from the robot's centre
+    // instead, stopping short of anything in the way, so it starts inside the
+    // mine.
+    loose.body.position = robot.attachmentOrigin;
+    loose.body.segment = robot.body.segment;
+    const glm::vec3 out = robot.attachmentOrigin - robot.body.position;
+    const float reach = glm::length(out);
+    if (reach > 1e-4f) {
+        const RayHit blocked = raycast(level, robot.body.position, out / reach,
+                                       reach + loose.body.radius, robot.body.segment, doors);
+        const float clear = blocked.hit ? std::max(0.0f, blocked.distance - loose.body.radius)
+                                        : reach;
+        loose.body.position = robot.body.position + out * (std::min(clear, reach) / reach);
+        loose.body.segment = trackSegment(level, loose.body.position, robot.body.segment);
+    }
+    // Away from the robot as well as the way it was hit, so even a shot
+    // straight down its length throws it clear rather than into the hull.
+    const glm::vec3 away = reach > 1e-4f ? out / reach
+                                         : robot.orientation * glm::vec3(0.0f, 1.0f, 0.0f);
+    loose.body.velocity =
+        robot.body.motion() + away * 7.0f + push / loose.body.mass * 0.25f;
+    loose.orientation = robot.orientation;
+    loose.spin = glm::vec3(randSigned() * 2.5f, randSigned() * 1.5f, 3.0f + randUnit() * 3.0f);
 }
 
 bool objectIsRobot(const RobotConfig& cfg, const std::string& type) {
@@ -325,6 +549,9 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.energy = def.energy;
         robot.mass = def.mass;
         robot.homeSegment = obj.segment;
+        robot.attachmentOn = def.attachment.present();
+        robot.attachmentBreaksOn = def.attachment.breaksOn;
+        if (robot.attachmentOn) placeAttachment(robot, def);
     }
     log::info("{} robots spawned", out.count);
 }
@@ -441,6 +668,128 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
     }
 }
 
+// The end of a special attack's wind-up: one shot from the attachment's
+// muzzle, delivered however the type says.
+//
+// Not dodgeable by design - see SpecialAttackDef. It aims at where the player
+// IS when it can see them, with no lead and no spread; when it cannot, it puts
+// the shot where it last saw them, which is how a wind-up the player ducked out
+// of still lands on the corner they ducked behind.
+void fireSpecial(const Level& level, const RobotDef& def, Robot& robot, int slot,
+                 CombatState& combat, Body& player, const WeaponConfig& weapons, bool canSee,
+                 const SolidDoors* doors, EventQueue* events, const PropState* props,
+                 const RobotState& robots) {
+    const SpecialAttackDef& sp = def.special;
+    robot.windingUp = false;
+    robot.windupTime = 0.0f;
+    robot.specialCooldown = sp.cooldown;
+
+    const glm::vec3 facing = robot.orientation * glm::vec3(0.0f, 0.0f, -1.0f);
+    const glm::vec3 target = canSee               ? player.position
+                             : robot.hasLastKnown ? robot.lastKnown
+                                                  : robot.muzzle + facing * 100.0f;
+
+    // From the muzzle, unless the muzzle is in the rock: an attachment can
+    // reach past the robot's collision sphere, and a shot started inside a
+    // wall would either stop on it or walk the wrong segment. Then it leaves
+    // from the robot's centre instead, which the mine always contains.
+    glm::vec3 origin = robot.body.position;
+    int segment = robot.body.segment;
+    const glm::vec3 out = robot.muzzle - robot.body.position;
+    const float reach = glm::length(out);
+    if (reach > 1e-4f) {
+        const RayHit blocked =
+            raycast(level, robot.body.position, out / reach, reach, robot.body.segment, doors);
+        if (!blocked.hit) {
+            origin = robot.muzzle;
+            segment = trackSegment(level, origin, robot.body.segment);
+        }
+    }
+
+    glm::vec3 dir = target - origin;
+    const float length = glm::length(dir);
+    dir = length > 1e-4f ? dir / length : facing;
+
+    // The wind-up letting go, at the muzzle, as bright as it got.
+    spawnEffect(combat, origin, segment, sp.color, sp.orbSize * 3.0f, 0.2f,
+                sp.lightRadius * 1.3f, sp.lightIntensity * 1.5f);
+
+    switch (sp.delivery) {
+        case SpecialDelivery::Projectile: {
+            // Robot fire like any other bolt from here on: swept, lit, and
+            // landing through the same code as the ordinary bursts.
+            const int bolt = combat.projectiles.spawn();
+            if (bolt < 0) return;
+            Projectile& p = combat.projectiles.items[static_cast<size_t>(bolt)];
+            p.kind = sp.homing ? ProjectileKind::Homing : ProjectileKind::Laser;
+            p.turnRate = sp.turnRate;
+            p.targetPlayer = sp.homing;
+            p.shootable = sp.shootable;
+            p.position = origin;
+            p.velocity = dir * sp.projectileSpeed;
+            p.color = sp.color;
+            p.segment = segment;
+            p.radius = sp.projectileRadius;
+            p.damage = sp.damage;
+            p.impactImpulse = sp.impulse;
+            p.splashRadius = sp.splashRadius;
+            p.splashDamage = sp.splashDamage;
+            p.splashImpulse = sp.splashImpulse;
+            p.lifetime = sp.projectileLifetime;
+            p.lightRadius = sp.lightRadius * 0.6f;
+            p.lightIntensity = sp.lightIntensity * 0.5f;
+            p.owner = slot;
+            emit(events, sp.homing ? Cue::HomingFire : Cue::RobotFire, origin, segment);
+            return;
+        }
+        case SpecialDelivery::Hitscan:
+            break;
+    }
+
+    CombatTraceParams params;   // a ray: it has no width in flight
+    params.owner = slot;
+    const CombatHit hit = traceCombatRay(level, combat, player, &robots, origin, dir, sp.range,
+                                         segment, params, doors, props);
+    const glm::vec3 end = hit.kind == CombatHit::Kind::None ? origin + dir * sp.range : hit.point;
+
+    const int beamSlot = combat.beams.spawn();
+    if (beamSlot >= 0) {
+        Beam& beam = combat.beams.items[static_cast<size_t>(beamSlot)];
+        beam.start = origin;
+        beam.end = end;
+        beam.color = sp.color;
+        beam.segment = segment;
+        beam.width = sp.beamWidth;
+        beam.lifetime = sp.beamTime;
+    }
+    emit(events, Cue::RailgunFire, origin, segment);
+
+    switch (hit.kind) {
+        case CombatHit::Kind::Player:
+            combat.player.shields -= sp.damage;
+            combat.player.hurtTimer = kHurtFlashTime;
+            applyImpulse(player, dir, sp.impulse, weapons.playerMass);
+            spawnEffect(combat, hit.point, player.segment, sp.color, 2.2f, 0.25f, 14.0f, 3.5f);
+            emitLocal(events, Cue::PlayerHurt);
+            break;
+        case CombatHit::Kind::Object:
+            combat.objects.health[static_cast<size_t>(hit.index)] -= sp.damage;
+            spawnEffect(combat, hit.point, hit.segment, sp.color, 1.6f, 0.2f, 10.0f, 2.6f);
+            emit(events, Cue::WallImpact, hit.point, hit.segment);
+            break;
+        case CombatHit::Kind::Wall:
+        case CombatHit::Kind::Prop:
+            spawnEffect(combat, end - dir * 0.2f, hit.segment, sp.color, 1.3f, 0.18f,
+                        sp.lightRadius * 0.5f, sp.lightIntensity * 0.55f);
+            emit(events, Cue::WallImpact, end, hit.segment);
+            break;
+        case CombatHit::Kind::Robot:
+        case CombatHit::Kind::Missile:
+        case CombatHit::Kind::None:
+            break;
+    }
+}
+
 } // namespace
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
@@ -475,6 +824,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         robot.modeTime += dt;
         robot.fireCooldown = std::max(0.0f, robot.fireCooldown - dt);
         robot.burstTimer = std::max(0.0f, robot.burstTimer - dt);
+        robot.specialCooldown = std::max(0.0f, robot.specialCooldown - dt);
         robot.strafeTimer -= dt;
         if (robot.strafeTimer <= 0.0f) {
             robot.strafeTimer = 0.8f + randUnit() * 0.8f;
@@ -496,6 +846,10 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 setMode(robot, RobotMode::Disabled);
                 robot.awareness = 0.0f;
                 robot.burstLeft = 0;
+                // A disabled robot is harmless, and that includes the wind-up
+                // it was holding: it goes with the power.
+                robot.windingUp = false;
+                robot.windupTime = 0.0f;
                 // Folded in, not left to decay: with nothing flying the robot,
                 // a shove and a drift are the same thing, and the drift is
                 // meant to last.
@@ -512,8 +866,10 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                                glm::quat(0.0f, robot.tumble * 0.5f * dt) + robot.orientation);
             robot.body.position += robot.body.velocity * dt;
             resolveCollision(level, robot.body, collision, dt, nullptr, doors);
+            if (robot.attachmentOn) placeAttachment(robot, def);
 
             if (robot.health <= 0.0f) {
+                knockAttachmentLoose(level, state, ri, glm::vec3(0.0f), doors);
                 robot.alive = false;
                 emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
                 spawnDebris(state, robot, def);
@@ -758,8 +1114,41 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         // The same shut doors stop them too.
         resolveCollision(level, robot.body, collision, dt, nullptr, doors);
 
+        // --- attachment and special attack --------------------------------
+        //
+        // After the move, so the attachment and the muzzle are where they are
+        // drawn this step. A wind-up starts only in Attack with the player in
+        // sight; once started it runs whatever the robot does next, and it
+        // always ends in a shot. See SpecialAttackDef.
+        if (robot.attachmentOn) {
+            placeAttachment(robot, def);
+            const SpecialAttackDef& sp = def.special;
+            if (sp.enabled && !robot.windingUp && robot.specialCooldown <= 0.0f &&
+                robot.mode == RobotMode::Attack && canSee) {
+                robot.windingUp = true;
+                robot.windupTime = 0.0f;
+                robot.pulseTimer = 0.0f;
+            }
+            if (robot.windingUp) {
+                robot.windupTime += dt;
+                const float k = sp.windup > 0.0f ? std::min(1.0f, robot.windupTime / sp.windup)
+                                                 : 1.0f;
+                robot.pulseTimer -= dt;
+                if (robot.pulseTimer <= 0.0f) {
+                    robot.pulseTimer = sp.pulseStart + (sp.pulseEnd - sp.pulseStart) * k;
+                    emit(events, Cue::SpecialWindup, robot.muzzle, robot.body.segment,
+                         0.35f + 0.65f * k);
+                }
+                if (robot.windupTime >= sp.windup) {
+                    fireSpecial(level, def, robot, ri, combat, player, weapons, canSee, doors,
+                                events, props, state);
+                }
+            }
+        }
+
         // --- death -------------------------------------------------------
         if (robot.health <= 0.0f) {
+            knockAttachmentLoose(level, state, ri, glm::vec3(0.0f), doors);
             robot.alive = false;
             emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
             spawnDebris(state, robot, def);
@@ -792,6 +1181,22 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         resolveCollision(level, d.body, collision, dt, nullptr, doors);
         // Bleed speed so chunks settle rather than pinballing forever.
         d.body.velocity *= std::exp(-1.4f * dt);
+    }
+
+    // --- loose attachments ---------------------------------------------
+    //
+    // Like debris, but kept: it tumbles off, slows, and stays where it lands.
+    // The spin bleeds off with the speed, so it comes to rest rather than
+    // turning forever in place.
+    for (LooseAttachment& loose : state.looseAttachments) {
+        if (!loose.alive) continue;
+        loose.body.knockback *= std::exp(-kKnockbackDamping * dt);
+        loose.body.position += loose.body.motion() * dt;
+        resolveCollision(level, loose.body, collision, dt, nullptr, doors);
+        loose.body.velocity *= std::exp(-1.1f * dt);
+        loose.spin *= std::exp(-1.1f * dt);
+        loose.orientation = glm::normalize(
+            loose.orientation + loose.orientation * glm::quat(0.0f, loose.spin * 0.5f * dt));
     }
 }
 

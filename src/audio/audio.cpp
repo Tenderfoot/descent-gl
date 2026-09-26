@@ -63,6 +63,8 @@ constexpr std::array<CueDef, static_cast<size_t>(Cue::Count)> kCues{{
     {"reactor.wav", 1.00f, 0.00f},        // ReactorDestroyed
     {"countdown.wav", 0.10f, 0.00f},      // CountdownWarn
     {"exit.wav", 0.90f, 0.00f},           // Exit
+    {"special_windup.wav", 0.70f, 0.00f},   // SpecialWindup
+    {"attachment_break.wav", 1.00f, 0.04f}, // AttachmentBreak
 }};
 
 constexpr std::array<const char*, static_cast<size_t>(Ambient::Count)> kAmbientFiles{{
