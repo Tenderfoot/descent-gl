@@ -25,6 +25,11 @@ uint32_t g_spreadCounter = 0;
 // See the muzzle flash comment in fire(): short, but not one step.
 constexpr float kMuzzleFlashTime = 0.05f;
 
+// How far past a robot's hull a shot may meet its shoulder railgun and still
+// count as hitting the gun. The gun sits partly inside the hull's sphere, and
+// without this a shot aimed squarely at it lands on the robot instead.
+constexpr float kGunPreference = 1.5f;
+
 float nextUnit() {
     g_spreadCounter = g_spreadCounter * 1664525u + 1013904223u;
     return static_cast<float>((g_spreadCounter >> 8) & 0xFFFFFFu) / 16777215.0f;
@@ -246,6 +251,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         body.point = contact;
         body.segment = bodySegment;
         body.index = index;
+        body.gun = false;
     };
 
     // The same decision for a volume that is not a sphere. Kept beside
@@ -264,6 +270,7 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
         body.point = origin + direction * along;
         body.segment = bodySegment;
         body.index = index;
+        body.gun = false;
     };
 
     // The player, for robot fire. Checked first so that where a robot's bolt
@@ -279,6 +286,27 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
             if (!robot.alive) continue;
             consider(robot.body.position, robot.body.radius, robot.body.segment,
                      CombatHit::Kind::Robot, i);
+
+            // The shoulder railgun is a box of its own. Where it sits inside
+            // the hull's sphere a shot aimed at the gun meets the sphere
+            // first, so the gun wins anything within kGunPreference of the
+            // hull: the player hits what they can see they are aiming at.
+            if (!robot.gunAttached) continue;
+            const float along = rayProxyDistance(robot.gunProxy, origin, direction, params.radius);
+            if (along < 0.0f || along > maxDistance) continue;
+            const bool hullHere = haveBody && body.kind == CombatHit::Kind::Robot && body.index == i;
+            const bool wins = hullHere  ? along <= bestBody + kGunPreference
+                              : haveBody ? along < bestBody
+                                         : along <= bestBody;
+            if (!wins) continue;
+            bestBody = along;
+            haveBody = true;
+            body.kind = CombatHit::Kind::Robot;
+            body.distance = along;
+            body.point = origin + direction * along;
+            body.segment = robot.body.segment;
+            body.index = i;
+            body.gun = true;
         }
     }
 
@@ -569,6 +597,23 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             switch (hit.kind) {
                 case CombatHit::Kind::Robot: {
                     Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
+                    if (hit.gun && weaponId == WeaponRailgun) {
+                        // The one shot that takes a shoulder railgun off. It
+                        // spends itself on the gun: the hull under it is not
+                        // hurt, but the robot knows exactly who did it.
+                        knockGunLoose(level, *robots, hit.index, shotDir * def.impactImpulse, doors);
+                        player.lastTargetRobot = hit.index;
+                        player.targetHudTime = kTargetHudTime;
+                        robot.awareness = 1.0f;
+                        robot.lastKnown = ship.position;
+                        robot.hasLastKnown = true;
+                        if (audible) {
+                            spawnEffect(state, hit.point, hit.segment, color, 3.2f, 0.4f, 18.0f,
+                                        5.0f);
+                            emit(events, Cue::RailgunBreak, hit.point, hit.segment);
+                        }
+                        break;
+                    }
                     robot.health -= shot;
                     robot.lastHitByCharge = weaponId == WeaponLightning;
                     player.lastTargetRobot = hit.index;

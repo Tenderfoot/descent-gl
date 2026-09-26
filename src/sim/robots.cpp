@@ -66,6 +66,14 @@ void steer(Robot& robot, const glm::vec3& desired, const RobotDef& def, float dt
     robot.body.velocity += length > maxChange ? delta * (maxChange / length) : delta;
 }
 
+// Puts a robot's shoulder railgun where the robot now is: its origin, its
+// muzzle and its hitbox, all from the one transform the renderer also uses.
+void placeGun(Robot& robot, const RobotDef& def) {
+    robot.gunOrigin = robot.body.position + robot.orientation * def.railgunMount;
+    robot.muzzle = robot.gunOrigin + robot.orientation * def.railgunMuzzle;
+    robot.gunProxy = placeProxy(def.railgunVolume, robot.gunOrigin, robot.orientation, 1.0f);
+}
+
 } // namespace
 
 RobotConfig RobotConfig::defaults() {
@@ -149,6 +157,15 @@ RobotConfig RobotConfig::defaults() {
     brute.eyes = {glm::vec3(-0.96f, 1.815f, -1.82f), glm::vec3(0.96f, 1.815f, -1.82f),
                   glm::vec3(0.0f, 2.015f, -1.99f)};
     cfg.types.push_back(brute);
+
+    // The same brute with a railgun over its right shoulder. A type of its own
+    // rather than a flag on a level object, so a level asks for one by name
+    // and the level format does not change. Its `model` is the plain brute:
+    // the gun is drawn as a separate mesh because it can come off.
+    RobotDef railBrute = brute;
+    railBrute.name = "brute_railgun";
+    railBrute.railgun = true;
+    cfg.types.push_back(railBrute);
 
     RobotDef reactor;
     reactor.name = "reactor";
@@ -235,6 +252,21 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "dropNothing", def.dropNothing);
             get(tj, "dropEnergy", def.dropEnergy);
             get(tj, "dropShield", def.dropShield);
+            get(tj, "railgun", def.railgun);
+            get(tj, "railgunModel", def.railgunModel);
+            getVec3(tj, "railgunMount", def.railgunMount);
+            getVec3(tj, "railgunMuzzle", def.railgunMuzzle);
+            get(tj, "railgunChargeTime", def.railgunChargeTime);
+            get(tj, "railgunCooldown", def.railgunCooldown);
+            get(tj, "railgunDamage", def.railgunDamage);
+            get(tj, "railgunImpulse", def.railgunImpulse);
+            get(tj, "railgunRange", def.railgunRange);
+            getVec3(tj, "railgunColor", def.railgunColor);
+            get(tj, "railgunOrbSize", def.railgunOrbSize);
+            get(tj, "railgunLightRadius", def.railgunLightRadius);
+            get(tj, "railgunLightIntensity", def.railgunLightIntensity);
+            get(tj, "railgunPulseStart", def.railgunPulseStart);
+            get(tj, "railgunPulseEnd", def.railgunPulseEnd);
             if (auto e = tj.find("eyes"); e != tj.end() && e->is_array()) {
                 def.eyes.clear();
                 for (const auto& ej : *e) {
@@ -283,6 +315,25 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["dropNothing"] = def.dropNothing;
         tj["dropEnergy"] = def.dropEnergy;
         tj["dropShield"] = def.dropShield;
+        // Only for a type that carries one, so the other types' entries do
+        // not fill up with the tuning of a weapon they do not have.
+        if (def.railgun) {
+            tj["railgun"] = true;
+            tj["railgunModel"] = def.railgunModel;
+            tj["railgunMount"] = {def.railgunMount.x, def.railgunMount.y, def.railgunMount.z};
+            tj["railgunMuzzle"] = {def.railgunMuzzle.x, def.railgunMuzzle.y, def.railgunMuzzle.z};
+            tj["railgunChargeTime"] = def.railgunChargeTime;
+            tj["railgunCooldown"] = def.railgunCooldown;
+            tj["railgunDamage"] = def.railgunDamage;
+            tj["railgunImpulse"] = def.railgunImpulse;
+            tj["railgunRange"] = def.railgunRange;
+            tj["railgunColor"] = {def.railgunColor.r, def.railgunColor.g, def.railgunColor.b};
+            tj["railgunOrbSize"] = def.railgunOrbSize;
+            tj["railgunLightRadius"] = def.railgunLightRadius;
+            tj["railgunLightIntensity"] = def.railgunLightIntensity;
+            tj["railgunPulseStart"] = def.railgunPulseStart;
+            tj["railgunPulseEnd"] = def.railgunPulseEnd;
+        }
         for (const glm::vec3& e : def.eyes) tj["eyes"].push_back({e.x, e.y, e.z});
         j["types"].push_back(tj);
     }
@@ -295,6 +346,46 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
     out << j.dump(2) << '\n';
     log::info("robot config saved to '{}'", path);
     return true;
+}
+
+void knockGunLoose(const Level& level, RobotState& state, int slot, const glm::vec3& push,
+                   const SolidDoors* doors) {
+    if (slot < 0 || slot >= state.count) return;
+    Robot& robot = state.robots[static_cast<size_t>(slot)];
+    if (!robot.gunAttached) return;
+    robot.gunAttached = false;
+    robot.charging = false;
+    robot.chargeTime = 0.0f;
+
+    LooseGun& gun = state.looseGuns[static_cast<size_t>(slot)];
+    gun = LooseGun{};
+    gun.alive = true;
+    gun.type = robot.type;
+    gun.body.radius = 0.9f;
+    // The gun reaches past the robot's collision sphere, so against a wall its
+    // origin can be in the rock. Walked out from the robot's centre instead,
+    // stopping short of anything in the way, so it starts inside the mine.
+    gun.body.position = robot.gunOrigin;
+    gun.body.segment = robot.body.segment;
+    const glm::vec3 out = robot.gunOrigin - robot.body.position;
+    const float reach = glm::length(out);
+    if (reach > 1e-4f) {
+        const RayHit blocked = raycast(level, robot.body.position, out / reach,
+                                       reach + gun.body.radius, robot.body.segment, doors);
+        const float clear = blocked.hit ? std::max(0.0f, blocked.distance - gun.body.radius)
+                                        : reach;
+        gun.body.position = robot.body.position + out * (std::min(clear, reach) / reach);
+        gun.body.segment = trackSegment(level, gun.body.position, robot.body.segment);
+    }
+    gun.body.mass = 0.6f;
+    // Off the shoulder it hangs on - up and out to the robot's right - as
+    // well as the way it was hit, so even a shot straight down its barrel
+    // throws it clear of the robot rather than into it.
+    const glm::vec3 right = robot.orientation * glm::vec3(1.0f, 0.0f, 0.0f);
+    const glm::vec3 up = robot.orientation * glm::vec3(0.0f, 1.0f, 0.0f);
+    gun.body.velocity = robot.body.motion() + right * 6.0f + up * 4.0f + push / gun.body.mass * 0.25f;
+    gun.orientation = robot.orientation;
+    gun.spin = glm::vec3(randSigned() * 2.5f, randSigned() * 1.5f, 3.0f + randUnit() * 3.0f);
 }
 
 bool objectIsRobot(const RobotConfig& cfg, const std::string& type) {
@@ -325,6 +416,8 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.energy = def.energy;
         robot.mass = def.mass;
         robot.homeSegment = obj.segment;
+        robot.gunAttached = def.railgun;
+        if (robot.gunAttached) placeGun(robot, def);
     }
     log::info("{} robots spawned", out.count);
 }
@@ -441,6 +534,99 @@ void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {
     }
 }
 
+// The end of a shoulder railgun's charge: one hitscan shot, the robot's
+// equivalent of the player's railgun.
+//
+// Not dodgeable by design. The five seconds of charge are the warning, and the
+// answers are to shoot the gun off, to get something solid between it and you,
+// or to take the hit. So it aims at where the player IS when it can see them,
+// with no lead and no spread; when it cannot, it puts the shot where it last saw
+// them, which is how a charge the player ducked out of still lands on the
+// corner they ducked behind.
+void fireRailgun(const Level& level, const RobotDef& def, Robot& robot, int slot,
+                 CombatState& combat, Body& player, const WeaponConfig& weapons, bool canSee,
+                 const SolidDoors* doors, EventQueue* events, const PropState* props,
+                 const RobotState& robots) {
+    robot.charging = false;
+    robot.chargeTime = 0.0f;
+    robot.chargeCooldown = def.railgunCooldown;
+
+    const glm::vec3 facing = robot.orientation * glm::vec3(0.0f, 0.0f, -1.0f);
+    const glm::vec3 target = canSee               ? player.position
+                             : robot.hasLastKnown ? robot.lastKnown
+                                                  : robot.muzzle + facing * def.railgunRange;
+
+    // From the muzzle, unless the muzzle is in the rock: the gun reaches past
+    // the robot's collision sphere, and a shot started inside a wall would
+    // either stop on it or walk the wrong segment. Then it leaves from the
+    // robot's centre instead, which the mine always contains.
+    glm::vec3 origin = robot.body.position;
+    int segment = robot.body.segment;
+    const glm::vec3 out = robot.muzzle - robot.body.position;
+    const float reach = glm::length(out);
+    if (reach > 1e-4f) {
+        const RayHit blocked =
+            raycast(level, robot.body.position, out / reach, reach, robot.body.segment, doors);
+        if (!blocked.hit) {
+            origin = robot.muzzle;
+            segment = trackSegment(level, origin, robot.body.segment);
+        }
+    }
+
+    glm::vec3 dir = target - origin;
+    const float length = glm::length(dir);
+    dir = length > 1e-4f ? dir / length : facing;
+
+    CombatTraceParams params;   // a ray: it has no width in flight
+    params.owner = slot;
+    const CombatHit hit = traceCombatRay(level, combat, player, &robots, origin, dir,
+                                         def.railgunRange, segment, params, doors, props);
+    const glm::vec3 end =
+        hit.kind == CombatHit::Kind::None ? origin + dir * def.railgunRange : hit.point;
+
+    const int beamSlot = combat.beams.spawn();
+    if (beamSlot >= 0) {
+        Beam& beam = combat.beams.items[static_cast<size_t>(beamSlot)];
+        beam.start = origin;
+        beam.end = end;
+        beam.color = def.railgunColor;
+        beam.segment = segment;
+        // Heavier and longer-lived than the player's, so it reads as the thing
+        // the last five seconds were building to.
+        beam.width = 0.3f;
+        beam.lifetime = 0.35f;
+    }
+    // The charge letting go, at the muzzle, as bright as the charge was.
+    spawnEffect(combat, origin, segment, def.railgunColor, def.railgunOrbSize * 3.0f, 0.2f,
+                def.railgunLightRadius * 1.3f, def.railgunLightIntensity * 1.5f);
+    emit(events, Cue::RailgunFire, origin, segment);
+
+    switch (hit.kind) {
+        case CombatHit::Kind::Player:
+            combat.player.shields -= def.railgunDamage;
+            combat.player.hurtTimer = kHurtFlashTime;
+            applyImpulse(player, dir, def.railgunImpulse, weapons.playerMass);
+            spawnEffect(combat, hit.point, player.segment, def.railgunColor, 2.2f, 0.25f, 14.0f,
+                        3.5f);
+            emitLocal(events, Cue::PlayerHurt);
+            break;
+        case CombatHit::Kind::Object:
+            combat.objects.health[static_cast<size_t>(hit.index)] -= def.railgunDamage;
+            spawnEffect(combat, hit.point, hit.segment, def.railgunColor, 1.6f, 0.2f, 10.0f, 2.6f);
+            emit(events, Cue::WallImpact, hit.point, hit.segment);
+            break;
+        case CombatHit::Kind::Wall:
+        case CombatHit::Kind::Prop:
+            spawnEffect(combat, end - dir * 0.2f, hit.segment, def.railgunColor, 1.3f, 0.18f,
+                        def.railgunLightRadius * 0.5f, def.railgunLightIntensity * 0.55f);
+            emit(events, Cue::WallImpact, end, hit.segment);
+            break;
+        case CombatHit::Kind::Robot:
+        case CombatHit::Kind::None:
+            break;
+    }
+}
+
 } // namespace
 
 void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& weapons,
@@ -475,6 +661,7 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         robot.modeTime += dt;
         robot.fireCooldown = std::max(0.0f, robot.fireCooldown - dt);
         robot.burstTimer = std::max(0.0f, robot.burstTimer - dt);
+        robot.chargeCooldown = std::max(0.0f, robot.chargeCooldown - dt);
         robot.strafeTimer -= dt;
         if (robot.strafeTimer <= 0.0f) {
             robot.strafeTimer = 0.8f + randUnit() * 0.8f;
@@ -496,6 +683,10 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 setMode(robot, RobotMode::Disabled);
                 robot.awareness = 0.0f;
                 robot.burstLeft = 0;
+                // A disabled robot is harmless, and that includes the charge
+                // it was holding: it goes with the power.
+                robot.charging = false;
+                robot.chargeTime = 0.0f;
                 // Folded in, not left to decay: with nothing flying the robot,
                 // a shove and a drift are the same thing, and the drift is
                 // meant to last.
@@ -512,8 +703,10 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                                glm::quat(0.0f, robot.tumble * 0.5f * dt) + robot.orientation);
             robot.body.position += robot.body.velocity * dt;
             resolveCollision(level, robot.body, collision, dt, nullptr, doors);
+            if (robot.gunAttached) placeGun(robot, def);
 
             if (robot.health <= 0.0f) {
+                knockGunLoose(level, state, ri, glm::vec3(0.0f), doors);
                 robot.alive = false;
                 emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
                 spawnDebris(state, robot, def);
@@ -758,8 +951,42 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         // The same shut doors stop them too.
         resolveCollision(level, robot.body, collision, dt, nullptr, doors);
 
+        // --- shoulder railgun --------------------------------------------
+        //
+        // After the move, so the muzzle the shot leaves from is where the gun
+        // is drawn this step. A charge starts only in Attack with the player
+        // in sight; once started it runs whatever the robot does next, and it
+        // always ends in a shot.
+        if (robot.gunAttached) {
+            placeGun(robot, def);
+            if (!robot.charging && robot.chargeCooldown <= 0.0f && robot.mode == RobotMode::Attack &&
+                canSee) {
+                robot.charging = true;
+                robot.chargeTime = 0.0f;
+                robot.chargePulseTimer = 0.0f;
+            }
+            if (robot.charging) {
+                robot.chargeTime += dt;
+                const float k = def.railgunChargeTime > 0.0f
+                                    ? std::min(1.0f, robot.chargeTime / def.railgunChargeTime)
+                                    : 1.0f;
+                robot.chargePulseTimer -= dt;
+                if (robot.chargePulseTimer <= 0.0f) {
+                    robot.chargePulseTimer =
+                        def.railgunPulseStart + (def.railgunPulseEnd - def.railgunPulseStart) * k;
+                    emit(events, Cue::RailgunCharge, robot.muzzle, robot.body.segment,
+                         0.35f + 0.65f * k);
+                }
+                if (robot.chargeTime >= def.railgunChargeTime) {
+                    fireRailgun(level, def, robot, ri, combat, player, weapons, canSee, doors,
+                                events, props, state);
+                }
+            }
+        }
+
         // --- death -------------------------------------------------------
         if (robot.health <= 0.0f) {
+            knockGunLoose(level, state, ri, glm::vec3(0.0f), doors);
             robot.alive = false;
             emit(events, Cue::RobotDeath, robot.body.position, robot.body.segment);
             spawnDebris(state, robot, def);
@@ -792,6 +1019,22 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         resolveCollision(level, d.body, collision, dt, nullptr, doors);
         // Bleed speed so chunks settle rather than pinballing forever.
         d.body.velocity *= std::exp(-1.4f * dt);
+    }
+
+    // --- loose shoulder railguns -----------------------------------------
+    //
+    // Like debris, but kept: it tumbles off, slows, and stays where it lands.
+    // The spin bleeds off with the speed, so it comes to rest rather than
+    // turning forever in place.
+    for (LooseGun& gun : state.looseGuns) {
+        if (!gun.alive) continue;
+        gun.body.knockback *= std::exp(-kKnockbackDamping * dt);
+        gun.body.position += gun.body.motion() * dt;
+        resolveCollision(level, gun.body, collision, dt, nullptr, doors);
+        gun.body.velocity *= std::exp(-1.1f * dt);
+        gun.spin *= std::exp(-1.1f * dt);
+        gun.orientation = glm::normalize(
+            gun.orientation + gun.orientation * glm::quat(0.0f, gun.spin * 0.5f * dt));
     }
 }
 

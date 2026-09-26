@@ -5,6 +5,7 @@
 #include "game/level.h"
 #include "game/level_list.h"
 #include "game/menu.h"
+#include "game/proxies.h"
 #include "game/session.h"
 #include "sim/collision.h"
 #include "sim/combat.h"
@@ -522,6 +523,7 @@ int runLoopTest(const char* levelPath, const char* weaponConfigPath, const char*
     rig.level = loadLevel(levelPath);
     rig.weapons = sim::loadWeaponConfig(weaponConfigPath);
     rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
+    resolveRobotAttachments(rig.robotCfg);
     bool ok = true;
     ok &= verifyLevelSession(rig.level, rig.robotCfg);
     ok &= verifyPlayerMenu();

@@ -225,6 +225,43 @@ def railgun(rng):
     return normalise(out)
 
 
+def railgun_charge(rng):
+    # One pulse of a shoulder railgun building up. The robot re-emits this
+    # faster and louder as the charge fills - from about twice a second to
+    # eight times - so it is short, rises within itself, and has a soft tail
+    # that stacks into a climbing whine instead of a stutter.
+    whine = sweep(0.22, 520, 1250, shape="tri")
+    for i, sample in enumerate(whine):
+        whine[i] = sample * (0.7 + 0.3 * math.sin(2.0 * math.pi * 61.0 * i / RATE))
+    hum = sweep(0.22, 110, 160, shape="square")
+    fizz = highpass(noise(0.22, rng), 3500)
+    out = mix(gain(env(whine, attack=0.03, release=0.10), 0.60),
+              gain(env(lowpass(hum, 900), attack=0.02, release=0.10), 0.30),
+              gain(env(fizz, attack=0.05, release=0.08), 0.10))
+    return normalise(out, 0.80)
+
+
+def railgun_break(rng):
+    # A shoulder railgun torn off its mount: a hard snap, a bright clang with
+    # no pitch the other metal sounds share, the charge bank shorting out in a
+    # falling fizz, and something heavy tumbling away underneath. Long enough
+    # to be heard over the fight it happens in.
+    snap = decay_env(highpass(noise(0.95, rng), 2200), 0.008)
+    clang = mix(
+        decay_env(tone(0.95, 587, shape="tri"), 0.16),
+        decay_env(tone(0.95, 1391, shape="sin"), 0.10),
+        decay_env(tone(0.95, 2263, shape="sin"), 0.06),
+    )
+    short = highpass(noise(0.95, rng), 1200)
+    for i, sample in enumerate(short):
+        short[i] = sample * (0.5 + 0.5 * math.sin(2.0 * math.pi * 33.0 * i / RATE))
+    zap = decay_env(sweep(0.95, 1900, 140, shape="saw"), 0.22)
+    thud = decay_env(sweep(0.95, 130, 45), 0.12)
+    out = mix(gain(snap, 0.80), gain(clang, 0.55), gain(decay_env(short, 0.25), 0.30),
+              gain(zap, 0.28), gain(thud, 0.60))
+    return normalise(out)
+
+
 def lightning(rng):
     # One burst of arc. Short and soft-edged on purpose: the gun re-triggers
     # this every fireInterval for as long as the trigger is held, so anything
@@ -419,6 +456,8 @@ SOUNDS = {
     "reactor.wav": reactor,
     "countdown.wav": countdown,
     "railgun.wav": railgun,
+    "railgun_charge.wav": railgun_charge,
+    "railgun_break.wav": railgun_break,
     "lightning.wav": lightning,
     "exit.wav": exit_sound,
     "engine.wav": engine,

@@ -23,6 +23,7 @@ class Audio;
 namespace sim {
 struct EventQueue;
 struct FlightConfig;
+struct RobotConfig;
 struct WeaponConfig;
 }
 
@@ -52,6 +53,7 @@ struct FramePrepareContext {
     Level& level;
     const sim::FlightConfig& flight;
     const sim::WeaponConfig& weapons;
+    const sim::RobotConfig& robots;
     LightFlood& flood;
     int& lightDoorSignature;
     std::vector<Light>& dynamicLights;

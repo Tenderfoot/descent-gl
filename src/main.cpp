@@ -22,6 +22,7 @@
 #include "game/light_test.h"
 #include "game/loop_test.h"
 #include "game/progress.h"
+#include "game/proxies.h"
 #include "game/resize_test.h"
 #include "game/robots_test.h"
 #include "game/comm_player.h"
@@ -206,7 +207,11 @@ int main(int argc, char** argv) {
     // mine, and the light editor writes back to whichever one is loaded.
     std::string levelFile = levelPath;
     dvk::Level level = dvk::loadLevel(levelFile);
-    const dvk::sim::RobotConfig robotConfig = dvk::sim::loadRobotConfig(kRobotConfigPath);
+    const dvk::sim::RobotConfig robotConfig = [] {
+        dvk::sim::RobotConfig cfg = dvk::sim::loadRobotConfig(kRobotConfigPath);
+        dvk::resolveRobotAttachments(cfg);
+        return cfg;
+    }();
     dvk::gl::Renderer renderer(level, robotConfig);
 
     dvk::Clock clock;
@@ -738,7 +743,8 @@ int main(int argc, char** argv) {
         const auto alpha = static_cast<float>(accumulator / kSimStep);
         dvk::FramePrepareContext frameContext{
             prev, cur, alpha, camera, shell.settings(), clock.seconds(), elapsed, audio,
-            soundEvents, level, flight, weapons, flood, lightDoorSignature, dynamicLights,
+            soundEvents, level, flight, weapons, robotConfig, flood, lightDoorSignature,
+            dynamicLights,
             solidDoors, occluders, playerLight, playerSeen, aimDistance, chaseCamera};
         dvk::PreparedFrame prepared = dvk::prepareRenderFrame(frameContext);
         dvk::RenderState& rs = prepared.renderState;

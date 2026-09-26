@@ -2,6 +2,7 @@
 
 #include "core/log.h"
 #include "game/level.h"
+#include "game/proxies.h"
 #include "sim/collision.h"
 #include "sim/occluders.h"
 #include "sim/lighting.h"
@@ -142,6 +143,7 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
     rig.level = loadLevel(levelPath);
     rig.weapons = sim::loadWeaponConfig(weaponConfigPath);
     rig.robotCfg = sim::loadRobotConfig(robotConfigPath);
+    resolveRobotAttachments(rig.robotCfg);
     bool ok = true;
 
     ok &= expect(rig.robotCfg.types.size() >= 3, "three robot types are defined");

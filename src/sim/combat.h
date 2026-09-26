@@ -326,6 +326,10 @@ struct CombatHit {
     // to everything that reads this - but which door it was is the one thing
     // the flow needs in order to let the shot open it.
     int door = -1;
+    // A Kind::Robot hit that landed on the robot's shoulder railgun rather
+    // than its hull. Every other reader treats it as a hit on the robot; the
+    // player's railgun is the one shot that knocks the gun loose.
+    bool gun = false;
 };
 
 struct CombatTraceParams {
