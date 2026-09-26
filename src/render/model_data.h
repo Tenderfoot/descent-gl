@@ -58,6 +58,16 @@ ModelData loadObj(const std::string& path);
 // on one face and was clean on the other.
 ModelData cubeModel();
 
+// cubeModel() stretched to `size` - the whole edge along each axis, centred on
+// the origin - with its UVs laid for a level block. The same 12 triangles in
+// the same order, so it is as closed as the cube and casts the same way.
+//
+// `unitsPerTile` > 0 repeats the tile once per that many units along each
+// face's edges, starting from the face's first corner; 0 or less stretches one
+// tile across every face. tools/editor/src/geometry.js builds the same UVs for
+// the editor's preview and has to be kept in step with this.
+ModelData blockModel(const glm::vec3& size, float unitsPerTile);
+
 // The model's axis-aligned bounds in its own space. Returns false for a model
 // with no positions, leaving the outputs untouched.
 bool modelBounds(const ModelData& model, glm::vec3& lo, glm::vec3& hi);

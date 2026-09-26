@@ -15,7 +15,7 @@ import {
     hasReactor, moveEntities, moveEntity, removeEntity, segmentCentre, setExit, setGrateTexture,
 } from './entities.js';
 import {
-    KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
+    BLOCK_TYPE, KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, WALL_TILE_NAMES,
     setWallTileNames,
 } from './format.js';
 import { ModelCache } from './obj.js';
@@ -359,7 +359,7 @@ async function loadLevel(name) {
     // Fetch every mesh the level names before the first draw, so objects come
     // up as themselves rather than as boxes that turn into robots a moment
     // later.
-    await models.loadAll(app.level.objects.map((o) => o.type));
+    await models.loadAll(app.level.objects.map((o) => o.type).filter((t) => t !== BLOCK_TYPE));
     app.selection = null;
     app.joinFrom = null;
     gizmo.detach();
@@ -818,10 +818,39 @@ function renderEntityTools(container, button, hint) {
             }
         }
 
-        if (kind === 'object') {
+        if (kind === 'object' && app.level.objects[index].type === BLOCK_TYPE) {
+            // Size rather than scale: a block is edited by its edges, one axis
+            // at a time, in the block's own frame. `scale` is still honoured
+            // if a file carries one, but the panel does not offer both knobs.
+            const block = app.level.objects[index];
+            ['x', 'y', 'z'].forEach((axis, k) => {
+                field(`size ${axis}`, block.size[k], { type: 'number', min: 0.1, max: 400, step: 0.5 },
+                      (el) => edit(`block ${index} size ${axis}`, () => {
+                          const value = Number(el.value);
+                          if (value > 0) block.size[k] = value;
+                      }));
+            });
+            row(`texture: ${WALL_TILE_NAMES[block.texture] ?? block.texture}`);
+            tileRow(block.texture, (tile, name) => edit(`block ${index} tile ${name}`, () => {
+                block.texture = tile;
+            }), 'use this tile on every face of the block');
+            const stretched = block.textureMode === 'stretch';
+            button(stretched ? 'Repeat the texture' : 'Stretch the texture',
+                   stretched
+                       ? 'Tile it every 5.5 units, the same density as the walls'
+                       : 'One copy of the tile across each face, whatever its size',
+                   () => edit(`block ${index} texture ${stretched ? 'repeat' : 'stretch'}`, () => {
+                       block.textureMode = stretched ? 'repeat' : 'stretch';
+                   }));
+            row(stretched ? 'one tile per face' : 'one tile every 5.5 units, as on the walls');
+        } else if (kind === 'object') {
             const object = app.level.objects[index];
             field('scale', object.scale, { type: 'number', min: 0.1, max: 20, step: 0.1 },
                   (el) => edit(`object ${index} scale`, () => { object.scale = Number(el.value); }));
+        }
+
+        if (kind === 'object') {
+            const object = app.level.objects[index];
             field('health', object.health,
                   { type: 'number', min: 0, max: 5000, step: 1 },
                   (el) => edit(`object ${index} health`, () => { object.health = Number(el.value); }));
@@ -989,7 +1018,7 @@ function renderEntityTools(container, button, hint) {
     row('objects');
     const objectRow = document.createElement('div');
     objectRow.className = 'textures';
-    for (const type of app.models) {
+    for (const type of [BLOCK_TYPE, ...app.models.filter((t) => t !== BLOCK_TYPE)]) {
         const el = document.createElement('button');
         el.textContent = type;
         el.title = `place a ${type}`;
@@ -1177,8 +1206,12 @@ function renderSelection() {
     const label = {
         object: () => {
             const o = app.level.objects[selection.index];
+            const shape = o.type === BLOCK_TYPE
+                ? `size ${o.size.join(' x ')}\ntexture ${WALL_TILE_NAMES[o.texture] ?? o.texture}, ` +
+                  `${o.textureMode}\n`
+                : `scale ${o.scale}\n`;
             return `<b>object ${selection.index}</b> ${escapeHtml(o.type)}\nsegment ${o.segment}\n` +
-                   `scale ${o.scale}\nhealth ${o.health}`;
+                   `${shape}health ${o.health}`;
         },
         pickup: () => {
             const p = app.level.pickups[selection.index];

@@ -9,7 +9,7 @@
 // here that moves something re-resolves it.
 
 import {
-    BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS,
+    BALL_COLOR, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS,
     PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM,
 } from './format.js';
 import { findSegment, sideCorners } from './geometry.js';
@@ -72,7 +72,7 @@ export function addPickup(level, kind, position) {
 
 export function addObject(level, type, position) {
     if (!type) throw new Error('an object needs a model name');
-    level.objects.push(place(level, {
+    const object = {
         keyOrder: null,
         type,
         position: position.slice(),
@@ -80,7 +80,13 @@ export function addObject(level, type, position) {
         scale: DEFAULTS.objectScale,
         segment: -1,
         health: DEFAULTS.objectHealth,
-    }));
+    };
+    if (type === BLOCK_TYPE) {
+        object.size = DEFAULTS.blockSize.slice();
+        object.texture = DEFAULTS.blockTexture;
+        object.textureMode = DEFAULTS.blockTextureMode;
+    }
+    level.objects.push(place(level, object));
     return level.objects.length - 1;
 }
 

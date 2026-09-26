@@ -256,4 +256,23 @@ ModelData cubeModel() {
     return cube;
 }
 
+ModelData blockModel(const glm::vec3& size, float unitsPerTile) {
+    ModelData block = cubeModel();
+    for (glm::vec3& p : block.positions) p *= size;
+    if (unitsPerTile <= 0.0f) return block;
+
+    // Each face is two triangles, {c0 c1 c2} then {c0 c2 c3}, with U running
+    // c0 -> c1 and V running c0 -> c3. Scaling a face's unit UVs by its edge
+    // lengths in tiles is the whole of the repeat.
+    for (size_t face = 0; face * 2 + 1 < block.triangles.size(); ++face) {
+        const glm::uvec3& first = block.triangles[face * 2];
+        const glm::uvec3& second = block.triangles[face * 2 + 1];
+        const glm::vec3 c0 = block.positions[first.x];
+        const glm::vec2 tiles(glm::length(block.positions[first.y] - c0) / unitsPerTile,
+                              glm::length(block.positions[second.z] - c0) / unitsPerTile);
+        for (size_t k = 0; k < 6; ++k) block.uvs[face * 6 + k] *= tiles;
+    }
+    return block;
+}
+
 } // namespace dvk::gl

@@ -58,9 +58,17 @@ export function setWallTileNames(names) {
     WALL_TILE_NAMES.push(...names);
 }
 
-// src/game/level.cpp: kWorldUnitsPerTile. One texture tile per this many world
-// units, for sides with no authored UVs.
+// src/game/level.h: kWorldUnitsPerTile. One texture tile per this many world
+// units, for sides with no authored UVs and for blocks that repeat their tile.
 export const WORLD_UNITS_PER_TILE = 5.5;
+
+// src/game/level.h: kBlockType. The one object type that names no model: a box
+// built from the object's own `size`, wearing a wall tile.
+export const BLOCK_TYPE = 'block';
+
+// How a block lays its tile. 'repeat' tiles it every WORLD_UNITS_PER_TILE, the
+// way a wall does; 'stretch' puts one copy across each face.
+export const BLOCK_TEXTURE_MODES = ['repeat', 'stretch'];
 
 // Defaults, so a round trip does not write a field the C++ would have omitted.
 // src/game/level.cpp: loadLevel / saveLevel.
@@ -77,6 +85,10 @@ export const DEFAULTS = {
     exitRadius: 6.0,
     objectScale: 1.0,
     objectHealth: 0.0,
+    // src/game/level.h: LevelObject, blocks only.
+    blockSize: [4.0, 4.0, 4.0],
+    blockTexture: 0,
+    blockTextureMode: 'repeat',
     // src/game/level.h: FloatingLightDef.
     ballRadius: 1.1,
     ballLightRadius: 26.0,

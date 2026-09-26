@@ -307,10 +307,20 @@ struct ExitTrigger {
     int segment = -1;
 };
 
+// One texture tile per this many world units, for sides with no authored UVs
+// and for blocks that repeat their texture. A 20-unit segment face therefore
+// carries between three and four tiles.
+inline constexpr float kWorldUnitsPerTile = 5.5f;
+
+// The one object type that names no model: a box built at load from the
+// object's own `size`, wearing a wall tile. Scenery for breaking up a room,
+// where a pillar is the wrong shape and authoring an OBJ per box is absurd.
+inline constexpr const char* kBlockType = "block";
+
 // A static thing standing in the mine. M3 places these purely as shadow
 // casters; M6 turns the same entries into robots.
 struct LevelObject {
-    std::string type;   // names a mesh in assets/models/
+    std::string type;   // names a mesh in assets/models/, or kBlockType
     glm::vec3 position{0.0f};
     glm::quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
     float scale = 1.0f;
@@ -318,6 +328,20 @@ struct LevelObject {
     // Zero means indestructible scenery. Anything positive is a target, and
     // becomes a robot's starting health in M6.
     float health = 0.0f;
+
+    // Blocks only. The whole edge length along each of the block's own axes,
+    // centred on `position`; `scale` still multiplies it, so the one uniform
+    // knob every object has means the same thing here.
+    glm::vec3 size{4.0f};
+    // A layer in the wall texture array, as a side's `texture` is.
+    int texture = 0;
+    // False repeats the tile every kWorldUnitsPerTile, the way a wall does, so
+    // a block beside a wall wears its tile at the same density. True stretches
+    // one copy of the tile across each face whatever its size.
+    bool stretchTexture = false;
+
+    bool isBlock() const { return type == kBlockType; }
+    glm::vec3 blockSize() const { return size * scale; }
 };
 
 // Authored props that move once the level is running. The simulation state for

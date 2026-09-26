@@ -9,7 +9,10 @@
 // silently deletes the prose at the top of mine01.json the first time the
 // in-game light editor's Save button is pressed.
 
-import { BALL_COLOR, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES, SIDE_COUNT } from './format.js';
+import {
+    BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES,
+    SIDE_COUNT,
+} from './format.js';
 import { rewireDoors, rewireGrates } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
 
@@ -175,7 +178,7 @@ export function parseLevel(json, path = '<memory>') {
     }
 
     for (const oj of j.objects ?? []) {
-        level.objects.push({
+        const object = {
             keyOrder: Object.keys(oj),
             type: String(oj.type),
             position: vec3(oj.position),
@@ -183,7 +186,19 @@ export function parseLevel(json, path = '<memory>') {
             scale: oj.scale ?? DEFAULTS.objectScale,
             segment: oj.segment ?? -1,
             health: oj.health ?? DEFAULTS.objectHealth,
-        });
+        };
+        // Only a block carries these, so every other object round-trips with
+        // exactly the keys it had.
+        if (object.type === BLOCK_TYPE) {
+            object.size = oj.size !== undefined ? vec3(oj.size) : DEFAULTS.blockSize.slice();
+            object.texture = oj.texture ?? DEFAULTS.blockTexture;
+            object.textureMode = oj.textureMode ?? DEFAULTS.blockTextureMode;
+            if (!BLOCK_TEXTURE_MODES.includes(object.textureMode)) {
+                throw new Error(`block textureMode '${object.textureMode}' is neither ` +
+                                "'repeat' nor 'stretch'");
+            }
+        }
+        level.objects.push(object);
     }
 
     if (!j.start) throw new Error('level has no "start"');
@@ -306,6 +321,11 @@ export function serializeLevel(level) {
         j.objects = level.objects.map((o) => {
             const oj = { type: o.type, position: o.position.slice(), orientation: o.orientation.slice() };
             if (o.scale !== DEFAULTS.objectScale) oj.scale = o.scale;
+            if (o.type === BLOCK_TYPE) {
+                oj.size = o.size.slice();
+                oj.texture = o.texture;
+                if (o.textureMode !== DEFAULTS.blockTextureMode) oj.textureMode = o.textureMode;
+            }
             if (o.health > DEFAULTS.objectHealth) oj.health = o.health;
             oj.segment = o.segment;
             return reorder(oj, o.keyOrder);

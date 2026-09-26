@@ -335,6 +335,7 @@ int runWorldTest(const char* levelPath) {
     }
 
     for (const LevelObject& obj : level.objects) {
+        if (obj.isBlock()) continue;   // no model file; blockModel() is cubeModel() stretched
         const std::string path = "assets/models/" + obj.type + ".obj";
         static std::vector<std::string> seen;
         if (std::find(seen.begin(), seen.end(), path) != seen.end()) continue;
