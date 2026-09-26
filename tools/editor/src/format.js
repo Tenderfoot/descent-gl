@@ -62,6 +62,11 @@ export function setWallTileNames(names) {
 // units, for sides with no authored UVs and for blocks that repeat their tile.
 export const WORLD_UNITS_PER_TILE = 5.5;
 
+// How an unauthored side lays its tile: fitted to the side, or projected from
+// world position so neighbouring sides share one grid. UvMode in
+// src/game/level.h.
+export const UV_MODES = ['side', 'world'];
+
 // src/game/level.h: kBlockType. The one object type that names no model: a box
 // built from the object's own `size`, wearing a wall tile.
 export const BLOCK_TYPE = 'block';

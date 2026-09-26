@@ -10,7 +10,7 @@
 
 import {
     BALL_COLOR, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS,
-    PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM,
+    PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM, UV_MODES,
 } from './format.js';
 import { findSegment, sideCorners } from './geometry.js';
 import { fromLevelQuat, multiplyQuat, toLevelQuat, transformDirection } from './transform.js';
@@ -230,7 +230,7 @@ export function addGrate(level, segment, side, texture) {
     if (sd.grate >= 0) throw new Error('that portal already has a grate');
     if (!Number.isInteger(texture) || texture < 0) throw new Error(`no such tile: ${texture}`);
 
-    level.grates.push({ keyOrder: null, segment, side, texture });
+    level.grates.push({ keyOrder: null, segment, side, texture, uvMode: null });
     rewireGrates(level);
     return level.grates.length - 1;
 }
@@ -240,6 +240,15 @@ export function setGrateTexture(level, index, texture) {
     if (!grate) throw new Error(`no grate ${index}`);
     if (!Number.isInteger(texture) || texture < 0) throw new Error(`no such tile: ${texture}`);
     grate.texture = texture;
+}
+
+// 'side', 'world', or null to take the level's. The editor draws grates flat,
+// so this changes the file and the game, not the view.
+export function setGrateUvMode(level, index, mode) {
+    const grate = level.grates[index];
+    if (!grate) throw new Error(`no grate ${index}`);
+    if (mode !== null && !UV_MODES.includes(mode)) throw new Error(`no such uv mode: ${mode}`);
+    grate.uvMode = mode;
 }
 
 export function setExit(level, position, radius = DEFAULTS.exitRadius) {

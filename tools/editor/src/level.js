@@ -11,7 +11,7 @@
 
 import {
     BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, PICKUP_NAMES,
-    SIDE_COUNT,
+    SIDE_COUNT, SIDE_NAMES, UV_MODES,
 } from './format.js';
 import { rewireDoors, rewireGrates } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
@@ -24,6 +24,17 @@ const vec3 = (j) => {
 // The file stores quaternions as [w, x, y, z]. THREE.Quaternion is (x, y, z, w).
 // Everything inside the editor uses the file's order; the single conversion
 // lives in view.js and nowhere else.
+// A "uvMode" as written: null when absent, so a side or grate that takes the
+// level's says nothing on save, as it said nothing on load. The game aborts on
+// any other value, so the editor refuses to open one.
+function readUvMode(value, where) {
+    if (value === undefined || value === null) return null;
+    if (!UV_MODES.includes(value)) {
+        throw new Error(`${where} has uvMode '${value}'; it is "side" or "world"`);
+    }
+    return value;
+}
+
 const quat = (j, fallback) => (Array.isArray(j) && j.length === 4 ? j.map(Number) : fallback.slice());
 
 export function parseLevel(json, path = '<memory>') {
@@ -39,6 +50,8 @@ export function parseLevel(json, path = '<memory>') {
         name: j.name ?? path,
         comment: j.comment ?? null,
         script: j.script ?? null,
+        // What a side or grate without its own "uvMode" gets; null is "side".
+        uvMode: readUvMode(j.uvMode, 'the level'),
         vertices: [],
         segments: [],
         lights: [],
@@ -67,7 +80,7 @@ export function parseLevel(json, path = '<memory>') {
         }
         level.segments.push({
             verts: sj.verts.map(Number),
-            sides: sj.sides.map((side) => ({
+            sides: sj.sides.map((side, i) => ({
                 neighbour: side.portal ?? -1,
                 door: side.door ?? -1,
                 // Derived from level.grates like `door`; see rewireGrates.
@@ -79,6 +92,8 @@ export function parseLevel(json, path = '<memory>') {
                 // null, not a filled array: the loader distinguishes "authored"
                 // from "left to the planar default" and so must the writer.
                 uv: Array.isArray(side.uv) ? side.uv.map((p) => [Number(p[0]), Number(p[1])]) : null,
+                // As written, null when the side takes the level's.
+                uvMode: readUvMode(side.uvMode, `segment ${si} side ${SIDE_NAMES[i]}`),
             })),
         });
     }
@@ -117,6 +132,7 @@ export function parseLevel(json, path = '<memory>') {
             segment: gj.segment,
             side: gj.side,
             texture: gj.texture,
+            uvMode: readUvMode(gj.uvMode, `grate ${level.grates.length}`),
         });
     }
 
@@ -245,6 +261,7 @@ export function serializeLevel(level) {
     j.name = level.name;
     if (level.comment !== null && level.comment !== undefined) j.comment = level.comment;
     if (level.script !== null && level.script !== undefined) j.script = level.script;
+    if (level.uvMode) j.uvMode = level.uvMode;
 
     j.vertices = level.vertices.map((v) => [v[0], v[1], v[2]]);
 
@@ -267,6 +284,7 @@ export function serializeLevel(level) {
                 // emits nowhere writes exactly what it did before sides could.
                 if (sd.emissive > 0) side.emissive = sd.emissive;
                 if (sd.rotation) side.rotate = sd.rotation;
+                if (sd.uvMode) side.uvMode = sd.uvMode;
             }
             if (sd.uv) side.uv = sd.uv.map((p) => [p[0], p[1]]);
             return side;
@@ -290,10 +308,14 @@ export function serializeLevel(level) {
         });
     }
 
-    // Every field always, matching saveLevel: a grate has no defaults to omit.
+    // Every field always, matching saveLevel, except uvMode: that one only
+    // when the grate has its own.
     if (level.grates.length) {
-        j.grates = level.grates.map((g) => reorder(
-            { segment: g.segment, side: g.side, texture: g.texture }, g.keyOrder));
+        j.grates = level.grates.map((g) => {
+            const gj = { segment: g.segment, side: g.side, texture: g.texture };
+            if (g.uvMode) gj.uvMode = g.uvMode;
+            return reorder(gj, g.keyOrder);
+        });
     }
 
     if (level.lights.length) {
