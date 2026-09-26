@@ -31,7 +31,8 @@ import {
     nearestSnapTarget, setLevelUvMode, setRotation, setTexture, setUvMode, snapVertex, splitPortal,
 } from './ops.js';
 import {
-    centroid, groupTransform, IDENTITY_QUAT, transformPoints,
+    centroid, conjugateQuat, edgeFrame, frameFromAxes, fromLevelQuat, groupTransform,
+    IDENTITY_QUAT, multiplyQuat, rotateVector, spreadFrame, transformPoints,
 } from './transform.js';
 import { EDITOR_ONLY_RULES, validateLevel } from './validate.js';
 import { LevelView } from './view.js';
@@ -77,6 +78,9 @@ const app = {
     lastSegment: null,
     models: [],
     history: new History(),
+    // Which way the gizmo's handles point: 'world' axes, or the selection's
+    // own - a wall's across, up and normal. Q flips it.
+    gizmoSpace: 'world',
 };
 
 // --- scene ------------------------------------------------------------------
@@ -135,7 +139,7 @@ viewport.appendChild(renderer.domElement);
 const hud = document.createElement('div');
 hud.id = 'hud';
 hud.textContent = 'drag to orbit · click to select · shift+click to add · double-click to fly in '
-    + '· 1/2/3/4 mode · W/E/R gizmo · T top · F frame';
+    + '· 1/2/3/4 mode · W/E/R gizmo · Q local/world · T top · F frame';
 viewport.appendChild(hud);
 
 const scene = new THREE.Scene();
@@ -705,7 +709,7 @@ function renderTools() {
         const chosen = selectionItems(selection).filter(isGeometry);
         if (chosen.length === 0) {
             return hint('Click a vertex, shift+click to add more. Drag the gizmo to move them; ' +
-                        'W/E/R switch it between move, turn and scale.');
+                        'W/E/R switch it between move, turn and scale; Q points it along the selection.');
         }
         if (chosen.length > 1) {
             const segments = new Set();
@@ -1188,7 +1192,8 @@ function renderSelection() {
         const verb = { translate: 'moves', rotate: 'turns', scale: 'scales' }[gizmo.mode];
         container.innerHTML =
             `<b>${items.length} ${escapeHtml(what)}</b>\n${escapeHtml(indices)}\n` +
-            `centre ${middle}\ngizmo ${verb} the group about its centre\n` +
+            `centre ${middle}\ngizmo ${verb} the group about its centre, along ` +
+            `${app.gizmoSpace === 'local' ? 'its own axes' : 'the world axes'}\n` +
             `primary ${escapeHtml(selection.kind)} ${selection.index}`;
         if (items.every(isGeometry)) view.highlightVertices(items.map((i) => i.index));
         else view.highlightSegments([]);
@@ -1307,10 +1312,24 @@ $('layers').addEventListener('change', applyLayers);
 $('gizmo-modes').innerHTML = GIZMO_MODES.map(([mode, label, key]) =>
     `<button data-gizmo="${mode}" title="${key}" aria-pressed="${mode === 'translate'}">` +
     `${label}</button>`).join('');
+$('gizmo-modes').insertAdjacentHTML('beforeend',
+    '<button data-space title="Q — point the handles along the selection’s own axes: a ' +
+    'wall’s width, height and normal, a segment’s length, height and depth" ' +
+    'aria-pressed="false">Local</button>');
 $('gizmo-modes').addEventListener('click', (e) => {
+    if (e.target.dataset?.space !== undefined) return setGizmoSpace(app.gizmoSpace === 'local' ? 'world' : 'local');
     const mode = e.target.dataset?.gizmo;
     if (mode) setGizmoMode(mode);
 });
+
+function setGizmoSpace(space) {
+    if (gizmo.dragging) return;
+    app.gizmoSpace = space;
+    $('gizmo-modes').querySelector('[data-space]')
+        .setAttribute('aria-pressed', String(space === 'local'));
+    syncGizmo();
+    renderSelection();
+}
 
 // Switching what the gizmo does re-parks it, because a mode change mid-selection
 // must not carry the previous mode's pose into the next drag.
@@ -1433,8 +1452,50 @@ function itemPosition(item) {
         : entityPosition(item.kind, item.index);
 }
 
-// Parks the gizmo on the selection's centroid, reset to identity, or detaches it
-// when there is nothing to move.
+// The axes local space points the handles along, as a frame (see transform.js),
+// or null to fall back to world. Worked out from the geometry every time the
+// gizmo is parked, so after a turn the handles follow the wall to where it
+// now faces.
+//
+// A side or a segment is recognised by its vertices and given the axes the
+// loader itself gives it: the side's across, up and inward normal, or the
+// segment's left-right, bottom-top and back-front. Anything else is fitted to
+// how its points spread, which is right for a flat set and at least stable for
+// the rest; fitting a side the same way would pick arbitrary axes on a square
+// wall, whose spread is the same every way across it.
+function selectionFrame(items, points) {
+    if (items.length === 1) {
+        const item = items[0];
+        if (item.kind === 'vertex') return null;
+        const facing = entityFacing(app.level, item.kind, item.index);
+        return facing?.length === 4 ? fromLevelQuat(facing) : null;
+    }
+    if (items.every((item) => item.kind === 'vertex')) {
+        const chosen = new Set(items.map((item) => item.index));
+        const same = (verts) => verts.length === chosen.size && verts.every((v) => chosen.has(v));
+        for (let si = 0; si < app.level.segments.length; ++si) {
+            const seg = app.level.segments[si];
+            if (chosen.size === 8 && same(seg.verts)) {
+                const centre = (side) => seg.sides[side].center;
+                const between = (from, to) => centre(to).map((n, k) => n - centre(from)[k]);
+                return frameFromAxes(between(0, 2), between(3, 1));   // left→right, bottom→top
+            }
+            if (chosen.size !== 4) continue;
+            for (let side = 0; side < SIDE_VERTICES.length; ++side) {
+                if (!same(SIDE_VERTICES[side].map((corner) => seg.verts[corner]))) continue;
+                const c = sideCorners(app.level, si, side);
+                const across = [0, 1, 2].map((k) => (c[1][k] - c[0][k]) + (c[2][k] - c[3][k]));
+                const up = [0, 1, 2].map((k) => (c[3][k] - c[0][k]) + (c[2][k] - c[1][k]));
+                return frameFromAxes(across, up);
+            }
+        }
+    }
+    if (points.length === 2) return edgeFrame(points[0], points[1]);
+    return spreadFrame(points);
+}
+
+// Parks the gizmo on the selection's centroid, in the frame of the current
+// space, or detaches it when there is nothing to move.
 //
 // Reset every time rather than left where the last drag put it: the pose the
 // gizmo reports is read as a delta from identity, so a handle still carrying the
@@ -1446,9 +1507,13 @@ function syncGizmo() {
     const points = items.map(itemPosition).filter(Boolean);
     if (points.length === 0 || points.length !== items.length) { gizmo.detach(); return; }
 
+    const frame = app.gizmoSpace === 'local'
+        ? selectionFrame(items, points) ?? IDENTITY_QUAT
+        : IDENTITY_QUAT;
     handle.position.set(...centroid(points));
-    handle.quaternion.set(0, 0, 0, 1);
+    handle.quaternion.set(...frame);
     handle.scale.set(1, 1, 1);
+    gizmo.setSpace(app.gizmoSpace);
     gizmo.attach(handle);
 }
 
@@ -1556,6 +1621,10 @@ gizmo.addEventListener('dragging-changed', (e) => {
             items,
             origin,
             pivot: centroid(origin),
+            // The pose the handle was parked in. What the gizmo reports is read
+            // against it: its turn since, and its scale along these axes.
+            frame: [handle.quaternion.x, handle.quaternion.y,
+                    handle.quaternion.z, handle.quaternion.w],
             // What each entity was facing before the drag, so a rotation
             // composes onto that rather than onto its own last frame's output.
             facing: items.map((item) => (item.kind === 'vertex'
@@ -1616,10 +1685,19 @@ function dragLabel(items) {
 // was moving, so a group snaps the STEP it takes instead and keeps its internal
 // offsets exactly. For one point the two are the same thing, because the pivot
 // is the point.
+//
+// In local space the step is snapped along the handles' own axes instead. A
+// wall moved along its normal and then rounded to the world grid would be
+// pulled sideways off the arrow it was dragged by, and so would a single
+// point snapped to a grid the arrow does not run along.
 function translationDelta() {
     const raw = [handle.position.x, handle.position.y, handle.position.z];
     const delta = raw.map((n, k) => n - drag.pivot[k]);
     if (gridStep() <= 0) return delta;
+    if (app.gizmoSpace === 'local') {
+        const along = rotateVector(conjugateQuat(drag.frame), delta).map(snap);
+        return rotateVector(drag.frame, along);
+    }
     if (drag.items.length === 1) return raw.map(snap).map((n, k) => n - drag.pivot[k]);
     return delta.map(snap);
 }
@@ -1627,12 +1705,15 @@ function translationDelta() {
 gizmo.addEventListener('objectChange', () => {
     if (!drag) return;
 
+    const pose = [handle.quaternion.x, handle.quaternion.y, handle.quaternion.z, handle.quaternion.w];
     const transform = groupTransform({
         pivot: drag.pivot,
         translate: translationDelta(),
-        rotation: [handle.quaternion.x, handle.quaternion.y,
-                   handle.quaternion.z, handle.quaternion.w],
+        // The turn since the drag began. The handle starts in drag.frame, not
+        // at identity, in local space.
+        rotation: multiplyQuat(pose, conjugateQuat(drag.frame)),
         scale: [handle.scale.x, handle.scale.y, handle.scale.z],
+        frame: drag.frame,
     });
     const turned = transform.rotation.some((n, k) => Math.abs(n - IDENTITY_QUAT[k]) > 1e-9);
     const moved = transformPoints(transform, drag.origin);
@@ -1850,6 +1931,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'w') setGizmoMode('translate');
     if (e.key === 'e') setGizmoMode('rotate');
     if (e.key === 'r') setGizmoMode('scale');
+    if (e.key === 'q') setGizmoSpace(app.gizmoSpace === 'local' ? 'world' : 'local');
     if (e.key === 'Escape') { clearSelection(); app.joinFrom = null; renderTools(); renderSelection(); }
 });
 
