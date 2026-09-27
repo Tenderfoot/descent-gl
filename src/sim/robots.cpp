@@ -676,15 +676,20 @@ void placeDrop(RobotState& state, PickupKind kind, const glm::vec3& position, in
 
 // A robot finished by the Static Charge always drops energy where it died,
 // plus one of each pickup its type lists in `chargeDrops`, spread evenly around
-// it from a random start - in place of the type's own roll, including a type
-// configured to drop nothing. The reactor is exempt: it is not a kill the loop
-// is about.
+// it from a random start. One killed by the player's missile - its impact or
+// its blast, disabled first or not - drops a shield pickup. Either replaces the
+// type's own roll, including a type configured to drop nothing. The reactor is
+// exempt from both: it is not a kill the loop is about.
 void spawnDrop(const Level& level, RobotState& state, const RobotDef& def, const Robot& robot) {
     (void)level;
     const glm::vec3& at = robot.body.position;
     const int segment = robot.body.segment;
 
-    if (!def.isReactor && robot.lastHitByCharge) {
+    if (!def.isReactor && robot.lastHit == LastHit::Missile) {
+        placeDrop(state, PickupKind::Shield, at, segment);
+        return;
+    }
+    if (!def.isReactor && robot.lastHit == LastHit::Charge) {
         placeDrop(state, PickupKind::Energy, at, segment);
         const size_t count = def.chargeDrops.size();
         const float start = randUnit() * 6.2831853f;
