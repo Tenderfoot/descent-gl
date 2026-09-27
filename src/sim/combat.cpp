@@ -205,6 +205,10 @@ bool breakAttachment(const Level& level, CombatState& state, RobotState& robots,
     if (!robot.attachmentOn || robot.attachmentBreaksOn != weaponId) return false;
 
     knockAttachmentLoose(level, robots, hit.index, push, doors);
+    // Through the robot's health like any other hit, so disabling and death
+    // follow from it on the robot's next step the usual way.
+    robot.health -= robot.attachmentBreakDamage;
+    robot.lastHitByCharge = false;
     state.player.lastTargetRobot = hit.index;
     state.player.targetHudTime = kTargetHudTime;
     robot.awareness = 1.0f;
@@ -889,6 +893,16 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 }
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
+                // The player's laser never kills outright: a shot that would
+                // finish a robot still up and running leaves it on 1 health,
+                // which is under the disabled line for every type, and it is
+                // the next hit that ends it. Judged by mode rather than by
+                // health, so a second bolt in the same step - before the
+                // robot's own step has disabled it - does not count as that.
+                if (p.owner < 0 && p.weapon == WeaponLaser && robot.health <= 0.0f &&
+                    robot.mode != RobotMode::Disabled) {
+                    robot.health = 1.0f;
+                }
                 robot.lastHitByCharge = false;
                 // Only the player's direct impact acquires a HUD target.
                 // applySplash remains intentionally unaware of target state.
