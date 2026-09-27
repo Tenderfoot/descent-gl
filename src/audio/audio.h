@@ -195,6 +195,14 @@ public:
     // changes at the bottom of that dip. See setMusicState, which walks it.
     bool nextMusicTrack(int side);
 
+    // Level boundaries. A new level starts both playlists on a track picked at
+    // random; a restart of the same level moves both on by one, so a retry
+    // does not replay what the player just died to. With the soundtrack
+    // stopped the change is immediate; with it still running - a restart
+    // from the pause menu - it goes through the same dip as a skip.
+    void shuffleMusicTracks();
+    void advanceMusicTracks();
+
     void setMasterGain(float gain);
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }
 
@@ -240,6 +248,9 @@ private:
     std::array<int, 2> musicTrackIndex_{{0, 0}};
     std::array<float, 2> musicSwapGain_{{1.0f, 1.0f}};
     std::array<int, 2> musicPendingTrack_{{-1, -1}};
+    // Puts one side on `index`: directly while the soundtrack is stopped,
+    // through the skip dip while it is running.
+    void cueMusicTrack(size_t side, int index);
     uint32_t rng_ = 0x9e3779b9u;
     std::array<uint32_t, static_cast<size_t>(sim::Cue::Count)> played_{};
     uint32_t dropped_ = 0;

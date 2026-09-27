@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/mat3x3.hpp>
 
@@ -446,6 +447,42 @@ bool Audio::nextMusicTrack(int side) {
     return true;
 }
 
+void Audio::cueMusicTrack(size_t side, int index) {
+    if (!musicRunning_) {
+        musicTrackIndex_[side] = index;
+        musicPendingTrack_[side] = -1;
+        musicSwapGain_[side] = 1.0f;
+        return;
+    }
+    if (index == musicTrackIndex_[side] && musicPendingTrack_[side] < 0) return;
+    musicPendingTrack_[side] = index;
+}
+
+void Audio::shuffleMusicTracks() {
+    // Seeded from the device rather than from rng_, which is fixed so cue
+    // variation replays the same way. The level's opening track is meant to
+    // differ from one launch to the next.
+    std::random_device device;
+    std::minstd_rand pick(device());
+    for (size_t side = 0; side < musicTrackIndex_.size(); ++side) {
+        const size_t count = bank_.music(static_cast<int>(side)).size();
+        if (count == 0) continue;
+        cueMusicTrack(side, static_cast<int>(pick() % count));
+    }
+}
+
+void Audio::advanceMusicTracks() {
+    for (size_t side = 0; side < musicTrackIndex_.size(); ++side) {
+        const size_t count = bank_.music(static_cast<int>(side)).size();
+        if (count < 2) continue;
+        // From wherever a skip still in flight was heading, so a restart
+        // pressed mid-dip lands one past it rather than on it.
+        const int from = musicPendingTrack_[side] >= 0 ? musicPendingTrack_[side]
+                                                       : musicTrackIndex_[side];
+        cueMusicTrack(side, static_cast<int>((static_cast<size_t>(from) + 1) % count));
+    }
+}
+
 void Audio::setMusicState(float combat, float volume, bool commDucked, float dt) {
     // Two seconds each way. The transition reads as one crossfade rather than
     // as two different gestures, and the soundtrack takes the same time to
@@ -546,8 +583,9 @@ void Audio::stopMusic() {
     musicDuck_ = 1.0f;
     // A skip that was still diving when the music stopped has nothing left to
     // dive for, so the envelope is put back rather than resumed into a level
-    // the player is no longer in. Which track each side had reached is kept:
-    // the player chose it, and a level boundary is no reason to undo that.
+    // the player is no longer in. Which track each side had reached is kept
+    // until the shell picks the next level's tracks: see shuffleMusicTracks
+    // and advanceMusicTracks.
     musicSwapGain_.fill(1.0f);
     musicPendingTrack_.fill(-1);
 }

@@ -207,6 +207,7 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
             loadLevelScript(loaded_.script, loaded_.level, loaded_.comm);
             session_.start();
             loaded_.comm.enterLevel();
+            audio_.shuffleMusicTracks();
             menu_.hide();
             loaded_.lightDoorSignature = -1;
             captureMouse(true);
@@ -226,6 +227,7 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
             loadLevelScript(loaded_.script, loaded_.level, loaded_.comm);
             session_.restart();
             loaded_.comm.enterLevel();
+            audio_.advanceMusicTracks();
             menu_.hide();
             loaded_.contacts.clear();
             loaded_.automap.open = false;
