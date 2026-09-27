@@ -1837,6 +1837,59 @@ void Renderer::buildDebugLines(const Level& level, const RenderState& rs,
         }
     }
 
+    // Placed from the interpolated view with the same placeProxy the sim uses,
+    // so it sits on the drawn attachment rather than a step behind it. A hull
+    // is drawn as its bounding box: close enough to see what the trace is
+    // aimed at.
+    if (drawAttachmentHitboxes && robotConfig_) {
+        const glm::vec3 color(1.0f, 0.2f, 0.9f);
+        for (int i = 0; i < rs.attachmentCount; ++i) {
+            const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];
+            if (part.key >= sim::kMaxRobots) continue;  // loose: no longer a target
+            if (part.type < 0 || part.type >= static_cast<int>(robotConfig_->types.size())) {
+                continue;
+            }
+            const sim::AttachmentDef& att =
+                robotConfig_->types[static_cast<size_t>(part.type)].attachment;
+            const sim::PlacedProxy p =
+                sim::placeProxy(att.volume, part.position, part.orientation, 1.0f);
+            const glm::mat3 basis = glm::mat3_cast(p.orientation);
+
+            if (p.kind == sim::ProxyVolume::Kind::Sphere) {
+                constexpr int kSides = 24;
+                const float r = p.halfExtents.x;
+                for (int axis = 0; axis < 3; ++axis) {
+                    const glm::vec3 u = basis[(axis + 1) % 3] * r;
+                    const glm::vec3 v = basis[(axis + 2) % 3] * r;
+                    for (int s = 0; s < kSides; ++s) {
+                        const float a0 = 6.2831853f * static_cast<float>(s) / kSides;
+                        const float a1 = 6.2831853f * static_cast<float>(s + 1) / kSides;
+                        debugLines_.line(p.centre + u * std::cos(a0) + v * std::sin(a0),
+                                         p.centre + u * std::cos(a1) + v * std::sin(a1), color);
+                    }
+                }
+                continue;
+            }
+
+            const glm::vec3 ex = basis[0] * p.halfExtents.x;
+            const glm::vec3 ey = basis[1] * p.halfExtents.y;
+            const glm::vec3 ez = basis[2] * p.halfExtents.z;
+            std::array<glm::vec3, 8> c;
+            for (int k = 0; k < 8; ++k) {
+                c[static_cast<size_t>(k)] = p.centre + ((k & 1) ? ex : -ex) +
+                                            ((k & 2) ? ey : -ey) + ((k & 4) ? ez : -ez);
+            }
+            // Each corner joins the corners that differ from it in one bit.
+            for (int k = 0; k < 8; ++k) {
+                for (int bit = 1; bit < 8; bit <<= 1) {
+                    if (k & bit) continue;
+                    debugLines_.line(c[static_cast<size_t>(k)], c[static_cast<size_t>(k | bit)],
+                                     color);
+                }
+            }
+        }
+    }
+
     debugLines_.upload();
 }
 

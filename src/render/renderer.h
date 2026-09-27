@@ -391,6 +391,9 @@ public:
     bool drawWallNormals = false;
     bool drawContacts = true;
     bool drawNoseRay = false;
+    // The hitbox of every robot attachment still mounted on its robot - the
+    // volume the player's fire is traced against, not the mesh.
+    bool drawAttachmentHitboxes = false;
 
     size_t shipTriangleCount() const { return shipModel_.triangleCount(); }
     int levelTriangleCount() const { return levelMesh_->triangleCount(); }
