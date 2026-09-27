@@ -42,10 +42,17 @@ export const KEY_NAMES = ['blue', 'yellow', 'purple'];
 export const LEGACY_KEY_NAMES = { red: 'purple' };
 export const LEGACY_PICKUP_NAMES = { key_red: 'key_purple' };
 
+// In the game's order, src/game/level.h: kPickupNames. Files store the name,
+// so the order only has to agree within the editor, but keeping it the same
+// is what stops a kind the game gains from going missing here again.
 export const PICKUP_NAMES = [
     'shield', 'energy', 'laser', 'concussion', 'homing', 'flares',
+    'railgun', 'lightning', 'vulcan',
     'key_blue', 'key_yellow', 'key_purple',
 ];
+
+// The three keys are the last three kinds, in `KEY_NAMES` order.
+export const PICKUP_KEY_FIRST = PICKUP_NAMES.indexOf('key_blue');
 
 // The tile set in layer order, so a level file's `texture: 2` means the same
 // thing here as it does in the game.

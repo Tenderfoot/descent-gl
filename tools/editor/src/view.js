@@ -11,7 +11,7 @@
 
 import * as THREE from 'three';
 
-import { BLOCK_TYPE, SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
+import { BLOCK_TYPE, PICKUP_KEY_FIRST, SIDE_COUNT, SIDE_NAMES, WALL_TILE_NAMES } from './format.js';
 import { lampPosition } from './entities.js';
 import { blockTriangles, lightSegments, portalFaces, portalFacing, sideCorners } from './geometry.js';
 
@@ -538,11 +538,11 @@ export class LevelView {
 
         for (let i = 0; i < level.pickups.length; ++i) {
             const pickup = level.pickups[i];
-            const isKey = pickup.kind >= 6;
+            const isKey = pickup.kind >= PICKUP_KEY_FIRST;
             const mesh = new THREE.Mesh(
                 this.track(new THREE.OctahedronGeometry(1.4)),
                 this.track(new THREE.MeshLambertMaterial({
-                    color: isKey ? KEY_COLORS[pickup.kind - 6] : PICKUP_COLOR,
+                    color: isKey ? KEY_COLORS[pickup.kind - PICKUP_KEY_FIRST] : PICKUP_COLOR,
                 })));
             mesh.position.copy(v3(pickup.position));
             mesh.userData.pick = { kind: 'pickup', index: i };

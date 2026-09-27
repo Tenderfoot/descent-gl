@@ -54,6 +54,9 @@
       "attackRange": 75.0,
       "burstCount": 4,
       "burstPause": 1.600000023841858,
+      "chargeDrops": [
+        "vulcan"
+      ],
       "color": [
         0.5,
         0.75,
@@ -102,6 +105,10 @@
       "attackRange": 75.0,
       "burstCount": 4,
       "burstPause": 1.600000023841858,
+      "chargeDrops": [
+        "homing",
+        "vulcan"
+      ],
       "color": [
         0.5,
         0.75,
@@ -192,6 +199,9 @@
       "attackRange": 55.0,
       "burstCount": 2,
       "burstPause": 2.0,
+      "chargeDrops": [
+        "concussion"
+      ],
       "color": [
         0.949999988079071,
         0.699999988079071,
@@ -245,6 +255,10 @@
       "attackRange": 55.0,
       "burstCount": 2,
       "burstPause": 2.0,
+      "chargeDrops": [
+        "concussion",
+        "railgun"
+      ],
       "color": [
         0.949999988079071,
         0.699999988079071,

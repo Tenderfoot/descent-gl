@@ -40,9 +40,20 @@ the live values.
   through rock, and hurts the player and other robots too. The blast is shown
   in game: the explosion light reaches exactly the blast radius, and a
   shockwave ring grows out to it.
-- **Robots drop nothing on their own.** Every type is `dropNothing: 1.0`. A
-  robot finished by the Static Charge always drops energy (+30); the reactor
-  is exempt.
+- **Robots resupply the player only when the Static Charge finishes them.**
+  Every type is `dropNothing: 1.0`, so any other kill drops nothing. A Static
+  Charge finish always drops an energy pickup where the robot died, plus one
+  pickup of each kind in the type's `chargeDrops`, scattered 2 units around
+  it. The reactor is exempt. Dropped pickups are the level's own pickups and
+  give the same amounts.
+
+  | Robot | Static Charge finish drops |
+  |---|---|
+  | drone | energy |
+  | gunner | energy, vulcan |
+  | gunner_missile | energy, homing, vulcan |
+  | brute | energy, concussion |
+  | brute_railgun | energy, concussion, railgun |
 - **There is no energy regeneration.** `energyRecharge` is 0; energy comes
   from pickups and Static Charge finishes. The headlight drains 0.2/s.
 
@@ -53,7 +64,7 @@ the live values.
 | Shields / energy | 100 / 100 (disabled at 10 shields) |
 | Shield pickup / energy pickup | +25 / +30 |
 | Default ammo | vulcan 2000, concussion 8, homing 6, railgun 20, Static Charge 10, flares 12 |
-| Ammo pickups | concussion +3, homing +3, railgun +10, vulcan +500, flares +4; Static Charge fills to 10 |
+| Ammo pickups | concussion +3, homing +3, railgun +3, vulcan +500, flares +4; Static Charge fills to 10 |
 
 Levels override the defaults with a `loadout` block. MineEntrance starts with
 railgun 5 and Static Charge 10; TheBeginning starts disabled with one
@@ -157,12 +168,15 @@ player. Its ordinary bursts carry on throughout.
   this matters depends on how early levels hand out laser upgrades.
 - **Rail ammo in MineEntrance.** It starts with 5 rounds - under two brutes'
   worth even with knock-offs.
-- **Laser to 1 health, then a touch of Static Charge, is an energy source.**
-  A Static Charge finish always drops +30 energy and the finishing zap costs a
-  fraction of a round, so a clean disable-then-zap is energy-positive
-  (brute: about 16 energy of laser for 30 back). It is gated by the overshoot
-  above and is accepted as a skill reward, but it is the reason energy may
-  not stay scarce for a player who has learned it.
-- **The Static Charge is now a finisher, not a killer.** A full charge is 72
+- **The Static Charge finish is the resupply loop, by design.** Bring a robot
+  low, switch, and finish it with the Static Charge to get its energy and
+  ammunition. From 1 health (after the laser rule) the finish costs a
+  fraction of a round; from a brute's 19 after three rails it costs about
+  2.6 rounds. So how a robot is brought down decides how many finishes a
+  10-round charge buys, and the laser's overshoot gates the cheap version.
+  Watch whether a player who has learned it stops being short of anything:
+  a brute_railgun finish returns +30 energy, +3 concussion and +3 rail -
+  about as much rail as the kill cost.
+- **The Static Charge is a finisher, not a killer.** A full charge is 72
   damage: a drone, not a gunner.
 - **Stale fallback defaults in code.** See the top of this file.
