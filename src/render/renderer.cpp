@@ -912,7 +912,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             hud_.rect(px - t * 0.5f, py - gap - arm - grow, t, a, color);
             hud_.rect(px - t * 0.5f, py + gap - grow, t, a, color);
         };
-        arms(1.0f, outline);
+        arms(1.0f, outline); 
         arms(0.0f, reticle);
     }
 
