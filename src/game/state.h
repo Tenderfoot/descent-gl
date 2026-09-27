@@ -81,6 +81,9 @@ struct RenderState {
         glm::vec3 color{1.0f};
         float size = 1.0f;
         float fade = 1.0f;   // 1 at birth, 0 at death
+        // An explosion's shockwave: how far out it has grown this frame, or 0
+        // for a flash that has none.
+        float ring = 0.0f;
     };
     std::array<Bolt, sim::kMaxProjectiles> bolts{};
     int boltCount = 0;
@@ -277,6 +280,13 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         flash.fade = std::max(0.0f, 1.0f - k);
         // Expanding as it fades reads as an explosion rather than a fading dot.
         flash.size = e.size * (0.55f + 0.85f * k);
+        // The shockwave eases out to the full blast radius over the first 40%
+        // of the flash and holds there while it fades, so the edge of the
+        // damage is on screen long enough to be read.
+        if (e.ringRadius > 0.0f) {
+            const float g = std::min(1.0f, k / 0.4f);
+            flash.ring = e.ringRadius * (1.0f - (1.0f - g) * (1.0f - g));
+        }
         r.flashes[static_cast<size_t>(r.flashCount++)] = flash;
     }
 

@@ -51,11 +51,11 @@ glm::vec3 spreadDirection(const glm::vec3& forward, const glm::vec3& right, cons
 
 }   // anonymous namespace
 
-void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
-                 const glm::vec3& color, float size, float lifetime, float lightRadius,
-                 float lightIntensity) {
+Effect* spawnEffect(CombatState& state, const glm::vec3& position, int segment,
+                    const glm::vec3& color, float size, float lifetime, float lightRadius,
+                    float lightIntensity) {
     const int i = state.effects.spawn();
-    if (i < 0) return;
+    if (i < 0) return nullptr;
     Effect& e = state.effects.items[static_cast<size_t>(i)];
     e.position = position;
     e.segment = segment;
@@ -64,6 +64,7 @@ void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
     e.lifetime = lifetime;
     e.lightRadius = lightRadius;
     e.lightIntensity = lightIntensity;
+    return &e;
 }
 
 namespace {
@@ -179,8 +180,13 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
     if (explosive) {
         applySplash(level, state, robots, player, at, segment, p.splashRadius, p.splashDamage,
                     p.splashImpulse, playerMass, doors, props);
-        spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f, 0.45f,
-                    p.splashRadius * 1.6f, 7.0f);
+        // The light reaches exactly as far as the damage does - it goes to
+        // zero at its radius - so in a mine with no ambient term, what the
+        // flash lit is what the blast hit. The ring draws the same edge crisply.
+        if (Effect* e = spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f,
+                                    0.45f, p.splashRadius, 7.0f)) {
+            e->ringRadius = p.splashRadius;
+        }
         emit(events, Cue::Explosion, at, segment);
     } else {
         spawnEffect(state, at, segment, p.color, 1.2f, 0.16f, 9.0f, 2.2f);

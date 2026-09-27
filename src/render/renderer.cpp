@@ -317,7 +317,8 @@ void Renderer::setLevel(const Level& level) {
             eyes = std::max(eyes, def.eyes.size());
         }
     }
-    billboards_.reserveQuads(RenderState{}.bolts.size() + RenderState{}.flashes.size() +
+    // Flashes twice: an explosion adds its shockwave ring as a second quad.
+    billboards_.reserveQuads(RenderState{}.bolts.size() + RenderState{}.flashes.size() * 2 +
                              RenderState{}.pickups.size() + RenderState{}.beams.size() +
                              RenderState{}.props.size() * 2 +
                              static_cast<size_t>(sim::kMaxRobots) * eyes);
@@ -1698,6 +1699,7 @@ void Renderer::buildBillboards(const RenderState& rs, const PortalWalk& walk) {
     for (int i = 0; i < rs.flashCount; ++i) {
         const RenderState::Flash& f = rs.flashes[static_cast<size_t>(i)];
         billboards_.add(f.position, right, up, f.size, f.color * f.fade);
+        if (f.ring > 0.0f) billboards_.addRing(f.position, right, up, f.ring, f.color * f.fade);
     }
 
     // Floating balls and swinging lamps. Emissive, because that is what they

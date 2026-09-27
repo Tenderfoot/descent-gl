@@ -61,6 +61,11 @@ void Billboards::addSprite(const glm::vec3& center, const glm::vec3& right, cons
     quad(center, right, up, size, tint, static_cast<float>(layer));
 }
 
+void Billboards::addRing(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                         float radius, const glm::vec3& color) {
+    quad(center, right, up, radius / kRingPeak, color, kRing);
+}
+
 void Billboards::addBeam(const glm::vec3& start, const glm::vec3& end, const glm::vec3& eye,
                          const glm::vec3& cameraRight, float width, const glm::vec3& color) {
     const glm::vec3 axis = end - start;

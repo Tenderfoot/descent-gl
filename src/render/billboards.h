@@ -42,6 +42,17 @@ public:
 
     static constexpr float kNoTexture = -1.0f;
 
+    // A thin glowing ring whose bright edge sits `radius` from the centre -
+    // an explosion's shockwave, drawn out to the edge of the blast. Another
+    // negative sentinel layer, so it shares the buffer and the draw too.
+    void addRing(const glm::vec3& center, const glm::vec3& right, const glm::vec3& up,
+                 float radius, const glm::vec3& color);
+
+    static constexpr float kRing = -2.0f;
+    // Where the ring's bright band peaks, as a fraction of the quad's half
+    // size. billboard.frag uses the same number.
+    static constexpr float kRingPeak = 0.96f;
+
     // A beam between two points: a quad turned about its own axis to face the
     // viewer. Same vertex format and same buffer as the sprites above, so a
     // corridor full of tracers still costs the unlit pass one draw.

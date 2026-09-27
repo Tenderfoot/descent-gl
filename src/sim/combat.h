@@ -107,6 +107,9 @@ struct Effect {
     // billboard does; this is how much light it throws.
     float lightRadius = 0.0f;
     float lightIntensity = 0.0f;
+    // An explosion's blast radius, which the renderer draws as a shockwave
+    // ring growing out to exactly this: the edge of the damage. 0 for none.
+    float ringRadius = 0.0f;
 };
 
 // A hitscan tracer: the line a shot took, drawn for a moment after the damage
@@ -406,10 +409,11 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
 // A short-lived additive billboard with a light: a muzzle flash, an impact, an
 // explosion. Public because robots fire too, and a robot's muzzle flash is the
-// same thing as the player's.
-void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
-                 const glm::vec3& color, float size, float lifetime, float lightRadius,
-                 float lightIntensity);
+// same thing as the player's. Returns the effect, or null when the pool is
+// full, for the one caller that has more to say about it.
+Effect* spawnEffect(CombatState& state, const glm::vec3& position, int segment,
+                    const glm::vec3& color, float size, float lifetime, float lightRadius,
+                    float lightIntensity);
 
 // Resets the player after a death. Returns true if a death happened this step.
 bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
