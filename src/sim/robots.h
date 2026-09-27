@@ -55,6 +55,11 @@ struct AttachmentDef {
     // The player weapon whose direct hit knocks it off. Only a direct hit:
     // splash never does, and any other weapon hitting it hits the robot.
     int breaksOn = WeaponRailgun;
+    // What knocking it off costs the robot, as a fraction of its full health.
+    // The reward for the accurate shot: it takes the special attack away and
+    // hurts more than the same round in the hull would. It can finish a robot
+    // that was already worn down.
+    float breakDamage = 0.5f;
 
     bool present() const { return !model.empty(); }
 };
@@ -264,6 +269,9 @@ struct Robot {
     // that breaks it off is judged by stepCombat, which has the RobotState
     // but not the RobotConfig.
     int attachmentBreaksOn = -1;
+    // Health lost when it is knocked off: AttachmentDef::breakDamage of the
+    // type's full health, copied at spawn for the same reason.
+    float attachmentBreakDamage = 0.0f;
     // The attachment model's origin in world space, and its hitbox, placed
     // from the robot's own transform every step. Kept on the robot because
     // the renderer draws it here and the combat trace hits it here, and

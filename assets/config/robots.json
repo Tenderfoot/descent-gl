@@ -82,7 +82,7 @@
         ]
       ],
       "fireInterval": 0.2199999988079071,
-      "health": 48.0,
+      "health": 123.0,
       "isReactor": false,
       "lead": 0.75,
       "model": "gunner",
@@ -130,7 +130,7 @@
         ]
       ],
       "fireInterval": 0.2199999988079071,
-      "health": 48.0,
+      "health": 123.0,
       "isReactor": false,
       "lead": 0.75,
       "model": "gunner",
@@ -144,6 +144,7 @@
       "spread": 0.04500000178813934,
       "turnRate": 2.0,
       "attachment": {
+        "breakDamage": 0.5,
         "breaksOn": "railgun",
         "model": "missile_pod",
         "mount": [
@@ -224,7 +225,7 @@
         ]
       ],
       "fireInterval": 0.5,
-      "health": 95.0,
+      "health": 184.0,
       "isReactor": false,
       "lead": 0.550000011920929,
       "model": "brute",
@@ -277,7 +278,7 @@
         ]
       ],
       "fireInterval": 0.5,
-      "health": 95.0,
+      "health": 184.0,
       "isReactor": false,
       "lead": 0.550000011920929,
       "model": "brute",
@@ -291,6 +292,7 @@
       "spread": 0.09000000357627869,
       "turnRate": 1.2999999523162842,
       "attachment": {
+        "breakDamage": 0.5,
         "breaksOn": "railgun",
         "model": "railgun",
         "mount": [
@@ -307,7 +309,7 @@
           0.8,
           1.0
         ],
-        "cooldown": 4.0,
+        "cooldown": 0.25,
         "damage": 32.0,
         "delivery": "hitscan",
         "enabled": true,
@@ -323,7 +325,7 @@
         "pulseEnd": 0.12,
         "pulseStart": 0.55,
         "range": 400.0,
-        "windup": 5.0
+        "windup": 3.5
       }
     },
     {

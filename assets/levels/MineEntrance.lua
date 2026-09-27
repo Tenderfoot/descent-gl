@@ -6,7 +6,7 @@ loadout {
   homing = 0,
   flares = 20,
   railgun = 5, 
-  lightning = 50, 
+  lightning = 10, 
 }
 
 tutorial {

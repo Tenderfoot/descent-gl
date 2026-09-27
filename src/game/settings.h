@@ -20,6 +20,9 @@ struct PlayerSettings {
     // Whether a level's scripted tutorial panes are allowed to stop the game.
     // On by default: a player who has not turned them off has not seen them.
     bool tutorials = true;
+    // Outline the hitbox of each weapon still mounted on a robot, so the
+    // player can see what to aim at to shoot it off.
+    bool weaponHitboxes = true;
     bool fullscreen = false;
     bool vsync = true;
     int windowWidth = 1600;

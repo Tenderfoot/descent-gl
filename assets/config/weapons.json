@@ -54,7 +54,7 @@
         0.550000011920929,
         0.25
       ],
-      "damage": 40.0,
+      "damage": 55.0,
       "energyCost": 0.0,
       "fireInterval": 0.6499999761581421,
       "lifetime": 6.0,
@@ -76,7 +76,7 @@
         0.8500000238418579,
         1.0
       ],
-      "damage": 34.0,
+      "damage": 50.0,
       "energyCost": 0.0,
       "fireInterval": 0.800000011920929,
       "lifetime": 6.0,

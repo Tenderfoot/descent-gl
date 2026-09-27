@@ -58,6 +58,7 @@ void readAttachment(const nlohmann::json& j, AttachmentDef& a) {
     if (auto it = j.find("breaksOn"); it != j.end() && it->is_string()) {
         a.breaksOn = weaponByName(it->get<std::string>(), a.breaksOn);
     }
+    get(j, "breakDamage", a.breakDamage);
 }
 
 nlohmann::json writeAttachment(const AttachmentDef& a) {
@@ -65,6 +66,7 @@ nlohmann::json writeAttachment(const AttachmentDef& a) {
     j["model"] = a.model;
     j["mount"] = vec3Json(a.mount);
     j["breaksOn"] = kWeaponNames[static_cast<size_t>(a.breaksOn)];
+    j["breakDamage"] = a.breakDamage;
     return j;
 }
 
@@ -551,6 +553,7 @@ void spawnRobots(const Level& level, const RobotConfig& cfg, RobotState& out) {
         robot.homeSegment = obj.segment;
         robot.attachmentOn = def.attachment.present();
         robot.attachmentBreaksOn = def.attachment.breaksOn;
+        robot.attachmentBreakDamage = def.attachment.breakDamage * def.health;
         if (robot.attachmentOn) placeAttachment(robot, def);
     }
     log::info("{} robots spawned", out.count);

@@ -51,11 +51,11 @@ glm::vec3 spreadDirection(const glm::vec3& forward, const glm::vec3& right, cons
 
 }   // anonymous namespace
 
-void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
-                 const glm::vec3& color, float size, float lifetime, float lightRadius,
-                 float lightIntensity) {
+Effect* spawnEffect(CombatState& state, const glm::vec3& position, int segment,
+                    const glm::vec3& color, float size, float lifetime, float lightRadius,
+                    float lightIntensity) {
     const int i = state.effects.spawn();
-    if (i < 0) return;
+    if (i < 0) return nullptr;
     Effect& e = state.effects.items[static_cast<size_t>(i)];
     e.position = position;
     e.segment = segment;
@@ -64,6 +64,7 @@ void spawnEffect(CombatState& state, const glm::vec3& position, int segment,
     e.lifetime = lifetime;
     e.lightRadius = lightRadius;
     e.lightIntensity = lightIntensity;
+    return &e;
 }
 
 namespace {
@@ -179,8 +180,13 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
     if (explosive) {
         applySplash(level, state, robots, player, at, segment, p.splashRadius, p.splashDamage,
                     p.splashImpulse, playerMass, doors, props);
-        spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f, 0.45f,
-                    p.splashRadius * 1.6f, 7.0f);
+        // The light reaches exactly as far as the damage does - it goes to
+        // zero at its radius - so in a mine with no ambient term, what the
+        // flash lit is what the blast hit. The ring draws the same edge crisply.
+        if (Effect* e = spawnEffect(state, at, segment, glm::vec3(1.0f, 0.65f, 0.3f), 6.0f,
+                                    0.45f, p.splashRadius, 7.0f)) {
+            e->ringRadius = p.splashRadius;
+        }
         emit(events, Cue::Explosion, at, segment);
     } else {
         spawnEffect(state, at, segment, p.color, 1.2f, 0.16f, 9.0f, 2.2f);
@@ -205,6 +211,10 @@ bool breakAttachment(const Level& level, CombatState& state, RobotState& robots,
     if (!robot.attachmentOn || robot.attachmentBreaksOn != weaponId) return false;
 
     knockAttachmentLoose(level, robots, hit.index, push, doors);
+    // Through the robot's health like any other hit, so disabling and death
+    // follow from it on the robot's next step the usual way.
+    robot.health -= robot.attachmentBreakDamage;
+    robot.lastHitByCharge = false;
     state.player.lastTargetRobot = hit.index;
     state.player.targetHudTime = kTargetHudTime;
     robot.awareness = 1.0f;
@@ -889,6 +899,16 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 }
                 Robot& robot = robots->robots[static_cast<size_t>(hit.index)];
                 robot.health -= p.damage;
+                // The player's laser never kills outright: a shot that would
+                // finish a robot still up and running leaves it on 1 health,
+                // which is under the disabled line for every type, and it is
+                // the next hit that ends it. Judged by mode rather than by
+                // health, so a second bolt in the same step - before the
+                // robot's own step has disabled it - does not count as that.
+                if (p.owner < 0 && p.weapon == WeaponLaser && robot.health <= 0.0f &&
+                    robot.mode != RobotMode::Disabled) {
+                    robot.health = 1.0f;
+                }
                 robot.lastHitByCharge = false;
                 // Only the player's direct impact acquires a HUD target.
                 // applySplash remains intentionally unaware of target state.

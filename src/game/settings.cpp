@@ -103,6 +103,7 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         readIf(source, "invertMouseY", settings.invertMouseY);
         readIf(source, "muted", settings.muted);
         readIf(source, "tutorials", settings.tutorials);
+        readIf(source, "weaponHitboxes", settings.weaponHitboxes);
         readIf(source, "fullscreen", settings.fullscreen);
         readIf(source, "vsync", settings.vsync);
         readIf(source, "windowWidth", settings.windowWidth);
@@ -159,6 +160,7 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"invertMouseY", settings.invertMouseY},
         {"muted", settings.muted},
         {"tutorials", settings.tutorials},
+        {"weaponHitboxes", settings.weaponHitboxes},
         {"fullscreen", settings.fullscreen},
         {"vsync", settings.vsync},
         {"windowWidth", settings.windowWidth},
