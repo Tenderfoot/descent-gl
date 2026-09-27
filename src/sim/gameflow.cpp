@@ -327,9 +327,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         if (glm::length(player.position - drop.position) > player.radius + kPickupReach) continue;
 
         drop.alive = false;
-        const PickupKind kind =
-            drop.kind == DropKind::Energy ? PickupKind::Energy : PickupKind::Shield;
-        collectPickup(kind, drop.position, drop.segment, cfg, state, combat, events, pickupHooks);
+        collectPickup(drop.kind, drop.position, drop.segment, cfg, state, combat, events, pickupHooks);
     }
 
     // --- the reactor -----------------------------------------------------

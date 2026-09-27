@@ -52,6 +52,18 @@ int weaponByName(const std::string& name, int fallback) {
     return fallback;
 }
 
+// A pickup kind by its level-file name, or nothing for a name that is not one.
+bool pickupByName(const std::string& name, PickupKind& out) {
+    for (size_t i = 0; i < kPickupNames.size(); ++i) {
+        if (name == kPickupNames[i]) {
+            out = static_cast<PickupKind>(i);
+            return true;
+        }
+    }
+    log::warn("robot config: '{}' is not a pickup; not dropping it", name);
+    return false;
+}
+
 void readAttachment(const nlohmann::json& j, AttachmentDef& a) {
     get(j, "model", a.model);
     getVec3(j, "mount", a.mount);
@@ -234,6 +246,7 @@ RobotConfig RobotConfig::defaults() {
     gunner.eyeColor = glm::vec3(0.5f, 0.9f, 1.0f);
     gunner.eyeSize = 0.34f;
     gunner.eyes = {glm::vec3(-0.765f, 0.615f, -1.44f), glm::vec3(0.765f, 0.615f, -1.44f)};
+    gunner.chargeDrops = {PickupKind::VulcanAmmo};
     cfg.types.push_back(gunner);
 
     RobotDef brute;
@@ -261,6 +274,7 @@ RobotConfig RobotConfig::defaults() {
     brute.eyeSize = 0.46f;
     brute.eyes = {glm::vec3(-0.96f, 1.815f, -1.82f), glm::vec3(0.96f, 1.815f, -1.82f),
                   glm::vec3(0.0f, 2.015f, -1.99f)};
+    brute.chargeDrops = {PickupKind::Concussion};
     cfg.types.push_back(brute);
 
     // The same brute with a railgun over its right shoulder. A type of its own
@@ -288,6 +302,7 @@ RobotConfig RobotConfig::defaults() {
     railBrute.special.range = 400.0f;
     railBrute.special.beamWidth = 0.3f;
     railBrute.special.beamTime = 0.35f;
+    railBrute.chargeDrops = {PickupKind::Concussion, PickupKind::RailgunAmmo};
     cfg.types.push_back(railBrute);
 
     // The gunner with a missile pod on its right shoulder: after a three
@@ -297,6 +312,7 @@ RobotConfig RobotConfig::defaults() {
     // that fired it as readily as anything else. The pod comes off to the
     // railgun, like the brute's gun: one rule for the player to learn.
     RobotDef missileGunner = gunner;
+    missileGunner.chargeDrops = {PickupKind::Homing, PickupKind::VulcanAmmo};
     missileGunner.name = "gunner_missile";
     missileGunner.attachment.model = "missile_pod";
     missileGunner.attachment.mount = glm::vec3(1.3f, 2.05f, 0.0f);
@@ -410,6 +426,15 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "dropNothing", def.dropNothing);
             get(tj, "dropEnergy", def.dropEnergy);
             get(tj, "dropShield", def.dropShield);
+            if (auto cd = tj.find("chargeDrops"); cd != tj.end() && cd->is_array()) {
+                def.chargeDrops.clear();
+                for (const auto& name : *cd) {
+                    PickupKind kind = PickupKind::Energy;
+                    if (name.is_string() && pickupByName(name.get<std::string>(), kind)) {
+                        def.chargeDrops.push_back(kind);
+                    }
+                }
+            }
             if (auto a = tj.find("attachment"); a != tj.end() && a->is_object()) {
                 readAttachment(*a, def.attachment);
             }
@@ -464,6 +489,13 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["dropNothing"] = def.dropNothing;
         tj["dropEnergy"] = def.dropEnergy;
         tj["dropShield"] = def.dropShield;
+        if (!def.chargeDrops.empty()) {
+            nlohmann::json names = nlohmann::json::array();
+            for (PickupKind kind : def.chargeDrops) {
+                names.push_back(kPickupNames[static_cast<size_t>(kind)]);
+            }
+            tj["chargeDrops"] = std::move(names);
+        }
         // Only for a type that carries them, so the other types' entries do
         // not fill up with the tuning of things they do not have.
         if (def.attachment.present()) tj["attachment"] = writeAttachment(def.attachment);
@@ -625,30 +657,50 @@ bool nextWaypoint(const Level& level, const RobotState& state, int fromSegment,
     return false;
 }
 
-// A robot finished by the Static Charge always drops energy, in place of the
-// type's own roll and whatever its drop chances say - including a type
-// configured to drop nothing. The reactor is exempt: it is not a kill the loop
-// is about.
-void spawnDrop(const Level& level, RobotState& state, const RobotDef& def, const Robot& robot) {
-    const bool chargeFinish = !def.isReactor && robot.lastHitByCharge;
+// How far from where a robot died its charge-finish ammunition lands, so the
+// pickups read as separate things rather than one pile. Nothing checks the
+// spot against the mine; a pickup nudged into a wall is an accepted loss.
+constexpr float kDropScatter = 2.0f;
 
-    DropKind kind = DropKind::Energy;
-    if (!chargeFinish) {
-        const float roll = randUnit() * (def.dropNothing + def.dropEnergy + def.dropShield);
-        if (roll < def.dropNothing) return;
-        kind = roll < def.dropNothing + def.dropEnergy ? DropKind::Energy : DropKind::Shield;
-    }
-
+void placeDrop(RobotState& state, PickupKind kind, const glm::vec3& position, int segment) {
     for (Drop& drop : state.drops) {
         if (drop.alive) continue;
         drop = Drop{};
         drop.alive = true;
         drop.kind = kind;
-        drop.position = robot.body.position;
-        drop.segment = robot.body.segment;
-        (void)level;
+        drop.position = position;
+        drop.segment = segment;
         return;
     }
+}
+
+// A robot finished by the Static Charge always drops energy where it died,
+// plus one of each pickup its type lists in `chargeDrops`, spread evenly around
+// it from a random start - in place of the type's own roll, including a type
+// configured to drop nothing. The reactor is exempt: it is not a kill the loop
+// is about.
+void spawnDrop(const Level& level, RobotState& state, const RobotDef& def, const Robot& robot) {
+    (void)level;
+    const glm::vec3& at = robot.body.position;
+    const int segment = robot.body.segment;
+
+    if (!def.isReactor && robot.lastHitByCharge) {
+        placeDrop(state, PickupKind::Energy, at, segment);
+        const size_t count = def.chargeDrops.size();
+        const float start = randUnit() * 6.2831853f;
+        for (size_t i = 0; i < count; ++i) {
+            const float a = start + 6.2831853f * static_cast<float>(i) / static_cast<float>(count);
+            const glm::vec3 out(std::cos(a) * kDropScatter, 0.0f, std::sin(a) * kDropScatter);
+            placeDrop(state, def.chargeDrops[i], at + out, segment);
+        }
+        return;
+    }
+
+    const float roll = randUnit() * (def.dropNothing + def.dropEnergy + def.dropShield);
+    if (roll < def.dropNothing) return;
+    placeDrop(state,
+              roll < def.dropNothing + def.dropEnergy ? PickupKind::Energy : PickupKind::Shield,
+              at, segment);
 }
 
 void spawnDebris(RobotState& state, const Robot& robot, const RobotDef& def) {

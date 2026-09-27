@@ -302,10 +302,7 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
                 rs.pickups[static_cast<size_t>(rs.pickupCount++)];
             view.present = true;
             view.position = drop.position;
-            dressPickup(view,
-                        drop.kind == dvk::sim::DropKind::Energy ? dvk::PickupKind::Energy
-                                                                : dvk::PickupKind::Shield,
-                        pulseAt(di));
+            dressPickup(view, drop.kind, pulseAt(di));
         }
 
         // Every light that is not baked into the level, rebuilt each frame.

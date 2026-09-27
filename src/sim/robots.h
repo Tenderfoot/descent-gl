@@ -1,5 +1,6 @@
 #pragma once
 
+#include "game/level.h"
 #include "sim/body.h"
 #include "sim/occluders.h"
 #include "sim/events.h"
@@ -200,6 +201,11 @@ struct RobotDef {
     float dropNothing = 0.35f;
     float dropEnergy = 0.35f;
     float dropShield = 0.30f;
+
+    // What a Static Charge finish drops besides its energy: the ammunition
+    // this type carries, one pickup of each, scattered around where it died.
+    // The chances above do not apply to a charge finish. See spawnDrop.
+    std::vector<PickupKind> chargeDrops;
 };
 
 struct RobotConfig {
@@ -301,14 +307,12 @@ struct LooseAttachment {
     glm::vec3 spin{0.0f};    // rad/s in its own frame, bled off as it settles
 };
 
-enum class DropKind : uint8_t { Energy, Shield };
-
 // What a robot leaves behind. A pickup the level did not place: stepGame
 // collects it alongside the authored ones, with the same effect, sound and
 // script hooks, and it is drawn as the same sprite. It stays until it is taken.
 struct Drop {
     bool alive = false;
-    DropKind kind = DropKind::Energy;
+    PickupKind kind = PickupKind::Energy;
     glm::vec3 position{0.0f};
     int segment = 0;
 };
@@ -322,7 +326,9 @@ struct Debris {
 };
 
 inline constexpr int kMaxRobots = 32;
-inline constexpr int kMaxDrops = 24;
+// Every robot finished by the Static Charge at once, each leaving its energy
+// and up to two kinds of ammunition.
+inline constexpr int kMaxDrops = kMaxRobots * 3;
 inline constexpr int kMaxDebris = 48;
 inline constexpr int kMaxPathSegments = 128;
 

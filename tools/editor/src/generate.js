@@ -17,7 +17,7 @@
 
 import { addDoor, addLight, addObject, addPickup, segmentCentre, setExit } from './entities.js';
 import { newLevel } from './create.js';
-import { SIDE_VERTICES, WALL_TILE_NAMES } from './format.js';
+import { PICKUP_KEY_FIRST, PICKUP_NAMES, SIDE_VERTICES, WALL_TILE_NAMES } from './format.js';
 import { add, insideSegment, scale } from './geometry.js';
 import { extrudeSide, joinSides, moveVertices, setTexture } from './ops.js';
 import { validateLevel } from './validate.js';
@@ -59,13 +59,13 @@ const tileLayer = (name, shipped) => {
     return layer < 0 ? shipped : layer;
 };
 
-// Pickup kinds, from src/game/level.h: shield, energy, laser, concussion,
-// homing, flares, then the three keys.
-const PICKUP_SHIELD = 0;
-const PICKUP_ENERGY = 1;
-const PICKUP_CONCUSSION = 3;
-const PICKUP_FLARES = 5;
-const PICKUP_KEY = [6, 7, 8];   // blue, yellow, purple - the order `KEY_NAMES` uses
+// Pickup kinds, as indices into PICKUP_NAMES.
+const PICKUP_SHIELD = PICKUP_NAMES.indexOf('shield');
+const PICKUP_ENERGY = PICKUP_NAMES.indexOf('energy');
+const PICKUP_CONCUSSION = PICKUP_NAMES.indexOf('concussion');
+const PICKUP_FLARES = PICKUP_NAMES.indexOf('flares');
+// blue, yellow, purple - the order `KEY_NAMES` uses
+const PICKUP_KEY = [PICKUP_KEY_FIRST, PICKUP_KEY_FIRST + 1, PICKUP_KEY_FIRST + 2];
 
 // Lattice directions, paired with the side each one leaves through.
 // src/game/level.h: left -x, top +y, right +x, bottom -y, back -z, front +z.
