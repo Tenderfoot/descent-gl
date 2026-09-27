@@ -1959,81 +1959,6 @@
   ],
   "objects": [
     {
-      "type": "drone",
-      "position": [
-        50.0,
-        9.0,
-        10.0
-      ],
-      "orientation": [
-        0.0,
-        0.0,
-        1.0,
-        0.0
-      ],
-      "segment": 9
-    },
-    {
-      "type": "drone",
-      "position": [
-        13.0,
-        10.0,
-        50.0
-      ],
-      "orientation": [
-        0.707107,
-        0.0,
-        0.707107,
-        0.0
-      ],
-      "segment": 4
-    },
-    {
-      "type": "gunner",
-      "position": [
-        30.0,
-        10.0,
-        67.0
-      ],
-      "orientation": [
-        0.707107,
-        0.0,
-        -0.707107,
-        0.0
-      ],
-      "segment": 7
-    },
-    {
-      "type": "drone",
-      "position": [
-        46.0,
-        10.0,
-        70.0
-      ],
-      "orientation": [
-        1.0,
-        0.0,
-        0.0,
-        0.0
-      ],
-      "segment": 8
-    },
-    {
-      "type": "gunner",
-      "position": [
-        67.0,
-        10.0,
-        10.0
-      ],
-      "orientation": [
-        0.0,
-        0.0,
-        1.0,
-        0.0
-      ],
-      "segment": 10
-    },
-    {
       "type": "brute",
       "position": [
         93.0,
@@ -2227,6 +2152,36 @@
         0.0
       ],
       "segment": 12
+    },
+    {
+      "type": "brute_railgun",
+      "position": [
+        69.1875,
+        9.86483303760461,
+        9.6875
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "segment": 10
+    },
+    {
+      "type": "gunner_missile",
+      "position": [
+        29.9375,
+        10.625,
+        69.8125
+      ],
+      "orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "segment": 7
     }
   ],
   "floatingLights": [
