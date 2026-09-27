@@ -111,7 +111,7 @@ struct HudWeaponSlot {
 // reach into simulation state.
 struct HudData {
     bool show = true;
-    float shields = 100.0f;
+    float shields = 200.0f;
     float energy = 100.0f;
 
     // The weapon strip, bottom right: the primaries in key order, then the

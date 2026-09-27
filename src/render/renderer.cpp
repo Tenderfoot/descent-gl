@@ -991,7 +991,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     hud_.bar(left, y, barW, barH, hud.energy / 100.0f, glm::vec4(0.3f, 0.75f, 1.0f, 0.9f));
     y -= barH + 12.0f * s;
     hud_.text("shields", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
-    hud_.bar(left, y, barW, barH, hud.shields / 100.0f, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
+    hud_.bar(left, y, barW, barH, hud.shields / sim::kPlayerMaxShields, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
 
     // Darkness, as a third gauge on the same stack. It belongs with energy and
     // shields rather than off on its own: the mine has no ambient term, so the

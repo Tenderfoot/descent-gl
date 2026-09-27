@@ -1,5 +1,5 @@
 loadout {
-  shields = 100,
+  shields = 200,
   energy = 100,
   vulcan = 0,
   concussion = 0,   

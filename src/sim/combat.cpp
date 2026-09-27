@@ -1050,7 +1050,7 @@ bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
     ship.velocity = glm::vec3(0.0f);
     shipOrientation = level.start.orientation;
 
-    state.player.shields = 100.0f;
+    state.player.shields = kPlayerMaxShields;
     state.player.energy = 100.0f;
     state.player.lastTargetRobot = -1;
     state.player.targetHudTime = 0.0f;
