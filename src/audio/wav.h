@@ -37,6 +37,14 @@ struct Clip {
 // most needs to be testable.
 Clip loadWav(const std::string& path);
 
+// Reads an Ogg Vorbis file into the same shape loadWav produces. The music is
+// Vorbis so the repository carries a tenth of the bytes; once decoded it costs
+// exactly what the WAV did. Lives in ogg.cpp.
+Clip loadOgg(const std::string& path);
+
+// loadOgg for a `.ogg` path, loadWav for anything else.
+Clip loadClip(const std::string& path);
+
 // Resamples in place to `rate` if the clip is at some other rate, so the mixer
 // only ever deals in one sample rate and does not carry a per-voice ratio it
 // would have to get right. Linear interpolation: these are short, noisy sound

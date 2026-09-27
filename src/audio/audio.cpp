@@ -79,8 +79,8 @@ constexpr std::array<const char*, static_cast<size_t>(Ambient::Count)> kAmbientF
 // tracks the game shipped with, one a side. A mine with no soundtrack would be
 // a strange way to report a typo in a config file.
 constexpr std::array<const char*, 2> kMusicFallback{{
-    "Sub-Bass Drones.wav",
-    "Mechanical Devastation.wav",
+    "Sub-Bass Drones.ogg",
+    "Mechanical Devastation.ogg",
 }};
 
 // The playlist file, beside the tracks it lists.
@@ -205,7 +205,7 @@ void Bank::loadMusic(const std::string& root) {
     for (size_t i = 0; i < playlist.size(); ++i) {
         for (const PlaylistEntry& entry : playlist[i]) {
             const std::filesystem::path path = std::filesystem::path(root) / entry.file;
-            Clip clip = loadWav(path.string());
+            Clip clip = loadClip(path.string());
             if (!clip.valid()) {
                 ++missing;
                 continue;

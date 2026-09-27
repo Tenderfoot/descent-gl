@@ -1,12 +1,12 @@
 {
     "lull": [
-        "Sub-Bass Drones.wav",
-	"Stealth in the Dark.wav",
-	"Deep Space Static.wav"
+        "Sub-Bass Drones.ogg",
+        "Stealth in the Dark.ogg",
+        "Deep Space Static.ogg"
     ],
     "combat": [
-        "Mechanical Devastation.wav",
-	"Grinding Bearings.wav",
-	"Grease-Scream Pistons.wav"
+        "Mechanical Devastation.ogg",
+        "Grinding Bearings.ogg",
+        "Grease-Scream Pistons.ogg"
     ]
 }
