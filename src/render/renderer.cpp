@@ -888,14 +888,29 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             ry = (0.5f - clip.y / clip.w * 0.5f) * h;
         }
     }
-    const float arm = 5.0f * s;
-    const float gap = 3.0f * s;
-    const float thin = std::max(1.0f, s * 0.6f);
-    const glm::vec4 reticle(0.6f, 1.0f, 0.7f, 0.75f);
-    hud_.rect(rx - gap - arm, ry - thin * 0.5f, arm, thin, reticle);
-    hud_.rect(rx + gap, ry - thin * 0.5f, arm, thin, reticle);
-    hud_.rect(rx - thin * 0.5f, ry - gap - arm, thin, arm, reticle);
-    hud_.rect(rx - thin * 0.5f, ry + gap, thin, arm, reticle);
+    // Small and crisp, the way a Counter-Strike crosshair is: four short arms
+    // in whole pixels on a pixel-snapped centre, so nothing lands on half a
+    // pixel and blurs, with a one-pixel dark outline so it still reads over an
+    // explosion. About 6 px arms, a 4 px gap and 2 px lines at 1080p.
+    {
+        const float arm = std::round(1.5f * s);
+        const float gap = std::round(1.0f * s);
+        const float thin = std::max(1.0f, std::round(0.45f * s));
+        const float px = std::round(rx - thin * 0.5f) + thin * 0.5f;
+        const float py = std::round(ry - thin * 0.5f) + thin * 0.5f;
+        const glm::vec4 outline(0.0f, 0.0f, 0.0f, 0.55f);
+        const glm::vec4 reticle(0.6f, 1.0f, 0.7f, 0.95f);
+        const auto arms = [&](float grow, const glm::vec4& color) {
+            const float t = thin + grow * 2.0f;
+            const float a = arm + grow * 2.0f;
+            hud_.rect(px - gap - arm - grow, py - t * 0.5f, a, t, color);
+            hud_.rect(px + gap - grow, py - t * 0.5f, a, t, color);
+            hud_.rect(px - t * 0.5f, py - gap - arm - grow, t, a, color);
+            hud_.rect(px - t * 0.5f, py + gap - grow, t, a, color);
+        };
+        arms(1.0f, outline);
+        arms(0.0f, reticle);
+    }
 
     // The nearest robot missile coming for the ship. On screen, a pulsing
     // bracket around it with its distance, so the player can put the reticle
