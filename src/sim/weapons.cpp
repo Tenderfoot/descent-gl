@@ -154,7 +154,7 @@ WeaponConfig WeaponConfig::defaults() {
     lightning.damage = 36.0f;
     lightning.impactImpulse = 30.0f;   // also per second; a steady push
     lightning.fireInterval = 0.14f;    // the crackle's repeat, not a damage gate
-    lightning.ammoCost = 5;            // rounds per SECOND: a full 50 is 10 s of trigger
+    lightning.ammoCost = 5;            // rounds per SECOND: a full 10 is 2 s of trigger
     lightning.range = 70.0f;           // short, so it has to be flown into range
     lightning.color = glm::vec3(0.75f, 0.62f, 1.0f);
     lightning.beamWidth = 0.10f;

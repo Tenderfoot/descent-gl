@@ -173,7 +173,7 @@ struct PlayerState {
     // lightningAmmo is the Static Charge: at most kStaticChargeCapacity, built
     // up by flying (WeaponConfig::staticChargeRate) and filled by its pickup.
     int railgunAmmo = 20;
-    int lightningAmmo = 50;
+    int lightningAmmo = 10;
     int flares = 12;
     std::array<float, WeaponCount> cooldown{};
     // What a continuous weapon has spent but not yet paid for, in whole rounds.
@@ -222,7 +222,7 @@ struct PlayerState {
 
 // The most the Static Charge holds. Flying stops adding to it here, and its
 // pickup fills it to exactly this.
-inline constexpr int kStaticChargeCapacity = 50;
+inline constexpr int kStaticChargeCapacity = 10;
 
 // Full shields. The number the disabled threshold is a fraction of.
 inline constexpr float kPlayerMaxShields = 100.0f;
