@@ -159,9 +159,13 @@ using FlarePool = Pool<Flare, kMaxFlares>;
 using EffectPool = Pool<Effect, kMaxEffects>;
 using BeamPool = Pool<Beam, kMaxBeams>;
 
+// Full shields. The number the disabled threshold is a fraction of, and what
+// the ship starts a level with.
+inline constexpr float kPlayerMaxShields = 200.0f;
+
 // The player's resources and loadout.
 struct PlayerState {
-    float shields = 100.0f;
+    float shields = kPlayerMaxShields;
     float energy = 100.0f;
     int primaryWeapon = WeaponLaser;
     int secondaryWeapon = WeaponConcussion;
@@ -226,9 +230,6 @@ struct PlayerState {
 // The most the Static Charge holds. Flying stops adding to it here, and its
 // pickup fills it to exactly this.
 inline constexpr int kStaticChargeCapacity = 10;
-
-// Full shields. The number the disabled threshold is a fraction of.
-inline constexpr float kPlayerMaxShields = 100.0f;
 
 // True while the ship is too badly damaged to fly itself. At or below this the
 // player has no thrust, no steering, no guns and no headlight: the ship drifts

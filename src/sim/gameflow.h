@@ -126,7 +126,7 @@ struct GameState {
 
 struct GameConfig {
     float countdownSeconds = 45.0f;
-    float shieldPickup = 25.0f;
+    float shieldPickup = 50.0f;
     float energyPickup = 30.0f;
     int concussionPickup = 3;
     int homingPickup = 3;

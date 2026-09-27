@@ -2,7 +2,7 @@
 -- transmissions come in back to back, and the last one hands the ship back.
 
 loadout {
-  shields = 5,      -- under the 10% threshold: disabled, drifting, tumbling
+  shields = 10,     -- under the 10% threshold: disabled, drifting, tumbling
   energy = 0,
   vulcan = 0,
   concussion = 1,   -- the one missile for the reactor
@@ -61,7 +61,7 @@ timer {
       after(12.0, function()        -- 7s clip + 5s buffer
         comm("help")
         after(10.0, function()      -- lands as the last line ends
-          set_shields(11)           -- back over the 10% cutoff: control returns
+          set_shields(22)           -- back over the 10% cutoff: control returns
           show_tutorial("shipcontroltutorial")
         end)
       end)

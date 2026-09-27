@@ -109,7 +109,7 @@ void collectPickup(PickupKind kind, const glm::vec3& position, int segment, cons
     PlayerState& p = combat.player;
     switch (kind) {
         case PickupKind::Shield:
-            p.shields = std::min(100.0f, p.shields + cfg.shieldPickup);
+            p.shields = std::min(kPlayerMaxShields, p.shields + cfg.shieldPickup);
             break;
         case PickupKind::Energy:
             p.energy = std::min(100.0f, p.energy + cfg.energyPickup);
