@@ -230,6 +230,11 @@ struct RobotConfig {
 RobotConfig loadRobotConfig(const std::string& path);
 bool saveRobotConfig(const std::string& path, const RobotConfig& cfg);
 
+// What landed the last damage a robot took, for the drop it leaves if that
+// damage is what killed it: a Static Charge finish resupplies the player, a
+// player missile's (impact or blast) repairs their shields. See spawnDrop.
+enum class LastHit : uint8_t { Other, Charge, Missile };
+
 struct Robot {
     bool alive = false;
     int type = 0;
@@ -265,9 +270,7 @@ struct Robot {
     glm::vec3 tumble{0.0f};
     int homeSegment = 0;
 
-    // Whether the last damage it took came from the Static Charge. A robot the
-    // Static Charge finishes always drops energy; see spawnDrop.
-    bool lastHitByCharge = false;
+    LastHit lastHit = LastHit::Other;
 
     // The attachment, for a type that has one. See AttachmentDef.
     bool attachmentOn = false;

@@ -40,12 +40,17 @@ the live values.
   through rock, and hurts the player and other robots too. The blast is shown
   in game: the explosion light reaches exactly the blast radius, and a
   shockwave ring grows out to it.
-- **Robots resupply the player only when the Static Charge finishes them.**
-  Every type is `dropNothing: 1.0`, so any other kill drops nothing. A Static
-  Charge finish always drops an energy pickup where the robot died, plus one
-  pickup of each kind in the type's `chargeDrops`, scattered 2 units around
-  it. The reactor is exempt. Dropped pickups are the level's own pickups and
-  give the same amounts.
+- **What a kill drops depends on the weapon that landed the last hit.** Every
+  type is `dropNothing: 1.0`, so a kill by anything else drops nothing. The
+  reactor is exempt from both drops below. Dropped pickups are the level's own
+  pickups and give the same amounts.
+  - **Static Charge finish:** an energy pickup where the robot died, plus one
+    pickup of each kind in the type's `chargeDrops`, scattered 2 units around
+    it.
+  - **Player missile kill** (concussion or homing, by impact or blast): a
+    shield pickup (+25) where the robot died. The robot does not have to be
+    disabled first, so a drone one-shot by a missile drops one too. A robot
+    missile's blast does not count, even one the player shot down.
 
   | Robot | Static Charge finish drops |
   |---|---|
@@ -54,8 +59,9 @@ the live values.
   | gunner_missile | energy, homing, vulcan |
   | brute | energy, concussion |
   | brute_railgun | energy, concussion, railgun |
-- **There is no energy regeneration.** `energyRecharge` is 0; energy comes
-  from pickups and Static Charge finishes. The headlight drains 0.2/s.
+- **There is no energy or shield regeneration.** `energyRecharge` is 0;
+  energy comes from pickups and Static Charge finishes, shields from pickups
+  and missile kills. The headlight drains 0.2/s.
 
 ## The player
 
@@ -177,6 +183,14 @@ player. Its ordinary bursts carry on throughout.
   Watch whether a player who has learned it stops being short of anything:
   a brute_railgun finish returns +30 energy, +3 concussion and +3 rail -
   about as much rail as the kill cost.
+- **Missile kills are a shield source, capped only by missile supply.**
+  Drones die to one missile, so every drone is a missile for +25 shields, and
+  brutes drop concussions on a Static Charge finish, so the two loops can feed
+  each other: finish a brute with the charge for three concussions, spend them
+  on drones for 75 shields. Shields recovered mid-fight also blunt incoming
+  pressure, the brute_railgun above most of all. Watch whether shields stop
+  being the resource that ends a run; requiring the robot to be disabled
+  first, or not counting drones, are the levers if so.
 - **The Static Charge is a finisher, not a killer.** A full charge is 72
   damage: a drone, not a gunner.
 - **Stale fallback defaults in code.** See the top of this file.

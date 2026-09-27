@@ -69,13 +69,21 @@ Effect* spawnEffect(CombatState& state, const glm::vec3& position, int segment,
 
 namespace {
 
+// What a projectile's damage counts as for the drop a kill leaves: the
+// player's concussion and homing missiles, by impact or by blast. Robot fire
+// has no weapon, so a robot missile - even one the player shot down - is not.
+LastHit projectileHit(const Projectile& p) {
+    return p.weapon == WeaponConcussion || p.weapon == WeaponHoming ? LastHit::Missile
+                                                                    : LastHit::Other;
+}
+
 // Applies damage to everything within `radius` of `centre`, falling off
 // linearly - robots, destructible scenery, and the player. Splash that does not
 // hurt the person who fired it is a missile you can safely shoot at your own
 // feet, which is not the weapon this is meant to be.
 int applySplash(const Level& level, CombatState& state, RobotState* robots, Body* player,
                 const glm::vec3& centre, int segment, float radius, float damage, float impulse,
-                float playerMass, const SolidDoors* doors, PropState* props) {
+                float playerMass, const SolidDoors* doors, PropState* props, LastHit cause) {
     if (radius <= 0.0f || (damage <= 0.0f && impulse <= 0.0f)) return 0;
     int hits = 0;
 
@@ -127,7 +135,7 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
             if (!exposed(robot.body.position, &d)) continue;
             const auto [hurt, shove] = share(d);
             robot.health -= hurt;
-            robot.lastHitByCharge = false;
+            robot.lastHit = cause;
             applyImpulse(robot.body, away(robot.body.position), shove, robot.mass);
             ++hits;
         }
@@ -179,7 +187,7 @@ void killProjectile(const Level& level, CombatState& state, RobotState* robots, 
     const bool explosive = p.splashRadius > 0.0f;
     if (explosive) {
         applySplash(level, state, robots, player, at, segment, p.splashRadius, p.splashDamage,
-                    p.splashImpulse, playerMass, doors, props);
+                    p.splashImpulse, playerMass, doors, props, projectileHit(p));
         // The light reaches exactly as far as the damage does - it goes to
         // zero at its radius - so in a mine with no ambient term, what the
         // flash lit is what the blast hit. The ring draws the same edge crisply.
@@ -214,7 +222,7 @@ bool breakAttachment(const Level& level, CombatState& state, RobotState& robots,
     // Through the robot's health like any other hit, so disabling and death
     // follow from it on the robot's next step the usual way.
     robot.health -= robot.attachmentBreakDamage;
-    robot.lastHitByCharge = false;
+    robot.lastHit = LastHit::Other;
     state.player.lastTargetRobot = hit.index;
     state.player.targetHudTime = kTargetHudTime;
     robot.awareness = 1.0f;
@@ -678,7 +686,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                         break;
                     }
                     robot.health -= shot;
-                    robot.lastHitByCharge = weaponId == WeaponLightning;
+                    robot.lastHit = weaponId == WeaponLightning ? LastHit::Charge : LastHit::Other;
                     player.lastTargetRobot = hit.index;
                     player.targetHudTime = kTargetHudTime;
                     robot.awareness = 1.0f;
@@ -909,7 +917,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                     robot.mode != RobotMode::Disabled) {
                     robot.health = 1.0f;
                 }
-                robot.lastHitByCharge = false;
+                robot.lastHit = projectileHit(p);
                 // Only the player's direct impact acquires a HUD target.
                 // applySplash remains intentionally unaware of target state.
                 if (p.owner < 0) {
