@@ -1837,11 +1837,13 @@ void Renderer::buildDebugLines(const Level& level, const RenderState& rs,
         }
     }
 
-    // Placed from the interpolated view with the same placeProxy the sim uses,
-    // so it sits on the drawn attachment rather than a step behind it. A hull
-    // is drawn as its bounding box: close enough to see what the trace is
-    // aimed at.
-    if (drawAttachmentHitboxes && robotConfig_) {
+    // The hitbox of every robot attachment still mounted on its robot - the
+    // volume the player's fire is traced against, not the mesh. A player
+    // setting rather than a debug toggle. Placed from the interpolated view
+    // with the same placeProxy the sim uses, so it sits on the drawn
+    // attachment rather than a step behind it. A hull is drawn as its
+    // bounding box: close enough to see what the trace is aimed at.
+    if (rs.weaponHitboxes && robotConfig_) {
         const glm::vec3 color(1.0f, 0.2f, 0.9f);
         for (int i = 0; i < rs.attachmentCount; ++i) {
             const RenderState::AttachmentView& part = rs.attachments[static_cast<size_t>(i)];

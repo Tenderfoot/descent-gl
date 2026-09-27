@@ -74,10 +74,11 @@ constexpr std::array<ButtonDefinition, 4> kAudioButtons{{
     {MenuAction::Back, "back"},
 }};
 
-constexpr std::array<ButtonDefinition, 5> kGameButtons{{
+constexpr std::array<ButtonDefinition, 6> kGameButtons{{
     {MenuAction::None, "mouse sensitivity"},
     {MenuAction::None, "invert mouse y"},
     {MenuAction::None, "tutorials"},
+    {MenuAction::None, "weapon hitboxes"},
     {MenuAction::ApplySettings, "apply"},
     {MenuAction::Back, "back"},
 }};
@@ -439,7 +440,7 @@ int PlayerMenu::valueRows(MenuScreen screen) {
     switch (screen) {
         case MenuScreen::SettingsVideo: return 5;
         case MenuScreen::SettingsAudio: return 2;
-        case MenuScreen::SettingsGame: return 3;
+        case MenuScreen::SettingsGame: return 4;
         default: return 0;
     }
 }
@@ -513,6 +514,9 @@ void PlayerMenu::adjustSetting(MenuScreen screen, int index, int direction) {
                     break;
                 case 1: editedSettings_.invertMouseY = !editedSettings_.invertMouseY; break;
                 case 2: editedSettings_.tutorials = !editedSettings_.tutorials; break;
+                case 3:
+                    editedSettings_.weaponHitboxes = !editedSettings_.weaponHitboxes;
+                    break;
                 default: break;
             }
             break;
@@ -910,6 +914,7 @@ MenuView PlayerMenu::view(int width, int height) const {
                         break;
                     case 1: onOff(editedSettings_.invertMouseY); break;
                     case 2: onOff(editedSettings_.tutorials); break;
+                    case 3: onOff(editedSettings_.weaponHitboxes); break;
                     default: break;
                 }
                 break;

@@ -169,6 +169,7 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
         rs.camera = camera;
         rs.verticalFov = camera == dvk::CameraMode::FirstPerson ? settings.firstPersonFov
                                                                 : settings.thirdPersonFov;
+        rs.weaponHitboxes = settings.weaponHitboxes;
 
         // The mine coming apart. Driven from wall-clock rather than the sim, so
         // the shake is smooth at any frame rate and never accumulates into the

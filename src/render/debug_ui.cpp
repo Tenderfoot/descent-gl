@@ -122,7 +122,6 @@ void drawDebugUi(DebugUiContext& ctx) {
             ImGui::Checkbox("contacts", &renderer.drawContacts);
             ImGui::SameLine();
             ImGui::Checkbox("nose ray", &renderer.drawNoseRay);
-            ImGui::Checkbox("robot weapon hitboxes", &renderer.drawAttachmentHitboxes);
         }
         ImGui::End();
 
