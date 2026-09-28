@@ -281,6 +281,13 @@ struct FireControls {
     // Step the secondary selection on to the next missile. A one-shot edge,
     // not a held button: the cycle key advances once per press.
     bool cycleSecondary = false;
+    // Aim from the chase camera rather than along the nose: the eye, and the
+    // direction through the reticle, both in the ship's own frame. The guns
+    // fire at whatever that ray meets first. False in first person, where the
+    // eye is on the nose and the two are the same line. See traceEyeRay.
+    bool aimFromEye = false;
+    glm::vec3 eyeLocal{0.0f};
+    glm::vec3 aimLocal{0.0f, 0.0f, -1.0f};
 };
 
 // Which doors have been shot since the game flow last looked.
@@ -370,6 +377,20 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
                          const glm::vec3& direction, float maxDistance, int segment,
                          const CombatTraceParams& params = {}, const SolidDoors* doors = nullptr,
                          const PropState* props = nullptr);
+
+// What the chase camera's reticle is on: the first thing along `direction`
+// from a camera at `eye`, as the player's fire would meet it.
+//
+// Started abreast of the ship rather than at the eye, so nothing between the
+// camera and the ship - behind the player - can be what they are aiming at.
+// False when that starting point cannot be reached from the ship in a straight
+// line, which is a camera pressed against a low ceiling: the caller aims along
+// the nose instead. On a ray that meets nothing, `hit.point` is the far end.
+bool traceEyeRay(const Level& level, const CombatState& state, const Body& ship,
+                 const RobotState* robots, const glm::vec3& shipPosition, int shipSegment,
+                 const glm::vec3& eye, const glm::vec3& direction, float maxDistance,
+                 CombatHit& hit, const SolidDoors* doors = nullptr,
+                 const PropState* props = nullptr);
 
 // The count a weapon spends, or null when it runs on energy instead. One
 // mapping rather than two: the gun and the readout that reports the gun agree

@@ -29,10 +29,14 @@ struct WeaponConfig;
 
 inline constexpr float kDefaultAimDistance = 200.0f;
 
-// How far down the firing line the reticle is drawn, and what it is drawn on.
-// Held across frames because the distance is chased rather than set: see where
-// it is updated in prepareRenderFrame.
+// Where the reticle is drawn, and what it is drawn on. Held across frames
+// because the nose-line distance is chased rather than set: see where it is
+// updated in prepareRenderFrame.
 struct AimLine {
+    // The world point the reticle covers.
+    glm::vec3 point{0.0f};
+    // How far down the nose line the reticle is, when it is on the nose line
+    // rather than on the chase camera's own aim ray.
     float distance = kDefaultAimDistance;
     // The line ends on a robot, a shootable missile or a destructible object
     // rather than on the mine. Remembered so that leaving a body snaps the

@@ -649,6 +649,14 @@ int main(int argc, char** argv) {
                         dvk::sim::weaponSlot(opts.autofire) == dvk::sim::WeaponSlot::Secondary;
                 }
             }
+            // In the chase camera the guns fire at what is under the reticle,
+            // from an eye placed wherever the mine let it sit last frame.
+            if (camera == dvk::CameraMode::Chase) {
+                const dvk::ChaseAimRay ray = dvk::chaseAimRay(chaseCamera.distance);
+                fire.aimFromEye = true;
+                fire.eyeLocal = ray.eye;
+                fire.aimLocal = ray.direction;
+            }
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
                                  fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
                                  &soundEvents, &cur.props);
@@ -769,8 +777,7 @@ int main(int argc, char** argv) {
             bindings,
             static_cast<float>(kSimStep),
             !opts.noUi && session.active() && session.mode() != dvk::AppMode::RunSummary,
-            shipForward,
-            aim.distance,
+            aim.point,
             aim.onBreakable,
             !automap.open,
             playerSeen,
