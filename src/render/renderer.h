@@ -328,6 +328,11 @@ public:
     // draw quietly drift apart. Valid after beginFrame, which sizes the target.
     glm::mat4 viewProj(const RenderState& rs) const;
 
+    // Where that view-projection's eye is: the chase camera's eye in chase
+    // view, shake included. The portal walk starts from the segment this is in,
+    // not the ship's - in chase view the two are often different segments.
+    glm::vec3 eyePos(const RenderState& rs) const;
+
     // What a comm manifest carried. The renderer loads the library, so this is
     // where the numbers arrive, but it is CommPlayer that decides what to do
     // with them. Null for an index no clip answers to, rather than an answer
@@ -423,7 +428,6 @@ private:
     static bool propAlive(const Prop& prop, const RenderState& rs);
 
     glm::mat4 buildView(const RenderState& rs) const;
-    glm::vec3 eyePos(const RenderState& rs) const;
     glm::mat4 shipModelMatrix(const RenderState& rs) const;
 
     void loadProps(const Level& level, const sim::RobotConfig& robots);

@@ -765,8 +765,15 @@ int main(int argc, char** argv) {
         renderer.beginFrame(fb.x, fb.y);
         renderer.buildDebugLines(level, rs, contacts, noseRay);
         if (!freezeVisible) {
-            walk.build(level, rs.shipSegment, renderer.viewProj(rs), rs.shipPos,
-                       &cur.game.doorField);
+            // The walk starts where the eye is. In chase view that is behind
+            // and above the ship and often a segment back from it; starting at
+            // the ship's segment clipped everything around the eye to the one
+            // portal between the two, so rooms still on screen dropped out.
+            // The eye sits on a clear line out from the ship, so following
+            // portal planes from the ship's segment finds its segment.
+            const glm::vec3 eye = renderer.eyePos(rs);
+            const int eyeSegment = dvk::trackSegment(level, eye, rs.shipSegment);
+            walk.build(level, eyeSegment, renderer.viewProj(rs), eye, &cur.game.doorField);
         }
 
         const dvk::HudBuildContext hudContext{

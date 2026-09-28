@@ -1954,9 +1954,10 @@ glm::mat4 Renderer::buildView(const RenderState& rs) const {
 glm::vec3 Renderer::eyePos(const RenderState& rs) const {
     if (rs.camera == CameraMode::Chase) {
         return rs.shipPos +
-               glm::mat3_cast(rs.shipOrientation) * chaseDirection() * rs.chaseDistance;
+               glm::mat3_cast(rs.shipOrientation) * chaseDirection() * rs.chaseDistance +
+               rs.shakeOffset;
     }
-    return rs.shipPos;
+    return rs.shipPos + rs.shakeOffset;
 }
 
 glm::mat4 Renderer::shipModelMatrix(const RenderState& rs) const {
