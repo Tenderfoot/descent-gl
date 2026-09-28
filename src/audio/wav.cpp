@@ -2,9 +2,11 @@
 
 #include "core/log.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 
 namespace dvk::audio {
@@ -168,6 +170,12 @@ Clip loadWav(const std::string& path) {
         clip.samples[f] = sum / static_cast<float>(channels);
     }
     return clip;
+}
+
+Clip loadClip(const std::string& path) {
+    std::string extension = std::filesystem::path(path).extension().string();
+    for (char& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return extension == ".ogg" ? loadOgg(path) : loadWav(path);
 }
 
 void resample(Clip& clip, int rate) {

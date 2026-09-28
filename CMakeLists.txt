@@ -30,6 +30,7 @@ add_executable(descent
     src/audio/audio.cpp
     src/audio/device.cpp
     src/audio/mixer.cpp
+    src/audio/ogg.cpp
     src/audio/sound_test.cpp
     src/audio/wav.cpp
     src/core/input.cpp
