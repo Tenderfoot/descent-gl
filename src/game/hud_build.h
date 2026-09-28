@@ -52,8 +52,8 @@ struct HudBuildContext {
     // summary, which is the menu's screen rather than the HUD's.
     bool show;
 
-    glm::vec3 shipForward;
-    float aimDistance;
+    // The world point the reticle covers.
+    glm::vec3 aimPoint;
     // The firing line ends on an attachment a selected weapon knocks loose.
     bool aimOnBreakable;
     // False on the automap, which has its own camera and no firing line on

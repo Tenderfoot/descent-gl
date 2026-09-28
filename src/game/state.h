@@ -37,6 +37,46 @@ inline constexpr float kChaseLookAhead = 6.0f;
 // static-order hazard for the sake of three arithmetic operations.
 inline glm::vec3 chaseDirection() { return glm::normalize(kChaseOffset); }
 
+// The ray through the chase camera's reticle, in the ship's own space, with the
+// eye `distance` along kChaseOffset.
+//
+// The reticle is a fixed pixel: the one the nose points at, at infinity, with
+// the eye all the way out. Far away that is where the nose is going anyway;
+// up close the ray runs above the nose line, and the guns aim up to meet it,
+// so what sits under the reticle is what the shot hits. Pulling the eye in
+// turns the camera a little, because its look-at target stays put; the ray
+// turns with it and stays on the same pixel.
+struct ChaseAimRay {
+    glm::vec3 eye{0.0f};
+    glm::vec3 direction{0.0f, 0.0f, -1.0f};
+};
+
+inline ChaseAimRay chaseAimRay(float distance) {
+    // The camera's own axes for an eye at `eye`, built the way glm::lookAt
+    // builds them, towards the point kChaseLookAhead ahead of the ship.
+    struct Axes {
+        glm::vec3 right, up, back;
+    };
+    const auto axes = [](const glm::vec3& eye) {
+        const glm::vec3 target(0.0f, 0.0f, -kChaseLookAhead);
+        const glm::vec3 back = glm::normalize(eye - target);
+        const glm::vec3 right = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), back));
+        return Axes{right, glm::cross(back, right), back};
+    };
+    // The reticle's direction in view space: the ship's nose, seen from the
+    // resting eye.
+    const glm::vec3 nose(0.0f, 0.0f, -1.0f);
+    const Axes rest = axes(kChaseOffset);
+    const glm::vec3 view(glm::dot(nose, rest.right), glm::dot(nose, rest.up),
+                         glm::dot(nose, rest.back));
+
+    ChaseAimRay ray;
+    ray.eye = chaseDirection() * distance;
+    const Axes now = axes(ray.eye);
+    ray.direction = glm::normalize(now.right * view.x + now.up * view.y + now.back * view.z);
+    return ray;
+}
+
 // State advanced by the fixed 120 Hz step. Everything the renderer needs to
 // interpolate lives here and nowhere else.
 struct SimState {

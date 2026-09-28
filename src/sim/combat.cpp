@@ -25,6 +25,16 @@ uint32_t g_spreadCounter = 0;
 // See the muzzle flash comment in fire(): short, but not one step.
 constexpr float kMuzzleFlashTime = 0.05f;
 
+// How far the chase camera's aim ray looks for something to be on. Past the
+// railgun's reach, so the longest gun is never told to stop short.
+constexpr float kEyeAimRange = 500.0f;
+
+// The widest a shot may leave the nose to reach the reticle's target: the cosine
+// of thirty degrees. The eye rides above the nose line, so a target a few units
+// ahead asks the guns to fire steeply upward to meet the ray; that close, the
+// target fills the screen and the nose is on it anyway.
+constexpr float kEyeAimMinCos = 0.866f;
+
 // How far past a robot's hull a shot may meet its attachment and still count
 // as hitting the attachment. One can sit partly inside the hull's sphere, and
 // without this a shot aimed squarely at it lands on the robot instead.
@@ -422,6 +432,34 @@ CombatHit traceCombatRay(const Level& level, const CombatState& state, const Bod
     return haveBody ? body : hit;
 }
 
+bool traceEyeRay(const Level& level, const CombatState& state, const Body& ship,
+                 const RobotState* robots, const glm::vec3& shipPosition, int shipSegment,
+                 const glm::vec3& eye, const glm::vec3& direction, float maxDistance,
+                 CombatHit& hit, const SolidDoors* doors, const PropState* props) {
+    const float abreast = std::max(0.0f, glm::dot(shipPosition - eye, direction));
+    const glm::vec3 start = eye + direction * abreast;
+
+    // The start is a couple of units off the ship at most, but under a low
+    // ceiling that is enough to be in the rock, or through it.
+    int startSegment = shipSegment;
+    const glm::vec3 across = start - shipPosition;
+    const float reach = glm::length(across);
+    if (reach > 1e-3f) {
+        if (raycast(level, shipPosition, across / reach, reach, shipSegment, doors).hit) {
+            return false;
+        }
+        startSegment = findSegment(level, start, shipSegment);
+        if (startSegment < 0) startSegment = shipSegment;
+    }
+
+    CombatTraceParams params;
+    params.owner = -1;
+    hit = traceCombatRay(level, state, ship, robots, start, direction, maxDistance, startSegment,
+                         params, doors, props);
+    if (hit.kind == CombatHit::Kind::None) hit.point = start + direction * maxDistance;
+    return true;
+}
+
 int* weaponAmmoPool(PlayerState& player, int weaponId) {
     switch (static_cast<WeaponId>(weaponId)) {
         case WeaponVulcan: return &player.vulcanAmmo;
@@ -530,6 +568,33 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     const glm::vec3 right = basis * glm::vec3(1.0f, 0.0f, 0.0f);
     const glm::vec3 up = basis * glm::vec3(0.0f, 1.0f, 0.0f);
 
+    // --- aim -------------------------------------------------------------
+    //
+    // In the chase camera the guns fire at what is under the reticle, found by
+    // a ray from the camera, rather than along the nose. The eye sits above
+    // the nose line, so the two disagree on anything near; this makes the
+    // reticle a promise. Asked once a step, and only with a trigger down.
+    bool eyeAimed = false;
+    glm::vec3 eyeTarget(0.0f);
+    if (controls.aimFromEye && (controls.primary || controls.secondary) && !disabled) {
+        CombatHit aimHit;
+        eyeAimed = traceEyeRay(level, state, ship, robots, ship.position, ship.segment,
+                               ship.position + basis * controls.eyeLocal,
+                               glm::normalize(basis * controls.aimLocal), kEyeAimRange, aimHit,
+                               doors, props);
+        eyeTarget = aimHit.point;
+    }
+    // The direction a shot leaving `origin` takes to reach the reticle's
+    // target, or the nose when there is none or it is too far off the nose.
+    const auto aimFrom = [&](const glm::vec3& origin) {
+        if (!eyeAimed) return forward;
+        const glm::vec3 to = eyeTarget - origin;
+        const float length = glm::length(to);
+        if (length < 1e-3f) return forward;
+        const glm::vec3 dir = to / length;
+        return glm::dot(dir, forward) >= kEyeAimMinCos ? dir : forward;
+    };
+
     // --- firing ----------------------------------------------------------
     const auto fire = [&](int weaponId) {
         const WeaponDef& def = cfg.weapons[static_cast<size_t>(weaponId)];
@@ -610,6 +675,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         } else {
             origin += forward * 1.5f;
         }
+        const glm::vec3 aim = aimFrom(origin);
 
         // The muzzle flash. Scaled from the weapon's own bolt light rather than
         // from a constant, so a vulcan pop is small and a missile launch throws
@@ -651,7 +717,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         // still be a bolt, and would still have to be swept step by step
         // against the mine; this is the thing the shared trace exists for.
         if (mode != WeaponFire::Projectile) {
-            const glm::vec3 shotDir = spreadDirection(forward, right, up, def.spread);
+            const glm::vec3 shotDir = spreadDirection(aim, right, up, def.spread);
             CombatTraceParams params;   // a ray, not a sweep: it has no width in flight
             params.owner = -1;
             const CombatHit hit = traceCombatRay(level, state, ship, robots, origin, shotDir,
@@ -747,7 +813,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         p.kind = projectileFor(weaponId);
         p.weapon = weaponId;
         p.position = origin;
-        p.velocity = spreadDirection(forward, right, up, def.spread) * def.speed;
+        p.velocity = spreadDirection(aim, right, up, def.spread) * def.speed;
         if (weaponInheritsVelocity(weaponId)) p.velocity += ship.velocity;
         p.color = color;
         p.segment = ship.segment;
@@ -763,8 +829,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
         p.turnRate = def.turnRate;
         p.owner = -1;
 
-        // Homing acquires once, at launch, from whatever is inside its forward
-        // cone. Re-acquiring every step makes it feel like a guided camera
+        // Homing acquires once, at launch, from whatever is inside the cone
+        // around where it was fired. Re-acquiring every step makes it feel like a guided camera
         // rather than a missile.
         if (weaponId == WeaponHoming) {
             float bestScore = -1.0f;
@@ -772,7 +838,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
                 const glm::vec3 to = position - origin;
                 const float dist = glm::length(to);
                 if (dist > def.seekRange || dist < 0.001f) return false;
-                const float cosAngle = glm::dot(to / dist, forward);
+                const float cosAngle = glm::dot(to / dist, aim);
                 if (cosAngle < std::cos(def.seekCone)) return false;
                 const float score = cosAngle - dist / def.seekRange;
                 if (score <= bestScore) return false;
