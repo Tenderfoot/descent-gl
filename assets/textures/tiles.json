@@ -23,6 +23,12 @@
 
     { "name": "rust-panel" },
 
-    { "name": "grate-open" }
+    { "name": "grate-open" },
+
+    { "name": "molten-slag", "scroll": [0.0, 0.03], "turbulence": 0.02 },
+    { "name": "energy-coolant", "scroll": [0.0, 0.015], "turbulence": 0.03 },
+    { "name": "plasma-conduit", "scroll": [0.0, 0.08] },
+    { "name": "toxic-sludge", "scroll": [0.0, 0.008], "turbulence": 0.015 },
+    { "name": "force-field", "scroll": [0.0, 0.05] }
   ]
 }
