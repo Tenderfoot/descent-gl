@@ -143,11 +143,18 @@ keeps more damage and the larger blast; homing's value is that it aims itself.
 
 ### Special attacks
 
-A special attack starts only in Attack mode with the player in sight. Once its
-wind-up starts it always fires - out of range, out of Attack, or out of sight
-(at the last place it saw the player) - unless the attachment is knocked off
-or the robot is disabled or killed. The robot does not have to face the
-player. Its ordinary bursts carry on throughout.
+A special attack starts whenever the robot is on to the player and can see
+them, at any distance and in any mode. Attack range governs only the ordinary
+bursts; the special has no range test beyond its own shot's reach (the
+railgun's 400) - line of sight and awareness are the only gates, the same ones
+that decide whether a robot notices the player at all. A robot that has never
+spotted the player in the dark still cannot start one.
+
+Once its wind-up starts it always fires - out of Attack, or out of sight (at
+the last place it saw the player) - unless the attachment is knocked off or
+the robot is disabled or killed. While it winds up outside Attack, the robot
+turns to aim at the player without changing course. Its ordinary bursts carry
+on throughout, within their own range.
 
 | | brute_railgun | gunner_missile |
 |---|---|---|
@@ -165,6 +172,14 @@ player. Its ordinary bursts carry on throughout.
   always present and only its size carries the warning. Three hits (96)
   disable the player - about 11 s in its sight. A cooldown of 1.5-2 s would
   give the tell back a visible gap.
+- **Long sightlines are now special-attack range.** With no distance gate, a
+  brute_railgun that has noticed the player fires every 3.75 s from anywhere
+  it can see them, and a gunner_missile launches a homing missile every 8 s -
+  from well beyond where the player's lasers and missiles are practical.
+  The answers are breaking line of sight and the player's railgun (range 300,
+  and the only weapon that knocks the attachment off). Watch long, lit
+  galleries in the later levels, and whether the railgun becomes mandatory
+  rather than rewarding.
 - **Laser levels 3 and 4 do nothing against drones.** From level 2 up a drone
   always takes three shots; at level 4 the second would kill it, so the laser
   rule adds the third. Drone health of about 30-35 would let the top levels
