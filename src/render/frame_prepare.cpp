@@ -162,7 +162,7 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
     const sim::OccluderSet& occluders = ctx.occluders;
     sim::Illumination& playerLight = ctx.playerLight;
     sim::PlayerVisibility& playerSeen = ctx.playerSeen;
-    float& aimDistance = ctx.aimDistance;
+    AimLine& aim = ctx.aim;
     ChaseCamera& chase = ctx.chase;
 
         dvk::RenderState rs = dvk::interpolate(prev, cur, alpha);
@@ -462,21 +462,58 @@ PreparedFrame prepareRenderFrame(FramePrepareContext& ctx) {
         const dvk::sim::RayHit noseRay =
             dvk::sim::raycast(level, rs.shipPos, shipForward, 300.0f, rs.shipSegment);
 
-        // The same ray says where the reticle belongs. The guns fire from the
-        // ship along this line, so the point the reticle should cover is the
-        // first thing the line meets - or a point far along it when it meets
-        // nothing, which is the honest answer to "where would this shot go".
+        // Where the reticle belongs. The guns fire from the ship along this
+        // line, so the point the reticle should cover is the first thing the
+        // line meets - or a point far along it when it meets nothing, which is
+        // the honest answer to "where would this shot go".
         //
-        // Chased rather than set: crossing a corridor mouth steps the hit from
-        // a near wall to a far one in a single frame, and in the chase camera
-        // that is a reticle jumping across the screen. In first person none of
-        // this shows, because the camera sits on the firing line and the whole
-        // line projects to one pixel whatever the distance.
+        // The combat trace rather than the nose ray, because the first thing
+        // the line meets is often a robot. In the chase camera the eye sits
+        // above the line, so a reticle drawn at the wall behind a robot lands
+        // above the point the shot crosses the robot - by a hand's width on
+        // screen at close range, which is the difference between taking an
+        // attachment off with the railgun and missing it.
+        //
+        // Chased rather than set against the mine: crossing a corridor mouth
+        // steps the hit from a near wall to a far one in a single frame, and in
+        // the chase camera that is a reticle jumping across the screen. Set,
+        // not chased, onto and off a body: a reticle easing across a robot says
+        // the shot is on it for the length of the ease when it is not. And not
+        // held off a close body by the near limit, which exists for walls met
+        // at a glancing angle. In first person none of this shows, because the
+        // camera sits on the firing line and the whole line projects to one
+        // pixel whatever the distance.
+        dvk::sim::CombatTraceParams aimParams;
+        aimParams.owner = -1;
+        const dvk::sim::CombatHit aimHit = dvk::sim::traceCombatRay(
+            level, cur.combat, cur.ship.body, &cur.robots, rs.shipPos, shipForward,
+            kAimFarDistance, rs.shipSegment, aimParams, &solidDoors, &cur.props);
+        const bool onBody = aimHit.kind != dvk::sim::CombatHit::Kind::None &&
+                            aimHit.kind != dvk::sim::CombatHit::Kind::Wall;
         const float aimTarget =
             std::clamp(noseRay.hit ? noseRay.distance : kAimFarDistance,
                        kAimNearDistance, kAimFarDistance);
-        aimDistance += (aimTarget - aimDistance) *
-                       std::min(1.0f, static_cast<float>(elapsed) * 12.0f);
+        if (onBody) {
+            aim.distance = aimHit.distance;
+        } else if (aim.onBody) {
+            aim.distance = aimTarget;
+        } else {
+            aim.distance += (aimTarget - aim.distance) *
+                            std::min(1.0f, static_cast<float>(elapsed) * 12.0f);
+        }
+        aim.onBody = onBody;
+
+        // Whether the reticle is on an attachment one of the selected weapons
+        // would knock loose - the railgun on a rail brute's cannon - so the HUD
+        // can say so before the shot rather than after it.
+        aim.onBreakable = false;
+        if (aimHit.kind == dvk::sim::CombatHit::Kind::Robot && aimHit.attachment) {
+            const dvk::sim::Robot& robot = cur.robots.robots[static_cast<size_t>(aimHit.index)];
+            const dvk::sim::PlayerState& player = cur.combat.player;
+            aim.onBreakable = robot.attachmentOn &&
+                              (robot.attachmentBreaksOn == player.primaryWeapon ||
+                               robot.attachmentBreaksOn == player.secondaryWeapon);
+        }
 
     return {std::move(rs), shipForward, noseRay};
 }

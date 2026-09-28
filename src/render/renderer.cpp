@@ -903,7 +903,10 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const float px = std::round(rx - line * 0.5f) + line * 0.5f;
         const float py = std::round(ry - line * 0.5f) + line * 0.5f;
         const glm::vec4 outline(0.0f, 0.0f, 0.0f, 0.55f);
-        const glm::vec4 reticle(0.6f, 1.0f, 0.7f, 0.95f);
+        // Amber over an attachment the selected weapon breaks, so a railgun
+        // shot at a cannon can wait for the reticle to say it will land.
+        const glm::vec4 reticle = hud.aimOnBreakable ? glm::vec4(1.0f, 0.72f, 0.25f, 0.95f)
+                                                     : glm::vec4(0.6f, 1.0f, 0.7f, 0.95f);
         const auto arms = [&](float grow, const glm::vec4& color) {
             const float t = line + grow * 2.0f;
             const float a = arm + grow * 2.0f;

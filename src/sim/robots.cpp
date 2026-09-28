@@ -207,7 +207,6 @@ RobotConfig RobotConfig::defaults() {
     drone.turnRate = 3.0f;
     drone.attackRange = 45.0f;
     drone.aggression = 0.8f;
-    drone.retreatThreshold = 0.35f;
     drone.projectileSpeed = 80.0f;
     drone.projectileDamage = 4.0f;
     drone.projectileImpulse = 4.0f;
@@ -233,7 +232,6 @@ RobotConfig RobotConfig::defaults() {
     gunner.turnRate = 2.0f;
     gunner.attackRange = 75.0f;
     gunner.aggression = 0.55f;
-    gunner.retreatThreshold = 0.3f;
     gunner.projectileSpeed = 105.0f;
     gunner.projectileDamage = 8.0f;
     gunner.projectileImpulse = 6.0f;
@@ -259,8 +257,7 @@ RobotConfig RobotConfig::defaults() {
     brute.acceleration = 14.0f;
     brute.turnRate = 1.3f;
     brute.attackRange = 55.0f;
-    brute.aggression = 0.95f;   // barely retreats; it is the wall you run into
-    brute.retreatThreshold = 0.15f;
+    brute.aggression = 0.95f;   // it is the wall you run into
     brute.projectileSpeed = 70.0f;
     brute.projectileDamage = 14.0f;
     brute.projectileImpulse = 9.0f;
@@ -352,8 +349,7 @@ RobotConfig RobotConfig::defaults() {
     reactor.acceleration = 0.0f;
     reactor.turnRate = 0.8f;
     reactor.attackRange = 130.0f;
-    reactor.aggression = 1.0f;      // never retreats; it cannot move anyway
-    reactor.retreatThreshold = -1.0f;
+    reactor.aggression = 1.0f;      // it cannot move anyway
     reactor.projectileSpeed = 48.0f;
     reactor.projectileDamage = 16.0f;
     reactor.projectileImpulse = 7.0f;
@@ -408,8 +404,6 @@ RobotConfig loadRobotConfig(const std::string& path) {
             get(tj, "turnRate", def.turnRate);
             get(tj, "attackRange", def.attackRange);
             get(tj, "aggression", def.aggression);
-            get(tj, "retreatThreshold", def.retreatThreshold);
-            get(tj, "retreatTime", def.retreatTime);
             get(tj, "projectileSpeed", def.projectileSpeed);
             get(tj, "projectileDamage", def.projectileDamage);
             get(tj, "fireInterval", def.fireInterval);
@@ -471,8 +465,6 @@ bool saveRobotConfig(const std::string& path, const RobotConfig& cfg) {
         tj["turnRate"] = def.turnRate;
         tj["attackRange"] = def.attackRange;
         tj["aggression"] = def.aggression;
-        tj["retreatThreshold"] = def.retreatThreshold;
-        tj["retreatTime"] = def.retreatTime;
         tj["projectileSpeed"] = def.projectileSpeed;
         tj["projectileDamage"] = def.projectileDamage;
         tj["fireInterval"] = def.fireInterval;
@@ -995,9 +987,6 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         }
 
         // --- transitions -------------------------------------------------
-        const float healthFraction = def.health > 0.0f ? robot.health / def.health : 1.0f;
-        const bool hurt = healthFraction <= def.retreatThreshold;
-
         switch (robot.mode) {
             case RobotMode::Idle:
                 if (robot.awareness > 0.0f) {
@@ -1019,28 +1008,12 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
             case RobotMode::Chase:
                 if (robot.awareness <= 0.0f) {
                     setMode(robot, RobotMode::Idle);
-                } else if (hurt) {
-                    setMode(robot, RobotMode::Retreat);
                 } else if (canSee && distance < def.attackRange) {
                     setMode(robot, RobotMode::Attack);
                 }
                 break;
             case RobotMode::Attack:
-                if (hurt) {
-                    setMode(robot, RobotMode::Retreat);
-                } else if (!canSee || distance > def.attackRange * 1.15f) {
-                    setMode(robot, robot.awareness > 0.0f ? RobotMode::Chase : RobotMode::Idle);
-                } else if (robot.burstLeft == 0 && robot.burstTimer > 0.0f &&
-                           randUnit() > def.aggression) {
-                    // Having just finished a burst, an unaggressive robot backs
-                    // off around the corner instead of standing and trading.
-                    // This is the behaviour that makes them read as cautious
-                    // rather than as turrets.
-                    setMode(robot, RobotMode::Retreat);
-                }
-                break;
-            case RobotMode::Retreat:
-                if (robot.modeTime > def.retreatTime) {
+                if (!canSee || distance > def.attackRange * 1.15f) {
                     setMode(robot, robot.awareness > 0.0f ? RobotMode::Chase : RobotMode::Idle);
                 }
                 break;
@@ -1149,13 +1122,6 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                     robot.fireCooldown = def.fireInterval;
                     if (robot.burstLeft == 0) robot.burstTimer = def.burstPause;
                 }
-                break;
-            }
-            case RobotMode::Retreat: {
-                // Back off towards where it came from, still facing the player
-                // so it can keep shooting on the way out.
-                faceTowards(robot, toPlayer, def.turnRate * 0.7f, dt);
-                if (distance > 1e-3f) desired = -(toPlayer / distance);
                 break;
             }
             case RobotMode::Disabled:

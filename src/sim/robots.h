@@ -31,13 +31,12 @@ enum class RobotMode : uint8_t {
     Alert,     // heard or saw something; turning towards where it was
     Chase,     // pathing towards the player through the segment graph
     Attack,    // in line of sight and in range: face, fire a burst, strafe
-    Retreat,   // hurt, or just finished a burst: back off, wait, return
     Disabled,  // under kDisabledHealthFraction: drifting, blind, harmless
     Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(RobotMode::Count)> kRobotModeNames{
-    "idle", "alert", "chase", "attack", "retreat", "disabled"};
+    "idle", "alert", "chase", "attack", "disabled"};
 
 // A second model hung on a robot: the brute's shoulder railgun, and whatever
 // comes after it. It is drawn, lit and shadowed as its own mesh, and it has a
@@ -154,8 +153,6 @@ struct RobotDef {
     // 0 pushes in to point blank, 1 keeps its distance. Also how readily it
     // leaves Idle.
     float aggression = 0.6f;
-    float retreatThreshold = 0.3f; // fraction of health
-    float retreatTime = 1.6f;
     float projectileSpeed = 85.0f;
     float projectileDamage = 6.0f;
     float projectileImpulse = 5.0f;   // the punch its bolts carry
