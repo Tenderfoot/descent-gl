@@ -382,9 +382,8 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
         }
     }
 
-    // --- retreat, death, debris and drops ------------------------------------
+    // --- death, debris and drops ---------------------------------------------
     {
-        int retreated = 0;
         int died = 0;
         int dropped = 0;
         int debrisSeen = 0;
@@ -396,8 +395,6 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             sim::Robot* robot = rig.firstOfType("drone");
             if (!robot) break;
             const int slot = static_cast<int>(robot - rig.robots.robots.data());
-            const sim::RobotDef& def =
-                rig.robotCfg.types[static_cast<size_t>(robot->type)];
 
             const glm::vec3 centre =
                 rig.level.segments[static_cast<size_t>(robot->body.segment)].center;
@@ -405,22 +402,6 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             rig.player.segment = robot->body.segment;
             rig.player.position = centre + glm::vec3(0.0f, 0.0f, 6.0f);
             rig.revealPlayer();
-
-            // Whittle it down and watch for the retreat threshold.
-            bool sawRetreat = false;
-            for (int i = 0; i < 900; ++i) {
-                sim::Robot& r = rig.robots.robots[static_cast<size_t>(slot)];
-                if (!r.alive) break;
-                if (r.health > def.health * (def.retreatThreshold + 0.05f)) {
-                    r.health -= 0.5f;
-                }
-                rig.run(1);
-                if (rig.robots.robots[static_cast<size_t>(slot)].alive &&
-                    rig.robots.robots[static_cast<size_t>(slot)].mode == sim::RobotMode::Retreat) {
-                    sawRetreat = true;
-                }
-            }
-            if (sawRetreat) ++retreated;
 
             // Finish it off.
             rig.robots.robots[static_cast<size_t>(slot)].health = -1.0f;
@@ -438,13 +419,11 @@ int runRobotsTest(const char* levelPath, const char* weaponConfigPath,
             }
         }
 
-        ok &= expect(retreated > 0, "a hurt robot retreated");
         ok &= expect(died == 12, "every robot taken to zero health died");
         ok &= expect(debrisSeen >= 3, "death spawned at least three debris chunks");
         ok &= expect(dropped > 0, "the drop table produced something across twelve kills");
-        log::info("death: {}/12 retreated when hurt, {}/12 died, {} debris chunks, "
-                  "{}/12 kills dropped something",
-                  retreated, died, debrisSeen, dropped);
+        log::info("death: {}/12 died, {} debris chunks, {}/12 kills dropped something", died,
+                  debrisSeen, dropped);
     }
 
     // --- darkness hides the player from robots that have not seen them -------

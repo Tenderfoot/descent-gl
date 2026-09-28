@@ -49,7 +49,7 @@ namespace dvk {
 //   --weapons-test      fire every weapon at walls and at targets and check
 //                       what happened, then exit. Needs no window and no GL.
 //   --robots-test       drive the robot state machine through idle, alert,
-//                       chase, attack, retreat and death, and check they never
+//                       chase, attack and death, and check they never
 //                       leave the mine. Needs no window and no GL.
 //   --headlight         start with the headlight on. It is off at the start
 //                       from now on, so a screenshot can no longer show it

@@ -339,8 +339,8 @@ int runWeaponsTest(const char* levelPath, const char* weaponConfigPath,
     //
     // The targets are robots from M6 on. They are stepped normally, so this is
     // also a check that a robot being shot at reacts rather than standing
-    // still: it will retreat once it is hurt enough, which is why the loop
-    // re-aims every step.
+    // still: it strafes while it attacks, which is why the loop re-aims every
+    // step.
     {
         rig.reset();
         rig.state.player.headlightOn = false;
