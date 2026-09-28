@@ -75,13 +75,15 @@ inline constexpr std::array<const char*, 2> kSpecialDeliveryNames{"hitscan", "pr
 
 // A telegraphed attack, fired from a robot's attachment and lost with it.
 //
-// It runs alongside the robot's ordinary bursts. It starts only in Attack with
-// the player in sight, winds up for `windup` seconds - an orb at the muzzle and
-// a light there, both growing from nothing, and a pulse that repeats faster and
-// louder - and then always fires: at the player if the robot can see them, at
-// where it last saw them if not. There is no lead and no spread. The wind-up is
-// the warning, and the answers to it are to break the attachment off, to get
-// something solid in the way, or to take the hit.
+// It runs alongside the robot's ordinary bursts. It starts whenever the robot
+// is on to the player and can see them, with no range test - attackRange is
+// for the bursts, not for this - and while it runs the robot turns to aim it
+// without changing course. It winds up for `windup` seconds - an orb at the
+// muzzle and a light there, both growing from nothing, and a pulse that repeats
+// faster and louder - and then always fires: at the player if the robot can
+// see them, at where it last saw them if not. There is no lead and no spread.
+// The wind-up is the warning, and the answers to it are to break the
+// attachment off, to get something solid in the way, or to take the hit.
 struct SpecialAttackDef {
     bool enabled = false;
     SpecialDelivery delivery = SpecialDelivery::Hitscan;

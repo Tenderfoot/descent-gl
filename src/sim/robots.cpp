@@ -1026,9 +1026,22 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         glm::vec3 desired(0.0f);
         glm::vec3 facing = robot.orientation * glm::vec3(0.0f, 0.0f, -1.0f);
 
+        // A wind-up can be running outside Attack: it starts at any distance,
+        // so a robot still closing in is often holding one. The shot goes at
+        // the player, or where it last saw them, whichever way the robot is
+        // pointing, so it turns its attachment onto that and keeps moving the
+        // way it was. Attack already faces the player.
+        const bool aimingSpecial = robot.windingUp && (canSee || robot.hasLastKnown);
+        const glm::vec3 specialAim = canSee ? toPlayer : robot.lastKnown - robot.body.position;
+
         switch (robot.mode) {
             case RobotMode::Idle: {
                 desired = glm::vec3(0.0f);
+                // Awareness can run out mid wind-up; the shot still comes.
+                if (aimingSpecial) {
+                    faceTowards(robot, specialAim, def.turnRate, dt);
+                    break;
+                }
                 // A slow drift turn, so an idle robot is not a statue.
                 const glm::quat spin =
                     glm::angleAxis(0.35f * dt, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1036,7 +1049,9 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 break;
             }
             case RobotMode::Alert: {
-                if (robot.hasLastKnown) {
+                if (aimingSpecial) {
+                    faceTowards(robot, specialAim, def.turnRate, dt);
+                } else if (robot.hasLastKnown) {
                     faceTowards(robot, robot.lastKnown - robot.body.position, def.turnRate, dt);
                 }
                 break;
@@ -1053,8 +1068,9 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 const glm::vec3 to = goal - robot.body.position;
                 if (glm::length(to) > 0.5f) {
                     desired = glm::normalize(to);
-                    faceTowards(robot, to, def.turnRate, dt);
+                    if (!aimingSpecial) faceTowards(robot, to, def.turnRate, dt);
                 }
+                if (aimingSpecial) faceTowards(robot, specialAim, def.turnRate, dt);
                 break;
             }
             case RobotMode::Attack: {
@@ -1143,14 +1159,15 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
         // --- attachment and special attack --------------------------------
         //
         // After the move, so the attachment and the muzzle are where they are
-        // drawn this step. A wind-up starts only in Attack with the player in
-        // sight; once started it runs whatever the robot does next, and it
-        // always ends in a shot. See SpecialAttackDef.
+        // drawn this step. A wind-up starts whenever a robot that is on to the
+        // player can see them, at any distance - not only in Attack, whose
+        // range is for the ordinary bursts. Once started it runs whatever the
+        // robot does next, and it always ends in a shot. See SpecialAttackDef.
         if (robot.attachmentOn) {
             placeAttachment(robot, def);
             const SpecialAttackDef& sp = def.special;
             if (sp.enabled && !robot.windingUp && robot.specialCooldown <= 0.0f &&
-                robot.mode == RobotMode::Attack && canSee) {
+                robot.awareness > 0.0f && canSee) {
                 robot.windingUp = true;
                 robot.windupTime = 0.0f;
                 robot.pulseTimer = 0.0f;
