@@ -191,6 +191,9 @@ struct HudData {
     // firing line on screen to mark.
     glm::vec3 aimPoint{0.0f};
     bool hasAimPoint = false;
+    // The aim point is on a robot's attachment that a selected weapon would
+    // knock loose. The reticle changes colour, so the shot can be timed.
+    bool aimOnBreakable = false;
 
     // The soundtrack, as a small marquee. The renderer is handed the finished
     // strings and never builds one: `musicTrack` points at storage the audio

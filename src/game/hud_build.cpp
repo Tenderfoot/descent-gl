@@ -102,6 +102,7 @@ gl::HudData buildHud(const HudBuildContext& ctx, HudScratch& scratch) {
     // Only the scene draws a firing line; the automap has its own camera.
     hud.aimPoint = ctx.render.shipPos + ctx.shipForward * ctx.aimDistance;
     hud.hasAimPoint = ctx.aimVisible;
+    hud.aimOnBreakable = ctx.aimOnBreakable;
     hud.shipDisabled = state.ship.disabled;
     hud.shipDisabledTime = state.game.elapsed;
     hud.energyDepleted = sim::playerEnergyDepleted(player);

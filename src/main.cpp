@@ -400,9 +400,10 @@ int main(int argc, char** argv) {
     long long totalSteps = 0;
     int frame = 0;
     double frameMs = 0.0;
-    // How far down the firing line the reticle is drawn. Held across frames
-    // because it is chased rather than set: see where it is updated below.
-    float aimDistance = dvk::kDefaultAimDistance;
+    // How far down the firing line the reticle is drawn, and what it is on.
+    // Held across frames because it is chased rather than set: see where it is
+    // updated below.
+    dvk::AimLine aim;
     // Where the chase camera's eye ended up once the mine had its say, and
     // whether the ship is still far enough from it to draw. Held across frames
     // for the same reason: see where they are updated below.
@@ -745,7 +746,7 @@ int main(int argc, char** argv) {
             prev, cur, alpha, camera, shell.settings(), clock.seconds(), elapsed, audio,
             soundEvents, level, flight, weapons, robotConfig, flood, lightDoorSignature,
             dynamicLights,
-            solidDoors, occluders, playerLight, playerSeen, aimDistance, chaseCamera};
+            solidDoors, occluders, playerLight, playerSeen, aim, chaseCamera};
         dvk::PreparedFrame prepared = dvk::prepareRenderFrame(frameContext);
         dvk::RenderState& rs = prepared.renderState;
         const glm::vec3& shipForward = prepared.shipForward;
@@ -769,7 +770,8 @@ int main(int argc, char** argv) {
             static_cast<float>(kSimStep),
             !opts.noUi && session.active() && session.mode() != dvk::AppMode::RunSummary,
             shipForward,
-            aimDistance,
+            aim.distance,
+            aim.onBreakable,
             !automap.open,
             playerSeen,
             commFrame,

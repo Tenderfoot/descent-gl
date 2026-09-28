@@ -29,6 +29,20 @@ struct WeaponConfig;
 
 inline constexpr float kDefaultAimDistance = 200.0f;
 
+// How far down the firing line the reticle is drawn, and what it is drawn on.
+// Held across frames because the distance is chased rather than set: see where
+// it is updated in prepareRenderFrame.
+struct AimLine {
+    float distance = kDefaultAimDistance;
+    // The line ends on a robot, a shootable missile or a destructible object
+    // rather than on the mine. Remembered so that leaving a body snaps the
+    // reticle off it the same way arriving snapped it on.
+    bool onBody = false;
+    // The line ends on a robot's attachment that one of the selected weapons
+    // knocks loose. This frame's answer only; the HUD tints the reticle for it.
+    bool onBreakable = false;
+};
+
 // The chase camera's state, held across frames because both halves of it are
 // chased rather than set: see where they are updated in prepareRenderFrame.
 //
@@ -61,7 +75,7 @@ struct FramePrepareContext {
     const sim::OccluderSet& occluders;
     sim::Illumination& playerLight;
     sim::PlayerVisibility& playerSeen;
-    float& aimDistance;
+    AimLine& aim;
     ChaseCamera& chase;
 };
 
