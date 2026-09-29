@@ -379,10 +379,11 @@ bool verifyPlayerMenu() {
 
     menu.showSettingsScreen(MenuScreen::SettingsAudio);
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::SettingsAudio && view.buttonCount == 4,
-                 "audio settings carry two values, apply and back");
+    ok &= expect(view.screen == MenuScreen::SettingsAudio && view.buttonCount == 5,
+                 "audio settings carry three values, apply and back");
     ok &= expect(std::string_view(view.buttons[0].value.data()) == "80%" &&
-                     std::string_view(view.buttons[1].value.data()) == "45%",
+                     std::string_view(view.buttons[1].value.data()) == "45%" &&
+                     std::string_view(view.buttons[2].value.data()) == "100%",
                  "audio settings show their current values");
     MenuInput decrease;
     decrease.decrease = true;

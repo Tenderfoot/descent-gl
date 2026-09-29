@@ -166,6 +166,12 @@ public:
     void setMasterGain(float gain) { masterGain_.store(gain, std::memory_order_relaxed); }
     float masterGain() const { return masterGain_.load(std::memory_order_relaxed); }
 
+    // Sound effect volume, 0..1: every voice except the music and a
+    // transmission's voice. Applied under the master, and before the per-voice
+    // glide, so moving it does not step.
+    void setEffectsGain(float gain) { effectsGain_.store(gain, std::memory_order_relaxed); }
+    float effectsGain() const { return effectsGain_.load(std::memory_order_relaxed); }
+
     Attenuation attenuation;
 
     // Diagnostics, for --sound-test and the debug panel.
@@ -196,6 +202,7 @@ private:
     Ring<Command, kCommandQueueSize> commands_;
     Listener listener_;
     std::atomic<float> masterGain_{0.8f};
+    std::atomic<float> effectsGain_{1.0f};
     uint64_t started_ = 0;
     uint64_t stolen_ = 0;
 };

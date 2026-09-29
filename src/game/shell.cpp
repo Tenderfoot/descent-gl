@@ -35,6 +35,7 @@ Shell::Shell(Window& window, Input& input, audio::Audio& audio, LevelSession& se
 
 void Shell::applyAudioSettings() {
     audio_.setMasterGain(settings_.masterVolume);
+    audio_.setEffectsGain(settings_.effectsVolume);
     audio_.setMuted(settings_.muted);
 }
 

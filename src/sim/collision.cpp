@@ -33,6 +33,19 @@ constexpr float kEpsilon = 1e-5f;
 // coplanar by construction.
 constexpr float kCoplanarSlack = 1e-3f;
 
+// Whether the end of a ray lies inside the segment its walk stopped in, against
+// each side's averaged plane. The slack covers the gap between those planes and
+// a warped side's two real triangles; a ray that slipped out of the mine misses
+// by far more than that.
+constexpr float kRayEndSlack = 0.5f;
+
+bool rayEndsIn(const Level& level, int segment, const glm::vec3& end) {
+    for (const SideData& sd : level.segments[static_cast<size_t>(segment)].sides) {
+        if (glm::dot(sd.normal, end) + sd.d < -kRayEndSlack) return false;
+    }
+    return true;
+}
+
 // The two triangles a portal side is split into, so a ray can be tested against
 // the opening itself rather than against the segment's bounding planes.
 void portalTriangles(const Level& level, int segment, int side, glm::vec3 out[6]) {
@@ -561,6 +574,23 @@ RayHit raycast(const Level& level, const glm::vec3& origin, const glm::vec3& dir
             result.normal = w.normal;
             result.segment = segment;
             result.triangle = bestTriangle;
+        } else if (!rayEndsIn(level, segment, origin + dir * maxDistance)) {
+            // Nothing ahead and no portal to leave by, yet the end of the ray
+            // is not in this segment: it slipped out through a crack. Two
+            // triangles sharing an edge - a wall's diagonal, or a wall meeting
+            // a portal - can both miss a ray that lands exactly on that edge,
+            // and the walk then carries on outside the mine with nothing left
+            // to hit. That used to come back as a clear line, and a robot on
+            // the far side of the level saw the player through solid rock for
+            // one step, which was enough to wake it, start its wind-up and
+            // put the music into combat. Reported as a hit, for the same
+            // reason running out of steps is below.
+            result.hit = true;
+            result.distance = travelled;
+            result.point = origin + dir * travelled;
+            result.normal = -dir;
+            result.segment = segment;
+            result.triangle = -1;
         }
         return result;
     }
