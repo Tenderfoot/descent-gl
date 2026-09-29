@@ -950,7 +950,31 @@ void stepRobots(const Level& level, const RobotConfig& cfg, const WeaponConfig& 
                 raycast(level, robot.body.position, dir, distance, robot.body.segment, doors);
             // The ray stops at the first wall or shut door; if that is farther
             // than the player, nothing is in the way.
-            canSee = !hit.hit || hit.distance >= distance - 0.5f;
+            canSee = hit.hit && hit.distance >= distance - 0.5f;
+
+            // A miss counts only if the walk ended where the player is. Two
+            // triangles sharing an edge can both miss a ray that lands exactly
+            // on it, and the walk then runs on outside the mine with nothing
+            // left to hit - a miss that means nothing. With no range on sight
+            // that happened somewhere in a big level often enough for a robot
+            // across it to see the player through solid rock for one step,
+            // which woke it, started a wind-up that always fires, and put the
+            // music into combat. A neighbour of the player's segment is
+            // accepted too, because the walk decides portal crossings by ray
+            // and the ship's segment is tracked by plane, and they can
+            // disagree about a player sitting on the portal between them.
+            if (!hit.hit) {
+                canSee = hit.endSegment == player.segment;
+                if (!canSee && hit.endSegment >= 0) {
+                    for (const SideData& sd :
+                         level.segments[static_cast<size_t>(hit.endSegment)].sides) {
+                        if (sd.neighbour >= 0 && sd.neighbour == player.segment) {
+                            canSee = true;
+                            break;
+                        }
+                    }
+                }
+            }
 
             // And now the things that are not the mine. This is where hiding
             // behind a pillar became real: until M8 the ray above was the whole

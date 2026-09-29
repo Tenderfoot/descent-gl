@@ -254,6 +254,12 @@ struct RayHit {
     // shot open the door it just struck, rather than dying against an anonymous
     // surface the way it used to.
     int door = -1;
+    // The segment the walk was in when it stopped - set on a miss too, unlike
+    // `segment`. A miss only says nothing was hit before maxDistance, and a
+    // ray that slipped out of the mine through a crack between two triangles
+    // misses as well; this is what tells the two apart. A ray that really
+    // reached its end stopped in or beside the segment that end is in.
+    int endSegment = -1;
 };
 
 // Walks the segment graph: tests the current segment's wall triangles, and on
