@@ -134,7 +134,7 @@ struct GameConfig {
     // No Static Charge amount: its pickup fills it to kStaticChargeCapacity.
     // A quarter of what the ship starts with, matching the fraction the other
     // ammo pickups are worth against their own starting counts.
-    int vulcanPickup = 500;
+    int vulcanPickup = 200;
     int flarePickup = 4;
 };
 
