@@ -1,7 +1,7 @@
 {
-  "name": "LevelFive",
+  "name": "Segmentation Fault",
   "comment": "Created in the level editor. One room; grow the rest with extrude.",
-  "script": "LevelFive.lua",
+  "script": "SegmentationFault.lua",
   "vertices": [
     [
       0.0,
