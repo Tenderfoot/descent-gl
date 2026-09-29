@@ -219,10 +219,11 @@ bool verifyLevelSelect() {
                  "the selected level's blurb is the subtitle");
     ok &= expect(std::string_view(view.subtitle).find("robots") == std::string_view::npos,
                  "only the first sentence of the blurb is kept");
-    menu.setLevelRecord(menu.levels()[1].path, 2, 83);
+    menu.setLevelRecord(menu.levels()[1].path, 3, 2, 83, 7);
     view = menu.view(kWidth, kHeight);
-    ok &= expect(std::string_view(view.buttons[1].value.data()) == "best 1:23",
-                 "completed levels show their best time");
+    ok &= expect(std::string_view(view.buttons[1].detail.data()) ==
+                     "best 1:23   attempts 3   successes 2   robots 7",
+                 "completed levels show their records");
 
     MenuInput confirm;
     confirm.confirm = true;

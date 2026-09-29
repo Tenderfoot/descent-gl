@@ -1655,15 +1655,43 @@ void Renderer::buildMenu(const MenuView& menu) {
         }
         const float labelScale = scale * 0.9f;
         const bool hasValue = button.value[0] != '\0';
+        const bool hasDetail = button.detail[0] != '\0';
+        const float innerLeft = button.bounds.x + button.bounds.width * 0.06f;
+        const float innerRight = button.bounds.x + button.bounds.width * 0.94f;
         const float labelWidth = hud_.textWidth(button.label, labelScale);
-        const float labelX = hasValue ? button.bounds.x + button.bounds.width * 0.06f
-                                      : button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
-        const float labelY = button.bounds.y + (button.bounds.height - 7.0f * labelScale) * 0.5f;
-        hud_.text(button.label, labelX, labelY, labelScale, text);
+        const float labelX = hasValue || hasDetail
+                                 ? innerLeft
+                                 : button.bounds.x + (button.bounds.width - labelWidth) * 0.5f;
+        // The detail line is smaller and shrinks further to fit the row, so a
+        // long record never runs off the end of it.
+        float detailScale = labelScale * 0.6f;
+        if (hasDetail) {
+            const float detailWidth = hud_.textWidth(button.detail.data(), detailScale);
+            if (detailWidth > innerRight - innerLeft) {
+                detailScale *= (innerRight - innerLeft) / detailWidth;
+            }
+        }
+        const float lineGap = hasDetail ? 3.0f * detailScale : 0.0f;
+        const float blockHeight =
+            7.0f * labelScale + (hasDetail ? lineGap + 7.0f * detailScale : 0.0f);
+        const float labelY = button.bounds.y + (button.bounds.height - blockHeight) * 0.5f;
+        float valueX = innerRight;
         if (hasValue) {
-            const float valueWidth = hud_.textWidth(button.value.data(), labelScale);
-            const float valueX = button.bounds.x + button.bounds.width * 0.94f - valueWidth;
+            valueX = innerRight - hud_.textWidth(button.value.data(), labelScale);
             hud_.text(button.value.data(), valueX, labelY, labelScale, text);
+        }
+        // A label that would reach the value is cut off short of it rather than
+        // written over it.
+        const float labelRight = hasValue ? valueX - labelScale * 4.0f : innerRight;
+        if (labelX + labelWidth > labelRight) {
+            hud_.textClipped(button.label, labelX, labelY, labelScale, text, labelX, labelRight);
+        } else {
+            hud_.text(button.label, labelX, labelY, labelScale, text);
+        }
+        if (hasDetail) {
+            const glm::vec4 detailInk = button.selected ? accent : dim;
+            hud_.text(button.detail.data(), innerLeft,
+                      labelY + 7.0f * labelScale + lineGap, detailScale, detailInk);
         }
     }
 

@@ -99,6 +99,9 @@ struct MenuButtonView {
     MenuRect bounds;
     bool selected = false;
     std::array<char, 32> value{};
+    // A second, smaller line under the label. Level rows put their records
+    // here rather than in `value`, which a long level name would run into.
+    std::array<char, 64> detail{};
     // >= 0 on a level row: which level of the menu's list it starts.
     int levelIndex = -1;
     int actionIndex = -1;
@@ -170,7 +173,8 @@ public:
     // outlive every view.
     void setLevels(std::vector<LevelEntry> levels, int campaignCount = 0);
     const std::vector<LevelEntry>& levels() const { return levels_; }
-    void setLevelRecord(const std::string& path, int completions, int bestSeconds);
+    void setLevelRecord(const std::string& path, int runs, int completions, int bestSeconds,
+                        int mostRobots);
     // Which level the last Start was for, or -1 when the list is empty. Index
     // into levels(), not into the group it was picked from.
     int selectedLevel() const { return chosenLevel_; }
