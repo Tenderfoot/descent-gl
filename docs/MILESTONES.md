@@ -559,13 +559,14 @@ machine. Iconify/restore and performance as ever.
 
 ---
 
-## M7 — The loop 🟡 In progress
+## M7 — The loop ✅
 
 Pickups, keyed doors, the reactor, the countdown, the exit, win and lose
-screens, an in-game HUD, and `mine01`. **Paused mid-milestone at the user's
-request.** The one known failure recorded below turned out to be the test's own
-oracle and is now fixed; see *Fixes after M7 — the raycast oracle* at the end of
-this file.
+screens, an in-game HUD, and `mine01`. The one known failure recorded below
+turned out to be the test's own oracle and is fixed; see *Fixes after M7 — the
+raycast oracle*. Signed off by the user on 2026-09-29; the playtesting questions
+left open below were settled at the keyboard and carried into the campaign
+levels (see *M10 — The campaign*).
 
 ### Done and verified
 
@@ -767,10 +768,11 @@ and drawn per occluder with the model matrix the prepass used.
 
 ---
 
-## M8 — Polish and performance 🟡 In progress
+## M8 — Polish and performance ✅
 
-Landing in pieces. The automap is done; muzzle flash and hit feedback,
-performance instrumentation, asset validation and the README follow.
+Landed in pieces: the automap, muzzle flash and hit feedback, performance
+instrumentation, asset validation and the README. Signed off by the user on
+2026-09-29, including the frame-time target left open below.
 
 ### The automap ✅
 
@@ -2599,3 +2601,67 @@ sim step and the line `proxy.h` draws on purpose.
 shape.** Object collision is still gated to the object's own segment, and an
 object's segment still comes from its origin rather than its extents; the editor
 still draws no proxy.
+
+---
+
+## M10 — The campaign 🟡 In progress
+
+Every milestone above is met. The goal now is **seven campaign levels, each
+complete**, where complete means four things on top of the geometry:
+
+- **Enemies** — robots placed and tuned for the level.
+- **Lights** — authored lights, floating lights and swinging lamps, lit for
+  the darkness-hides-you mechanic.
+- **Comms** — scripted transmissions in the level's `.lua` (`message`,
+  `comm()`, triggers, events).
+- **Loadouts and pickups** — a `loadout {}` in the level's `.lua`, and shields,
+  energy and ammo placed in the level, not only its three keys.
+
+The campaign order is `assets/config/campaign.json`.
+
+### Status, 2026-09-29
+
+Read from the level files. A level with no `.lua` has no comms and starts on
+the default loadout.
+
+| # | Level | Geometry | Enemies | Lights | Comms | Loadout + pickups |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `TheBeginning` | ✅ | ✅ reactor only, by design | ✅ 3 | ✅ 3 messages + controls tutorial | ✅ scripted disabled start; no pickups, by design |
+| 2 | `MineEntrance` | ✅ | ✅ 20 robots | ✅ 28 + 1 floating | ✅ 4 messages, 4 tutorials | ✅ loadout; 15 pickups |
+| 3 | `LevelThree` (the hub) | ✅ | ✅ 25 robots | ✅ 22 + 2 floating + 1 swinging | ⬜ no script | ⬜ no loadout; keys only |
+| 4 | `LevelFour` | ✅ | ✅ 32 robots | ✅ 26 + 8 floating | ⬜ no script | ⬜ no loadout; keys only |
+| 5 | `LevelFive` | ✅ | ✅ 30 robots | ✅ 52 + 3 floating | ⬜ no script | ⬜ no loadout; keys only |
+| 6 | `levelsix` | ✅ | ✅ 36 robots | 🟡 2 + 5 floating across 65 segments | ⬜ no script | 🟡 9 pickups; no loadout |
+| 7 | *unnamed* | ⬜ not modelled, not in `campaign.json` | ⬜ | ⬜ | ⬜ | ⬜ |
+
+### Level seven: the plan
+
+A low-health stealth mission for the first half: sneak through, and do not
+fight. Then the turn: the player comes out of it with quad damage and fights
+back through the rooms they crept past.
+
+The stealth half is mostly authoring. Robots already notice the player by line
+of sight *and* light (*Darkness hides the player*); the headlight, muzzle flash,
+flares and explosions all light the player; floating lights can be shot out;
+and a `loadout {}` can set low shields and weak weapons. The second half needs
+the one new feature in this milestone:
+
+- **Quad damage.** There is no such pickup. It needs a `PickupKind`, a damage
+  multiplier in combat, its duration, a HUD indicator, and a sound and look.
+
+Open design questions, for the user: what dying costs in the stealth half
+(restart the level, or a checkpoint); whether idle robots need patrol routes
+or the lighting puzzle is enough; and whether quad damage runs on a timer or
+lasts until the level ends.
+
+### What is left
+
+1. **Comms** for `LevelThree`, `LevelFour`, `LevelFive` and `levelsix`: write
+   the scripts, and record and add the clips.
+2. **Loadouts** for `LevelThree` through `levelsix`.
+3. **Pickups** (shields, energy, ammo) for `LevelThree`, `LevelFour` and
+   `LevelFive`, and a pass over the ones in `levelsix`.
+4. **Lighting** for `levelsix`.
+5. **Level seven**: model it, add it to `campaign.json`, and give it enemies,
+   lights, comms, a loadout and pickups.
+6. **Quad damage**, for level seven.
