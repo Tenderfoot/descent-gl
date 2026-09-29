@@ -803,45 +803,6 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     const float cx = w * 0.5f;
     const float cy = h * 0.5f;
 
-    // Last directly damaged robot, upper left. It mirrors the player's two
-    // resource bars but stays visually separate: this is a transient scanner
-    // result, not another resource owned by the ship.
-    if (hud.hasTarget && hud.targetFade > 0.0f) {
-        const float alpha = std::clamp(hud.targetFade, 0.0f, 1.0f);
-        const float x = 8.0f * s;
-        const float y = 8.0f * s;
-        const float panelW = 72.0f * s;
-        const float panelH = 45.0f * s;
-        const float targetBarW = panelW - 8.0f * s;
-        const float targetBarH = 3.5f * s;
-        const glm::vec4 frame(0.95f, 0.35f, 0.25f, alpha * 0.95f);
-        const glm::vec4 targetDim(0.8f, 0.86f, 0.92f, alpha * 0.82f);
-        const auto targetBar = [&](float barY, float fill, const glm::vec4& color) {
-            const float border = 1.0f;
-            hud_.rect(x + 4.0f * s - border, barY - border,
-                      targetBarW + border * 2.0f, targetBarH + border * 2.0f,
-                      glm::vec4(color.r * 0.35f, color.g * 0.35f, color.b * 0.35f,
-                                alpha * 0.85f));
-            hud_.rect(x + 4.0f * s, barY, targetBarW, targetBarH,
-                      glm::vec4(0.0f, 0.0f, 0.0f, alpha * 0.6f));
-            const float clamped = std::clamp(fill, 0.0f, 1.0f);
-            if (clamped > 0.0f) {
-                hud_.rect(x + 4.0f * s, barY, targetBarW * clamped, targetBarH, color);
-            }
-        };
-        hud_.rect(x, y, panelW, panelH, glm::vec4(0.015f, 0.025f, 0.04f, alpha * 0.78f));
-        hud_.rect(x, y, panelW, std::max(1.0f, 0.8f * s), frame);
-        hud_.text(hud.targetName, x + 4.0f * s, y + 4.0f * s, s * 0.85f, frame);
-        hud_.text(hud.targetStatus, x + 4.0f * s, y + 12.0f * s, s * 0.62f,
-                  hud.targetDisabled ? frame : targetDim);
-        hud_.text("health", x + 4.0f * s, y + 21.0f * s, s * 0.58f, targetDim);
-        targetBar(y + 28.0f * s, hud.targetHealth01,
-                  glm::vec4(1.0f, 0.32f, 0.22f, alpha * 0.92f));
-        hud_.text("energy", x + 4.0f * s, y + 33.0f * s, s * 0.58f, targetDim);
-        targetBar(y + 40.0f * s, hud.targetEnergy01,
-                  glm::vec4(0.3f, 0.75f, 1.0f, alpha * 0.92f));
-    }
-
     // Incoming transmission, below the key row in the otherwise open upper
     // right. The authored frames loop for the duration of the message; the
     // short fades keep it from arriving and vanishing as a hard rectangle.
@@ -1045,6 +1006,11 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     // of the most important ones goes.
     const float musicPlateW = std::min(w * 0.30f, 74.0f * s);
 
+    // Where the weapon strip's plate starts, for the target readout that sits on
+    // top of it. The strip folds to two rows on a narrow window, and the readout
+    // has to ride up with it rather than be drawn into it.
+    float stripTop = h;
+
     // The weapon strip, bottom centre: one cell per gun, drawn from the row the
     // game layer filled. The renderer never asks what a weapon is - only how
     // wide its name is and which of four states its cell is in.
@@ -1238,6 +1204,7 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         const float plateX = cx - plateW * 0.5f;
         const float plateY = h - 8.0f * s - plateH;
         const float rightEdge = plateX + plateW - pad;
+        stripTop = plateY;
 
         hud_.rect(plateX, plateY, plateW, plateH, glm::vec4(0.015f, 0.025f, 0.04f, 0.72f));
         hud_.rect(plateX, plateY, plateW, rule, glm::vec4(accent.r, accent.g, accent.b, 0.55f));
@@ -1256,6 +1223,41 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
                       HudData::kSecondarySlots, rightEdge - tail, plateY);
             drawChip(rightEdge - chipW, plateY);
         }
+    }
+
+    // Last directly damaged robot, bottom centre on top of the weapon strip.
+    // Small and centred because it is a transient scanner result read in a
+    // glance between shots, not another resource owned by the ship: a name, what
+    // it is doing, and how much of it is left.
+    if (hud.hasTarget && hud.targetFade > 0.0f) {
+        const float alpha = std::clamp(hud.targetFade, 0.0f, 1.0f);
+        const float nameScale = s * 0.62f;
+        const float statusScale = s * 0.48f;
+        const float pad = 3.0f * s;
+        const float barH = 2.5f * s;
+        const float nameY = pad;
+        const float statusY = nameY + 7.0f * nameScale + 1.5f * s;
+        const float barY = statusY + 7.0f * statusScale + 2.0f * s;
+        const float panelW = std::max(56.0f * s, hud_.textWidth(hud.targetName, nameScale) +
+                                                     pad * 2.0f);
+        const float panelH = barY + barH + pad;
+        const float x = cx - panelW * 0.5f;
+        const float y = stripTop - 4.0f * s - panelH;
+        const float barW = panelW - pad * 2.0f;
+        const glm::vec4 frame(0.95f, 0.35f, 0.25f, alpha * 0.95f);
+        const glm::vec4 targetDim(0.8f, 0.86f, 0.92f, alpha * 0.82f);
+        const glm::vec4 health(1.0f, 0.32f, 0.22f, alpha * 0.92f);
+
+        hud_.rect(x, y, panelW, panelH, glm::vec4(0.015f, 0.025f, 0.04f, alpha * 0.72f));
+        hud_.rect(x, y, panelW, std::max(1.0f, 0.6f * s), frame);
+        hud_.text(hud.targetName, cx - hud_.textWidth(hud.targetName, nameScale) * 0.5f,
+                  y + nameY, nameScale, frame);
+        hud_.text(hud.targetStatus, cx - hud_.textWidth(hud.targetStatus, statusScale) * 0.5f,
+                  y + statusY, statusScale, hud.targetDisabled ? frame : targetDim);
+        hud_.rect(x + pad, y + barY, barW, barH,
+                  glm::vec4(health.r * 0.3f, health.g * 0.3f, health.b * 0.3f, alpha * 0.7f));
+        const float fill = std::clamp(hud.targetHealth01, 0.0f, 1.0f);
+        if (fill > 0.0f) hud_.rect(x + pad, y + barY, barW * fill, barH, health);
     }
 
     // The soundtrack, bottom right. It held the middle of this edge until the
