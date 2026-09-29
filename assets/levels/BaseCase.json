@@ -1,7 +1,7 @@
 {
-  "name": "TheBeginning",
+  "name": "Base Case",
   "comment": "Created in the level editor. One room; grow the rest with extrude.",
-  "script": "TheBeginning.lua",
+  "script": "BaseCase.lua",
   "vertices": [
     [
       -10.115831698429297,

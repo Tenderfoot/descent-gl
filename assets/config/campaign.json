@@ -1,10 +1,10 @@
 {
   "levels": [
-    "TheBeginning",
-    "MineEntrance",
-    "LevelThree",
-    "LevelFour",
-    "LevelFive",
-    "levelsix"
+    "BaseCase",
+    "RecursiveStep",
+    "UndefinedBehaviour",
+    "BufferOverflow",
+    "SegmentationFault",
+    "RaceCondition"
   ]
 }
