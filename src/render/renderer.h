@@ -470,6 +470,7 @@ private:
     std::unique_ptr<Shader> wallShader_;
     std::unique_ptr<Shader> emissiveShader_;
     std::unique_ptr<Shader> unlitShader_;
+    std::unique_ptr<Shader> ballShader_;
     std::unique_ptr<Shader> shadowShader_;
     std::unique_ptr<Shader> fullscreenShader_;
     std::unique_ptr<Shader> debugLineShader_;
@@ -493,6 +494,7 @@ private:
     std::unique_ptr<LevelMesh> levelMesh_;
     std::unique_ptr<Mesh> ship_;
     std::unique_ptr<Mesh> gizmo_;
+    std::unique_ptr<Mesh> ball_;   // unit sphere, for the floating lights
 
     ModelData shipModel_;
     OccluderMesh shipOccluderMesh_;
