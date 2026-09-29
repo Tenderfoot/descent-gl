@@ -70,7 +70,7 @@ the live values.
 | Shields / energy | 100 / 100 (disabled at 10 shields) |
 | Shield pickup / energy pickup | +25 / +30 |
 | Default ammo | vulcan 2000, concussion 8, homing 6, railgun 20, Static Charge 10, flares 12 |
-| Ammo pickups | concussion +3, homing +3, railgun +3, vulcan +500, flares +4; Static Charge fills to 10 |
+| Ammo pickups | concussion +3, homing +3, railgun +3, vulcan +200, flares +4; Static Charge fills to 10 |
 
 Levels override the defaults with a `loadout` block. MineEntrance starts with
 railgun 5 and Static Charge 10; TheBeginning starts disabled with one
