@@ -1,5 +1,9 @@
 #include "render/mesh.h"
 
+#include <glm/gtc/constants.hpp>
+
+#include <cmath>
+
 namespace dvk::gl {
 
 Mesh::Mesh(const std::vector<Vertex>& vertices, const std::vector<GLuint>& indices)
@@ -59,6 +63,42 @@ Mesh& Mesh::operator=(Mesh&& other) noexcept {
 void Mesh::draw() const {
     glBindVertexArray(vao_);
     glDrawElements(GL_TRIANGLES, indexCount_, GL_UNSIGNED_INT, nullptr);
+}
+
+Mesh sphereMesh(int slices, int stacks) {
+    std::vector<Vertex> vertices;
+    std::vector<GLuint> indices;
+    vertices.reserve(static_cast<size_t>((slices + 1) * (stacks + 1)));
+    indices.reserve(static_cast<size_t>(slices * stacks * 6));
+
+    // Rings from the +Y pole down to the -Y pole. The seam column is
+    // duplicated so the UVs can run 0..1 without wrapping.
+    for (int i = 0; i <= stacks; ++i) {
+        const float theta = glm::pi<float>() * static_cast<float>(i) / static_cast<float>(stacks);
+        for (int j = 0; j <= slices; ++j) {
+            const float phi =
+                glm::two_pi<float>() * static_cast<float>(j) / static_cast<float>(slices);
+            const glm::vec3 p{std::sin(theta) * std::cos(phi), std::cos(theta),
+                              std::sin(theta) * std::sin(phi)};
+            vertices.push_back({p, p,
+                                {static_cast<float>(j) / static_cast<float>(slices),
+                                 static_cast<float>(i) / static_cast<float>(stacks)}});
+        }
+    }
+
+    // Counter-clockwise seen from outside. The triangles that touch a pole are
+    // degenerate on one edge and rasterize nothing, which is cheaper than a
+    // special case.
+    const auto row = static_cast<GLuint>(slices + 1);
+    for (int i = 0; i < stacks; ++i) {
+        for (int j = 0; j < slices; ++j) {
+            const GLuint a = static_cast<GLuint>(i) * row + static_cast<GLuint>(j);
+            const GLuint b = a + row;
+            indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
+        }
+    }
+
+    return Mesh(vertices, indices);
 }
 
 } // namespace dvk::gl

@@ -39,4 +39,11 @@ private:
 // render/model.h through toMesh(), so that anything drawing one can build its
 // shadow occluder from the same triangles - see cubeModel().
 
+// A unit-radius sphere centred on the origin, with smooth normals that point
+// straight out from the centre. Draw-only: it is never an occluder, which is
+// why it can be a Mesh directly rather than going through ModelData. The one
+// thing drawn from it is a floating light, and a light inside its own shadow
+// caster would put itself out.
+Mesh sphereMesh(int slices, int stacks);
+
 } // namespace dvk::gl
