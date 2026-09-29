@@ -34,6 +34,7 @@ void Mixer::render(float* out, int frames) {
     if (!clips_) return;
 
     const float master = masterGain_.load(std::memory_order_relaxed);
+    const float effects = effectsGain_.load(std::memory_order_relaxed);
 
     for (Voice& v : voices_) {
         if (!v.active || !v.clip || v.clip->samples.empty()) continue;
@@ -41,6 +42,13 @@ void Mixer::render(float* out, int frames) {
         float targetL = 0.0f;
         float targetR = 0.0f;
         spatialise(v, targetL, targetR);
+        const bool effect = v.ambient != static_cast<int>(Ambient::Comm) &&
+                            v.ambient != static_cast<int>(Ambient::MusicLull) &&
+                            v.ambient != static_cast<int>(Ambient::MusicCombat);
+        if (effect) {
+            targetL *= effects;
+            targetR *= effects;
+        }
         // A new voice starts at its own gain rather than gliding up from
         // nothing; only a continuing one glides.
         if (v.gainL < 0.0f) {

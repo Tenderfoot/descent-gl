@@ -204,6 +204,7 @@ public:
     void advanceMusicTracks();
 
     void setMasterGain(float gain);
+    void setEffectsGain(float gain) { mixer_.setEffectsGain(gain); }
     float masterGain() const { return muted_ ? unmutedGain_ : mixer_.masterGain(); }
 
     // Muting keeps the device open and the ambient channels running, so
