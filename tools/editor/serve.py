@@ -64,6 +64,23 @@ def level_path(name):
     return LEVELS / f"{name}.json"
 
 
+def level_names():
+    """Every level stem: the campaign's in play order, then the rest sorted.
+
+    The same split the game's menu makes from assets/config/campaign.json. A
+    missing or unreadable campaign file, or a stem in it with no level, is not
+    an error here - the list falls back to what is on disk.
+    """
+    on_disk = {p.stem for p in LEVELS.glob("*.json")}
+    try:
+        campaign = json.loads((CONFIG / "campaign.json").read_text(encoding="utf-8"))["levels"]
+    except (OSError, ValueError, KeyError, TypeError):
+        campaign = []
+    stems = [n for n in campaign if isinstance(n, str)] if isinstance(campaign, list) else []
+    ordered = [n for n in dict.fromkeys(stems) if n in on_disk]
+    return ordered + sorted(on_disk - set(ordered))
+
+
 def asset_path(directory, name, suffix):
     """<directory>/<name><suffix>, or None if the name is not a bare stem."""
     if not LEVEL_NAME.match(name or ""):
@@ -116,8 +133,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
 
         if path == "/api/levels":
-            names = sorted(p.stem for p in LEVELS.glob("*.json"))
-            return self.send_json(200, {"levels": names, "binary": str(find_binary() or "")})
+            return self.send_json(200, {"levels": level_names(), "binary": str(find_binary() or "")})
 
         if path == "/api/textures":
             # The tile names in layer order, which is what the side panel's
