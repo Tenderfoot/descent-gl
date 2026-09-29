@@ -295,8 +295,10 @@ int main(int argc, char** argv) {
     for (dvk::LevelEntry& entry : catalog.levels) {
         if (const dvk::LevelRecord* record =
                 progress.find(dvk::levelProgressId(entry.path))) {
+            entry.runs = record->runs;
             entry.completions = record->wins;
             entry.bestSeconds = static_cast<int>(record->bestTime);
+            entry.mostRobots = record->mostRobots;
         }
     }
 

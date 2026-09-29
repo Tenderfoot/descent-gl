@@ -301,7 +301,8 @@ void Shell::finishRun(const sim::GameState& game, bool recordProgress) {
             recordRun(progress_, levelId, won, game.elapsed, game.robotsDestroyed);
         savePlayerProgress(progressPath_, progress_);
         if (const LevelRecord* record = progress_.find(levelId)) {
-            menu_.setLevelRecord(loaded_.path, record->wins, static_cast<int>(record->bestTime));
+            menu_.setLevelRecord(loaded_.path, record->runs, record->wins,
+                                 static_cast<int>(record->bestTime), record->mostRobots);
         }
         note = runRecordNote(update);
     }

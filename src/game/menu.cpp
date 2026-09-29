@@ -210,7 +210,7 @@ ListLayout levelListLayout(int count, int width, int height) {
     spec.bottom = 0.90f;
     spec.gap = std::clamp(static_cast<float>(std::max(height, 1)) * 0.018f, 10.0f, 18.0f);
     spec.rowMin = 30.0f;
-    spec.rowMax = 58.0f;
+    spec.rowMax = 66.0f;   // two lines: the name and its records
     return layoutList(spec, width, height);
 }
 
@@ -295,12 +295,15 @@ void PlayerMenu::setSelectedLevel(int index) {
     levelScroll_ = levelSelection_;
 }
 
-void PlayerMenu::setLevelRecord(const std::string& path, int completions, int bestSeconds) {
+void PlayerMenu::setLevelRecord(const std::string& path, int runs, int completions,
+                                int bestSeconds, int mostRobots) {
     const auto found = std::find_if(levels_.begin(), levels_.end(),
                                     [&](const LevelEntry& level) { return level.path == path; });
     if (found == levels_.end()) return;
+    found->runs = std::max(runs, 0);
     found->completions = std::max(completions, 0);
     found->bestSeconds = bestSeconds;
+    found->mostRobots = std::max(mostRobots, 0);
 }
 
 void PlayerMenu::hide() {
@@ -717,13 +720,19 @@ MenuView PlayerMenu::view(int width, int height) const {
             button.action = MenuAction::Start;
             const LevelEntry& level = levels_[static_cast<size_t>(begin + index)];
             button.label = level.name.c_str();
-            if (level.completions > 0) {
-                if (level.bestSeconds >= 0) {
-                    std::snprintf(button.value.data(), button.value.size(), "best %d:%02d",
-                                  level.bestSeconds / 60, level.bestSeconds % 60);
-                } else {
-                    std::snprintf(button.value.data(), button.value.size(), "%s", "complete");
+            if (level.runs == 0 && level.completions == 0) {
+                std::snprintf(button.detail.data(), button.detail.size(), "%s",
+                              "not attempted");
+            } else {
+                char best[16] = "";
+                if (level.completions > 0 && level.bestSeconds >= 0) {
+                    std::snprintf(best, sizeof(best), "best %d:%02d   ", level.bestSeconds / 60,
+                                  level.bestSeconds % 60);
                 }
+                std::snprintf(button.detail.data(), button.detail.size(),
+                              "%sattempts %d   successes %d   robots %d", best,
+                              std::max(level.runs, level.completions), level.completions,
+                              level.mostRobots);
             }
             button.levelIndex = begin + index;
             button.bounds = {layout.left,
@@ -796,7 +805,7 @@ MenuView PlayerMenu::view(int width, int height) const {
     switch (screen_) {
         case MenuScreen::Main:
             result.title = "descent";
-            result.subtitle = "into the dark";
+            result.subtitle = "";
             break;
         case MenuScreen::LevelGroups:
             result.title = "play";
