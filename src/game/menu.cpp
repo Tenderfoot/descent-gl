@@ -67,9 +67,10 @@ constexpr std::array<ButtonDefinition, 7> kVideoButtons{{
     {MenuAction::Back, "back"},
 }};
 
-constexpr std::array<ButtonDefinition, 4> kAudioButtons{{
+constexpr std::array<ButtonDefinition, 5> kAudioButtons{{
     {MenuAction::None, "master volume"},
     {MenuAction::None, "music volume"},
+    {MenuAction::None, "effects volume"},
     {MenuAction::ApplySettings, "apply"},
     {MenuAction::Back, "back"},
 }};
@@ -439,7 +440,7 @@ int PlayerMenu::buttonCount() const {
 int PlayerMenu::valueRows(MenuScreen screen) {
     switch (screen) {
         case MenuScreen::SettingsVideo: return 5;
-        case MenuScreen::SettingsAudio: return 2;
+        case MenuScreen::SettingsAudio: return 3;
         case MenuScreen::SettingsGame: return 4;
         default: return 0;
     }
@@ -502,6 +503,10 @@ void PlayerMenu::adjustSetting(MenuScreen screen, int index, int direction) {
                 case 1:
                     editedSettings_.musicVolume =
                         step(editedSettings_.musicVolume, 0.05f, 0.0f, 1.0f);
+                    break;
+                case 2:
+                    editedSettings_.effectsVolume =
+                        step(editedSettings_.effectsVolume, 0.05f, 0.0f, 1.0f);
                     break;
                 default: break;
             }
@@ -902,6 +907,11 @@ MenuView PlayerMenu::view(int width, int height) const {
                         std::snprintf(
                             button.value.data(), button.value.size(), "%d%%",
                             static_cast<int>(std::round(editedSettings_.musicVolume * 100.0f)));
+                        break;
+                    case 2:
+                        std::snprintf(
+                            button.value.data(), button.value.size(), "%d%%",
+                            static_cast<int>(std::round(editedSettings_.effectsVolume * 100.0f)));
                         break;
                     default: break;
                 }

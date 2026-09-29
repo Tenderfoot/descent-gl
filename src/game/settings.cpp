@@ -56,6 +56,7 @@ bool expect(bool condition, const char* message) {
 PlayerSettings normalizedPlayerSettings(PlayerSettings settings) {
     settings.masterVolume = std::clamp(settings.masterVolume, 0.0f, 1.0f);
     settings.musicVolume = std::clamp(settings.musicVolume, 0.0f, 1.0f);
+    settings.effectsVolume = std::clamp(settings.effectsVolume, 0.0f, 1.0f);
     settings.mouseSensitivity = std::clamp(settings.mouseSensitivity, 0.2f, 3.0f);
     settings.firstPersonFov =
         std::clamp(settings.firstPersonFov, kMinVerticalFov, kMaxVerticalFov);
@@ -97,6 +98,7 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         const nlohmann::json source = nlohmann::json::parse(input);
         readIf(source, "masterVolume", settings.masterVolume);
         readIf(source, "musicVolume", settings.musicVolume);
+        readIf(source, "effectsVolume", settings.effectsVolume);
         readIf(source, "mouseSensitivity", settings.mouseSensitivity);
         readIf(source, "firstPersonFov", settings.firstPersonFov);
         readIf(source, "thirdPersonFov", settings.thirdPersonFov);
@@ -154,6 +156,7 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"version", kSettingsVersion},
         {"masterVolume", settings.masterVolume},
         {"musicVolume", settings.musicVolume},
+        {"effectsVolume", settings.effectsVolume},
         {"mouseSensitivity", settings.mouseSensitivity},
         {"firstPersonFov", settings.firstPersonFov},
         {"thirdPersonFov", settings.thirdPersonFov},
