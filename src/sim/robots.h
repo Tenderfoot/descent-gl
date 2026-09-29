@@ -327,7 +327,7 @@ struct Debris {
     float lifetime = 2.5f;
 };
 
-inline constexpr int kMaxRobots = 32;
+inline constexpr int kMaxRobots = 64;
 // Every robot finished by the Static Charge at once, each leaving its energy
 // and up to two kinds of ammunition.
 inline constexpr int kMaxDrops = kMaxRobots * 3;
