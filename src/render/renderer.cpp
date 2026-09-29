@@ -108,6 +108,7 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     emissiveShader_ =
         std::make_unique<Shader>("shaders/wall_emissive.vert", "shaders/wall_emissive.frag");
     unlitShader_ = std::make_unique<Shader>("shaders/unlit.vert", "shaders/unlit.frag");
+    ballShader_ = std::make_unique<Shader>("shaders/ball.vert", "shaders/ball.frag");
     shadowShader_ = std::make_unique<Shader>("shaders/shadow.vert", "shaders/shadow.frag");
     fullscreenShader_ =
         std::make_unique<Shader>("shaders/fullscreen.vert", "shaders/fullscreen.frag");
@@ -222,6 +223,7 @@ Renderer::Renderer(const Level& level, const sim::RobotConfig& robots)
     shipOccluder_.reset(&shipOccluderMesh_, glm::mat4(1.0f));
 
     gizmo_ = std::make_unique<Mesh>(toMesh(cubeModel()));
+    ball_ = std::make_unique<Mesh>(sphereMesh(24, 16));
 
     loadRobotMeshes(robots);
     setLevel(level);
@@ -2518,6 +2520,27 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         glDisable(GL_BLEND);
     }
 
+    // The floating lights' balls. Opaque and depth-writing, and before the
+    // billboards so a bolt behind a ball is hidden by it and the ball's own
+    // glow shows only round its rim. Here and nowhere earlier: in the prepass
+    // the lit passes would light it with its own light, and as a shadow caster
+    // it would sit round that light and black out the room.
+    bool anyBall = false;
+    for (int i = 0; i < rs.propCount; ++i) {
+        const RenderState::PropView& prop = rs.props[static_cast<size_t>(i)];
+        if (prop.ballRadius <= 0.0f) continue;
+        if (!anyBall) {
+            ballShader_->bind();
+            ballShader_->setVec3("uEye", eyePos(rs));
+            anyBall = true;
+        }
+        glm::mat4 m = glm::translate(glm::mat4(1.0f), prop.position);
+        m = glm::scale(m, glm::vec3(prop.ballRadius));
+        ballShader_->setMat4("uModel", m);
+        ballShader_->setVec3("uColor", prop.color);
+        ball_->draw();
+    }
+
     if (!billboards_.empty()) {
         // Additive, depth-tested but not depth-writing: a bolt lights what is
         // behind it and never occludes anything.
@@ -2556,7 +2579,6 @@ void Renderer::unlitPass(const RenderState& rs, const Level& level, const Portal
         unlitShader_->setVec3("uColor", light.color);
         gizmo_->draw();
     }
-    (void)rs;
 }
 
 void Renderer::drawScene(const RenderState& rs, const Level& level, const PortalWalk& walk,

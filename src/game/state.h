@@ -222,7 +222,11 @@ struct RenderState {
     struct PropView {
         glm::vec3 position{0.0f};
         glm::vec3 color{1.0f};
-        float size = 1.0f;
+        float size = 1.0f;   // the glow around it
+        // Floating lights only: a solid emissive sphere of the body's own
+        // radius, so it reads as a ball and not as a static light's fixture.
+        // Zero for a lamp, which is only the glow.
+        float ballRadius = 0.0f;
         // Swinging lamps only: where the cord is anchored, so the renderer can
         // draw the cord the lamp is hanging from.
         bool corded = false;
@@ -412,7 +416,10 @@ inline RenderState interpolate(const SimState& a, const SimState& b, float t) {
         view.position = was.alive ? glm::mix(was.body.position, ball.body.position, t)
                                   : ball.body.position;
         view.color = ball.color;
-        view.size = ball.body.radius * 1.5f;
+        // The glow reaches past the ball so it has a halo round its rim; the
+        // part behind the sphere is depth-rejected.
+        view.size = ball.body.radius * 2.4f;
+        view.ballRadius = ball.body.radius;
         r.props[static_cast<size_t>(r.propCount++)] = view;
     }
     for (int i = 0; i < b.props.swingingCount; ++i) {
