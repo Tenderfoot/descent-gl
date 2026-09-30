@@ -4659,6 +4659,124 @@
         -222.2167146060256
       ],
       "segment": 74
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        10.017354703864738,
+        10.0,
+        -46.8862541786615
+      ],
+      "segment": 2
+    },
+    {
+      "kind": "vulcan",
+      "position": [
+        10.017354703864738,
+        10.0,
+        -35.99105284535955
+      ],
+      "segment": 2
+    },
+    {
+      "kind": "shield",
+      "position": [
+        -116.66616698998597,
+        61.09962427332533,
+        44.0455475628641
+      ],
+      "segment": 26,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "vulcan",
+      "position": [
+        -116.66616698998597,
+        73.6619221928451,
+        44.0455475628641
+      ],
+      "segment": 26,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        -116.66616698998597,
+        67.36149563665016,
+        50.20115328937037
+      ],
+      "segment": 26,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        129.35080008629387,
+        80.44075820943152,
+        -106.36514350213058
+      ],
+      "segment": 33,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "homing",
+      "position": [
+        129.35080008629387,
+        74.9383975433381,
+        -106.36514350213058
+      ],
+      "segment": 33,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        9.999999999999998,
+        112.95026555081328,
+        -166.69170341007754
+      ],
+      "segment": 70,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "vulcan",
+      "position": [
+        9.999999999999998,
+        112.95026555081328,
+        -177.48605025975007
+      ],
+      "segment": 70,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        9.999999999999998,
+        112.95026555081328,
+        -191.37514923325887
+      ],
+      "segment": 70,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "shield",
+      "position": [
+        10.0,
+        30.073154159931676,
+        -222.2167146060256
+      ],
+      "segment": 74,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        10.0,
+        11.321028615812022,
+        -222.2167146060256
+      ],
+      "segment": 74,
+      "maxDifficulty": "normal"
     }
   ],
   "objects": [

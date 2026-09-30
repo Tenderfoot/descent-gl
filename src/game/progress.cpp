@@ -202,8 +202,7 @@ bool saveSaveSlots(const std::filesystem::path& path, const SaveSlots& saves) {
             log::warn("could not write progress temporary file '{}'", temporary.string());
             return false;
         }
-        file << output.dump(2) << '
-';
+        file << output.dump(2) << '\n';
         file.flush();
         if (!file) {
             log::warn("could not finish writing progress temporary file '{}'", temporary.string());

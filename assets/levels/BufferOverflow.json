@@ -6526,6 +6526,74 @@
         402.565335246773
       ],
       "segment": 95
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        10.0,
+        29.000672623838987,
+        -26.024935107082616
+      ],
+      "segment": 2
+    },
+    {
+      "kind": "homing",
+      "position": [
+        10.0,
+        60.364320769442116,
+        -32.508287544458646
+      ],
+      "segment": 4
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        -127.36356413808346,
+        160.9989575186743,
+        85.3748255693301
+      ],
+      "segment": 61,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        -127.42086476112334,
+        166.28255946623764,
+        85.3748255693301
+      ],
+      "segment": 61,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "vulcan",
+      "position": [
+        -127.17282348756218,
+        154.01389641320495,
+        85.3748255693301
+      ],
+      "segment": 61,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "vulcan",
+      "position": [
+        157.02044256875044,
+        157.10061790764902,
+        85.39704871064139
+      ],
+      "segment": 47,
+      "maxDifficulty": "normal"
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        147.76128291227027,
+        157.10061790764902,
+        85.39704871064139
+      ],
+      "segment": 47,
+      "maxDifficulty": "normal"
     }
   ],
   "exit": {
