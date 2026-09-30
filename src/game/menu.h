@@ -14,7 +14,12 @@ namespace dvk {
 enum class MenuScreen {
     Hidden,
     Main,
-    // What "play" opens: the campaign or the other maps, each a level list.
+    // What "play" opens: the three save slots.
+    SaveSlots,
+    // An empty slot's first question, and the only time it is asked: the
+    // difficulty the slot will be played at for as long as it exists.
+    NewSlot,
+    // What a slot opens: the campaign or the other maps, each a level list.
     LevelGroups,
     LevelSelect,
     Pause,
@@ -30,6 +35,9 @@ enum class MenuScreen {
     Summary,
     // A level's scripted tutorial, with the game stopped behind it.
     Tutorial,
+    // Yes or no to something that cannot be undone. The shell remembers what
+    // was asked; the menu only knows the words.
+    Confirm,
 };
 
 // Whether this screen edits settings values, which is what makes leaving it an
@@ -41,7 +49,12 @@ inline bool editsSettings(MenuScreen screen) {
 
 enum class MenuAction {
     None,
-    ChooseLevel,   // main menu "play": open the campaign / other maps choice
+    ChooseLevel,   // main menu "play": open the save slots
+    ChooseSlot,    // selectedSlot(): open it, or ask an empty one its difficulty
+    CreateSlot,    // selectedSlot() at selectedDifficulty()
+    DeleteSlot,    // the open slot, once confirmed
+    ConfirmYes,
+    ConfirmNo,
     ChooseCampaign,
     ChooseOtherMaps,
     OpenSettings,
@@ -173,8 +186,15 @@ public:
     // outlive every view.
     void setLevels(std::vector<LevelEntry> levels, int campaignCount = 0);
     const std::vector<LevelEntry>& levels() const { return levels_; }
+    int campaignCount() const { return campaignCount_; }
     void setLevelRecord(const std::string& path, int runs, int completions, int bestSeconds,
                         int mostRobots);
+    // What a slot's row says. `difficulty` is null for an empty slot.
+    void setSlotSummary(int slot, const char* difficulty, int campaignWon, int campaignTotal);
+    // The slot the last ChooseSlot was for.
+    int selectedSlot() const { return chosenSlot_; }
+    // What the last CreateSlot picked: 0-2 are Difficulty, 3 is ultra-hard.
+    int selectedDifficulty() const { return chosenDifficulty_; }
     // Which level the last Start was for, or -1 when the list is empty. Index
     // into levels(), not into the group it was picked from.
     int selectedLevel() const { return chosenLevel_; }
@@ -183,6 +203,8 @@ public:
 
     void hide();
     void showMain();
+    void showSaveSlots();
+    void showNewSlot();
     // Campaign or other maps. The cursor starts on the group last opened, or
     // the one holding the loaded level.
     void showLevelGroups();
@@ -202,9 +224,14 @@ public:
     // whichever menu opened it.
     void closeSettings();
     void showTutorial(const char* title, const char* text);
+    // The strings must outlive the screen; the shell passes literals. The
+    // cursor starts on `no`, so a confirm pressed by reflex does nothing.
+    void showConfirm(const char* title, const char* subtitle, const char* yes, const char* no);
     void setConfirmationSeconds(int seconds);
+    // `retry` is false when there is nothing left to retry on: the ultra-hard
+    // slot the run was played on has just been deleted.
     void showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
-                     int robotsTotal, const char* recordNote = "");
+                     int robotsTotal, const char* recordNote = "", bool retry = true);
 
     MenuAction update(const MenuInput& input, int width, int height);
     MenuView view(int width, int height) const;
@@ -241,6 +268,21 @@ private:
     int levelScroll_ = 0;
     int controlScroll_ = 0;
     int chosenLevel_ = -1;
+    struct SlotSummary {
+        bool used = false;
+        std::array<char, 32> value{};
+        std::array<char, 64> detail{};
+        // The level groups' subtitle while this slot is open.
+        std::array<char, 48> heading{};
+    };
+    std::array<SlotSummary, 3> slots_{};
+    int chosenSlot_ = -1;
+    int chosenDifficulty_ = 1;
+    const char* confirmTitle_ = "";
+    const char* confirmSubtitle_ = "";
+    const char* confirmYes_ = "";
+    const char* confirmNo_ = "";
+    bool summaryRetry_ = true;
     bool won_ = false;
     const char* reason_ = "";
     const char* recordNote_ = "";

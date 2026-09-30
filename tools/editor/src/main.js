@@ -16,8 +16,8 @@ import {
     setGrateUvMode,
 } from './entities.js';
 import {
-    BLOCK_TYPE, KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_NAMES, SIDE_NAMES, SIDE_VERTICES, UV_MODES,
-    WALL_TILE_NAMES, setWallTileNames,
+    BLOCK_TYPE, DIFFICULTY_NAMES, KEY_NAMES, LIGHT_FIXTURE_SIZE, PICKUP_KEY_FIRST, PICKUP_NAMES,
+    SIDE_NAMES, SIDE_VERTICES, UV_MODES, WALL_TILE_NAMES, setWallTileNames,
 } from './format.js';
 import { ModelCache } from './obj.js';
 import { checkLevelName, checkName, newLevel } from './create.js';
@@ -946,6 +946,30 @@ function renderEntityTools(container, button, hint) {
             lightFields(lamp, set);
         }
 
+        if (kind === 'pickup') {
+            const pickup = app.level.pickups[index];
+            if (pickup.kind >= PICKUP_KEY_FIRST) {
+                row('keys appear at every difficulty');
+            } else {
+                row('appears up to');
+                const difficultyRow = document.createElement('div');
+                difficultyRow.className = 'textures';
+                DIFFICULTY_NAMES.forEach((name, difficulty) => {
+                    const el = document.createElement('button');
+                    el.textContent = name;
+                    el.title = difficulty === DIFFICULTY_NAMES.length - 1
+                        ? 'on every difficulty'
+                        : `on ${DIFFICULTY_NAMES.slice(0, difficulty + 1).join(' and ')} only`;
+                    el.setAttribute('aria-pressed', String(pickup.maxDifficulty === difficulty));
+                    el.onclick = () => edit(`pickup ${index} up to ${name}`, () => {
+                        pickup.maxDifficulty = difficulty;
+                    });
+                    difficultyRow.appendChild(el);
+                });
+                container.appendChild(difficultyRow);
+            }
+        }
+
         if (kind === 'exit') {
             const exit = app.level.exitTrigger;
             field('radius', exit.radius, { type: 'number', min: 1, max: 60, step: 0.5 },
@@ -1264,7 +1288,8 @@ function renderSelection() {
         },
         pickup: () => {
             const p = app.level.pickups[selection.index];
-            return `<b>pickup ${selection.index}</b> ${PICKUP_NAMES[p.kind]}\nsegment ${p.segment}`;
+            const upTo = p.kind >= PICKUP_KEY_FIRST ? '' : `\nup to ${DIFFICULTY_NAMES[p.maxDifficulty]}`;
+            return `<b>pickup ${selection.index}</b> ${PICKUP_NAMES[p.kind]}\nsegment ${p.segment}${upTo}`;
         },
         start: () => `<b>player start</b>\nsegment ${app.level.start.segment}`,
         exit: () => `<b>exit</b>\nsegment ${app.level.exitTrigger.segment}\n` +

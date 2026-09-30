@@ -54,6 +54,13 @@ export const PICKUP_NAMES = [
 // The three keys are the last three kinds, in `KEY_NAMES` order.
 export const PICKUP_KEY_FIRST = PICKUP_NAMES.indexOf('key_blue');
 
+// src/game/level.h: kDifficultyNames. A pickup's `maxDifficulty` is the
+// highest difficulty it appears at. Absent means the last of these, which is
+// every difficulty, so it is only written when it says something. Keys ignore
+// it in the game: a mine whose key is missing cannot be finished.
+export const DIFFICULTY_NAMES = ['easy', 'normal', 'hard'];
+export const DIFFICULTY_HARDEST = DIFFICULTY_NAMES.length - 1;
+
 // The tile set in layer order, so a level file's `texture: 2` means the same
 // thing here as it does in the game.
 //

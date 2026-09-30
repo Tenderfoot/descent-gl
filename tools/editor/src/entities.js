@@ -9,8 +9,8 @@
 // here that moves something re-resolves it.
 
 import {
-    BALL_COLOR, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS, MAX_SWINGING_LIGHTS,
-    PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM, UV_MODES,
+    BALL_COLOR, BLOCK_TYPE, DEFAULTS, DIFFICULTY_HARDEST, KEY_NAMES, LAMP_COLOR, MAX_FLOATING_LIGHTS,
+    MAX_SWINGING_LIGHTS, PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_TOP, SIDE_BOTTOM, UV_MODES,
 } from './format.js';
 import { findSegment, sideCorners } from './geometry.js';
 import { fromLevelQuat, multiplyQuat, toLevelQuat, transformDirection } from './transform.js';
@@ -66,7 +66,10 @@ export function addLight(level, position, segment = -1) {
 
 export function addPickup(level, kind, position) {
     if (kind < 0 || kind >= PICKUP_NAMES.length) throw new Error(`no such pickup kind: ${kind}`);
-    level.pickups.push(place(level, { keyOrder: null, kind, position: position.slice(), segment: -1 }));
+    level.pickups.push(place(level, {
+        keyOrder: null, kind, position: position.slice(), segment: -1,
+        maxDifficulty: DIFFICULTY_HARDEST,
+    }));
     return level.pickups.length - 1;
 }
 

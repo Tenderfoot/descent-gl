@@ -8,7 +8,10 @@
 #include "game/tutorial.h"
 #include "render/renderer.h"
 #include "sim/collision.h"
+#include "sim/gameflow.h"
 #include "sim/robots.h"
+
+#include <algorithm>
 
 namespace dvk {
 
@@ -35,6 +38,15 @@ void applySessionLoadout(LevelSession& session, const ScriptLoadout& loadout) {
     applyLoadout(loadout, session.initial().combat.player);
     applyLoadout(loadout, session.previous().combat.player);
     applyLoadout(loadout, session.current().combat.player);
+}
+
+void applySessionDifficulty(LevelSession& session, const Level& level, Difficulty difficulty) {
+    const size_t count = std::min(level.pickups.size(), static_cast<size_t>(sim::kMaxPickups));
+    for (SimState* state : {&session.initial(), &session.previous(), &session.current()}) {
+        for (size_t i = 0; i < count; ++i) {
+            state->game.collected[i] = !pickupPresent(level.pickups[i], difficulty);
+        }
+    }
 }
 
 void setSessionHeadlight(LevelSession& session, bool on) {

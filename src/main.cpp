@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     const std::filesystem::path progressPath =
         opts.progressPath.empty() ? dvk::defaultPlayerProgressPath()
                                   : std::filesystem::path(opts.progressPath);
-    dvk::PlayerProgress progress = dvk::loadPlayerProgress(progressPath);
+    dvk::SaveSlots saves = dvk::loadSaveSlots(progressPath);
     if (opts.volumeOverride) settings.masterVolume = opts.volume;
     if (opts.sizeOverride) {
         settings.windowWidth = opts.width;
@@ -264,6 +264,9 @@ int main(int argc, char** argv) {
 
     dvk::loadLevelScript(script, level, comm);
     dvk::applySessionLoadout(session, script.loadout());
+    // What a run that never passes through the slot screen is played at. One
+    // that does is set again from its slot when it starts.
+    dvk::applySessionDifficulty(session, level, dvk::Difficulty::Normal);
     if (opts.headlight) dvk::setSessionHeadlight(session, true);
     if (opts.targetHud && session.initial().robots.count > 0) {
         dvk::sim::Robot& target = session.initial().robots.robots[0];
@@ -291,20 +294,14 @@ int main(int argc, char** argv) {
     dvk::sim::FlightConfig flight = dvk::sim::loadFlightConfig(kFlightConfigPath);
     const dvk::sim::FlightConfig flightDefaults;
 
+    // The level list's records are a save slot's, and are filled in when one
+    // is opened.
     dvk::LevelCatalog catalog = dvk::discoverCatalog(kLevelDir, kCampaignPath);
-    for (dvk::LevelEntry& entry : catalog.levels) {
-        if (const dvk::LevelRecord* record =
-                progress.find(dvk::levelProgressId(entry.path))) {
-            entry.runs = record->runs;
-            entry.completions = record->wins;
-            entry.bestSeconds = static_cast<int>(record->bestTime);
-            entry.mostRobots = record->mostRobots;
-        }
-    }
 
     dvk::Shell shell(window, input, audio, session, loaded, std::move(settings), settingsPath,
-                     std::move(progress), progressPath, vsyncAllowed);
+                     std::move(saves), progressPath, vsyncAllowed);
     shell.menu().setLevels(std::move(catalog.levels), catalog.campaignCount);
+    shell.refreshSlotSummaries();
     // The list opens on the level that is loaded, so confirming twice from the
     // main menu starts what a plain run has always started.
     for (int i = 0; i < static_cast<int>(shell.menu().levels().size()); ++i) {
