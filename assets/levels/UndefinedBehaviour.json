@@ -4685,7 +4685,8 @@
         61.09962427332533,
         44.0455475628641
       ],
-      "segment": 26
+      "segment": 26,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "vulcan",
@@ -4694,7 +4695,8 @@
         73.6619221928451,
         44.0455475628641
       ],
-      "segment": 26
+      "segment": 26,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "concussion",
@@ -4703,7 +4705,8 @@
         67.36149563665016,
         50.20115328937037
       ],
-      "segment": 26
+      "segment": 26,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "railgun",
@@ -4712,7 +4715,8 @@
         80.44075820943152,
         -106.36514350213058
       ],
-      "segment": 33
+      "segment": 33,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "homing",
@@ -4721,7 +4725,8 @@
         74.9383975433381,
         -106.36514350213058
       ],
-      "segment": 33
+      "segment": 33,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "railgun",
@@ -4730,7 +4735,8 @@
         112.95026555081328,
         -166.69170341007754
       ],
-      "segment": 70
+      "segment": 70,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "vulcan",
@@ -4739,7 +4745,8 @@
         112.95026555081328,
         -177.48605025975007
       ],
-      "segment": 70
+      "segment": 70,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "concussion",
@@ -4748,7 +4755,8 @@
         112.95026555081328,
         -191.37514923325887
       ],
-      "segment": 70
+      "segment": 70,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "shield",
@@ -4757,7 +4765,8 @@
         30.073154159931676,
         -222.2167146060256
       ],
-      "segment": 74
+      "segment": 74,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "railgun",
@@ -4766,7 +4775,8 @@
         11.321028615812022,
         -222.2167146060256
       ],
-      "segment": 74
+      "segment": 74,
+      "maxDifficulty": "normal"
     }
   ],
   "objects": [

@@ -6552,16 +6552,18 @@
         160.9989575186743,
         85.3748255693301
       ],
-      "segment": 61
+      "segment": 61,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "concussion",
       "position": [
         -127.42086476112334,
-        166.24689659879166,
+        166.28255946623764,
         85.3748255693301
       ],
-      "segment": 61
+      "segment": 61,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "vulcan",
@@ -6570,7 +6572,8 @@
         154.01389641320495,
         85.3748255693301
       ],
-      "segment": 61
+      "segment": 61,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "vulcan",
@@ -6579,7 +6582,8 @@
         157.10061790764902,
         85.39704871064139
       ],
-      "segment": 47
+      "segment": 47,
+      "maxDifficulty": "normal"
     },
     {
       "kind": "railgun",
@@ -6588,7 +6592,8 @@
         157.10061790764902,
         85.39704871064139
       ],
-      "segment": 47
+      "segment": 47,
+      "maxDifficulty": "normal"
     }
   ],
   "exit": {
