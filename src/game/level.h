@@ -319,11 +319,29 @@ inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)>
     "railgun", "lightning", "vulcan",
     "key_blue", "key_yellow", "key_purple"};
 
+// How hard a run is. The mine is the same at every one of them; what changes
+// is which pickups are lying in it. Ultra-hard is not in here because it is
+// not a difficulty of the mine: it is hard, played on a save slot that a
+// failed run deletes. See SaveSlot.
+enum class Difficulty : int { Easy = 0, Normal, Hard, Count };
+
+inline constexpr std::array<const char*, static_cast<size_t>(Difficulty::Count)> kDifficultyNames{
+    "easy", "normal", "hard"};
+
 struct Pickup {
     PickupKind kind = PickupKind::Shield;
     glm::vec3 position{0.0f};
     int segment = -1;
+    // The highest difficulty this pickup is placed at. Hard, the default, is
+    // every difficulty; a level file only names it when it is lower.
+    Difficulty maxDifficulty = Difficulty::Hard;
 };
+
+// Whether a pickup is lying in the mine on a run at `difficulty`. A key always
+// is, whatever the file says: a mine whose key is missing cannot be finished.
+inline bool pickupPresent(const Pickup& pickup, Difficulty difficulty) {
+    return pickup.kind >= PickupKind::KeyBlue || difficulty <= pickup.maxDifficulty;
+}
 
 // Where the level is escaped from, once the reactor is gone.
 struct ExitTrigger {

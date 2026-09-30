@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <system_error>
 #include <utility>
 
@@ -20,7 +21,9 @@ namespace dvk {
 
 namespace {
 
-constexpr int kProgressVersion = 1;
+// 1 was one player's records, with no slots and no difficulty.
+constexpr int kProgressVersion = 2;
+constexpr const char* kUltraHardName = "ultra-hard";
 
 template <typename T>
 void readIf(const nlohmann::json& source, const char* name, T& destination) {
@@ -42,6 +45,36 @@ bool replaceFile(const std::filesystem::path& source, const std::filesystem::pat
     std::filesystem::rename(source, destination, error);
     return !error;
 #endif
+}
+
+void readLevels(const nlohmann::json& source, PlayerProgress& progress) {
+    const auto levels = source.find("levels");
+    if (levels == source.end() || !levels->is_object()) return;
+    for (auto entry = levels->begin(); entry != levels->end(); ++entry) {
+        if (!entry.value().is_object()) continue;
+        LevelRecord& record = progress.findOrAdd(entry.key());
+        readIf(entry.value(), "runs", record.runs);
+        readIf(entry.value(), "wins", record.wins);
+        readIf(entry.value(), "bestTime", record.bestTime);
+        readIf(entry.value(), "mostRobots", record.mostRobots);
+        record.runs = std::max(record.runs, 0);
+        record.wins = std::clamp(record.wins, 0, record.runs);
+        record.bestTime = record.bestTime > 0.0f ? record.bestTime : -1.0f;
+        record.mostRobots = std::max(record.mostRobots, 0);
+    }
+}
+
+nlohmann::json writeLevels(const PlayerProgress& progress) {
+    nlohmann::json levels = nlohmann::json::object();
+    for (const LevelRecord& record : progress.levels()) {
+        levels[record.id] = {
+            {"runs", record.runs},
+            {"wins", record.wins},
+            {"bestTime", record.bestTime},
+            {"mostRobots", record.mostRobots},
+        };
+    }
+    return levels;
 }
 
 bool expect(bool condition, const char* message) {
@@ -90,35 +123,60 @@ std::filesystem::path defaultPlayerProgressPath() {
     return std::filesystem::path("progress.json");
 }
 
-PlayerProgress loadPlayerProgress(const std::filesystem::path& path) {
-    PlayerProgress progress;
-    std::ifstream input(path);
-    if (!input) return progress;
-    try {
-        const nlohmann::json source = nlohmann::json::parse(input);
-        const auto levels = source.find("levels");
-        if (levels == source.end() || !levels->is_object()) return progress;
-        for (auto entry = levels->begin(); entry != levels->end(); ++entry) {
-            if (!entry.value().is_object()) continue;
-            LevelRecord& record = progress.findOrAdd(entry.key());
-            readIf(entry.value(), "runs", record.runs);
-            readIf(entry.value(), "wins", record.wins);
-            readIf(entry.value(), "bestTime", record.bestTime);
-            readIf(entry.value(), "mostRobots", record.mostRobots);
-            record.runs = std::max(record.runs, 0);
-            record.wins = std::clamp(record.wins, 0, record.runs);
-            record.bestTime = record.bestTime > 0.0f ? record.bestTime : -1.0f;
-            record.mostRobots = std::max(record.mostRobots, 0);
-        }
-    } catch (const nlohmann::json::exception& error) {
-        log::warn("could not read progress '{}': {}; using empty progress", path.string(),
-                  error.what());
-        return PlayerProgress{};
-    }
-    return progress;
+const char* saveSlotDifficultyName(const SaveSlot& slot) {
+    if (slot.ultraHard) return kUltraHardName;
+    return kDifficultyNames[static_cast<size_t>(slot.difficulty)];
 }
 
-bool savePlayerProgress(const std::filesystem::path& path, const PlayerProgress& progress) {
+SaveSlots loadSaveSlots(const std::filesystem::path& path) {
+    SaveSlots saves;
+    std::ifstream input(path);
+    if (!input) return saves;
+    try {
+        const nlohmann::json source = nlohmann::json::parse(input);
+        const auto slots = source.find("slots");
+        if (slots == source.end()) {
+            // From before slots: whoever was playing keeps their records, in
+            // the first slot, at the difficulty the game always had.
+            SaveSlot& first = saves.slots[0];
+            readLevels(source, first.progress);
+            first.used = !first.progress.levels().empty();
+            return saves;
+        }
+        if (!slots->is_array()) return saves;
+        for (size_t i = 0; i < slots->size() && i < saves.slots.size(); ++i) {
+            const nlohmann::json& entry = (*slots)[i];
+            if (!entry.is_object()) continue;   // null is an empty slot
+            SaveSlot& slot = saves.slots[i];
+            slot.used = true;
+            std::string difficulty = kDifficultyNames[static_cast<size_t>(slot.difficulty)];
+            readIf(entry, "difficulty", difficulty);
+            if (difficulty == kUltraHardName) {
+                slot.difficulty = Difficulty::Hard;
+                slot.ultraHard = true;
+            } else {
+                const auto known =
+                    std::find(kDifficultyNames.begin(), kDifficultyNames.end(), difficulty);
+                if (known != kDifficultyNames.end()) {
+                    slot.difficulty =
+                        static_cast<Difficulty>(std::distance(kDifficultyNames.begin(), known));
+                } else {
+                    log::warn("save slot {} has unknown difficulty '{}'; playing it at {}",
+                              i + 1, difficulty,
+                              kDifficultyNames[static_cast<size_t>(slot.difficulty)]);
+                }
+            }
+            readLevels(entry, slot.progress);
+        }
+    } catch (const nlohmann::json::exception& error) {
+        log::warn("could not read progress '{}': {}; using empty save slots", path.string(),
+                  error.what());
+        return SaveSlots{};
+    }
+    return saves;
+}
+
+bool saveSaveSlots(const std::filesystem::path& path, const SaveSlots& saves) {
     std::error_code error;
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
@@ -127,16 +185,16 @@ bool savePlayerProgress(const std::filesystem::path& path, const PlayerProgress&
         return false;
     }
 
-    nlohmann::json levels = nlohmann::json::object();
-    for (const LevelRecord& record : progress.levels()) {
-        levels[record.id] = {
-            {"runs", record.runs},
-            {"wins", record.wins},
-            {"bestTime", record.bestTime},
-            {"mostRobots", record.mostRobots},
-        };
+    nlohmann::json slots = nlohmann::json::array();
+    for (const SaveSlot& slot : saves.slots) {
+        if (!slot.used) {
+            slots.push_back(nullptr);
+            continue;
+        }
+        slots.push_back({{"difficulty", saveSlotDifficultyName(slot)},
+                         {"levels", writeLevels(slot.progress)}});
     }
-    const nlohmann::json output{{"version", kProgressVersion}, {"levels", std::move(levels)}};
+    const nlohmann::json output{{"version", kProgressVersion}, {"slots", std::move(slots)}};
     const std::filesystem::path temporary = path.string() + ".tmp";
     {
         std::ofstream file(temporary, std::ios::trunc);
@@ -144,7 +202,8 @@ bool savePlayerProgress(const std::filesystem::path& path, const PlayerProgress&
             log::warn("could not write progress temporary file '{}'", temporary.string());
             return false;
         }
-        file << output.dump(2) << '\n';
+        file << output.dump(2) << '
+';
         file.flush();
         if (!file) {
             log::warn("could not finish writing progress temporary file '{}'", temporary.string());
@@ -189,8 +248,11 @@ int runProgressTest() {
     std::filesystem::remove_all(directory, error);
 
     bool ok = true;
-    PlayerProgress progress = loadPlayerProgress(path);
-    ok &= expect(progress.levels().empty(), "missing file starts empty");
+    SaveSlots saves = loadSaveSlots(path);
+    ok &= expect(!saves.slots[0].used && saves.slots[0].progress.levels().empty(),
+                 "missing file starts empty");
+    saves.slots[1].used = true;
+    PlayerProgress& progress = saves.slots[1].progress;
     const RunRecordUpdate first = recordRun(progress, "mine01.json", true, 90.0f, 8);
     ok &= expect(first.firstCompletion && first.newBestTime && first.newRobotRecord,
                  "first win establishes every record");
@@ -200,9 +262,9 @@ int runProgressTest() {
     const RunRecordUpdate loss = recordRun(progress, "mine01.json", false, 30.0f, 12);
     ok &= expect(!loss.newBestTime && loss.newRobotRecord,
                  "a loss can set a robot record but not a completion time");
-    ok &= expect(savePlayerProgress(path, progress), "atomic save succeeds");
-    const PlayerProgress loaded = loadPlayerProgress(path);
-    const LevelRecord* record = loaded.find("mine01.json");
+    ok &= expect(saveSaveSlots(path, saves), "atomic save succeeds");
+    const SaveSlots loaded = loadSaveSlots(path);
+    const LevelRecord* record = loaded.slots[1].progress.find("mine01.json");
     ok &= expect(record && record->runs == 3 && record->wins == 2 && record->bestTime == 90.0f &&
                      record->mostRobots == 12,
                  "saved progress round trips");
@@ -213,7 +275,7 @@ int runProgressTest() {
         std::ofstream partial(path, std::ios::trunc);
         partial << R"({"levels":{"mine01.json":{"runs":4,"wins":"many","bestTime":75.0},"future.json":{"runs":1,"wins":1,"futureField":true}}})";
     }
-    const PlayerProgress partial = loadPlayerProgress(path);
+    const PlayerProgress partial = loadSaveSlots(path).slots[0].progress;
     const LevelRecord* partialRecord = partial.find("mine01.json");
     ok &= expect(partialRecord && partialRecord->runs == 4 && partialRecord->wins == 0 &&
                      partialRecord->bestTime == 75.0f && partial.find("future.json"),
@@ -223,7 +285,7 @@ int runProgressTest() {
         std::ofstream malformed(path, std::ios::trunc);
         malformed << "{";
     }
-    ok &= expect(loadPlayerProgress(path).levels().empty(), "malformed progress starts empty");
+    ok &= expect(!loadSaveSlots(path).slots[0].used, "malformed progress starts empty");
 
     std::filesystem::remove_all(directory, error);
     std::printf("progress-test: %s\n", ok ? "PASS" : "FAIL");

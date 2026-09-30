@@ -20,7 +20,7 @@ namespace dvk {
 
 Shell::Shell(Window& window, Input& input, audio::Audio& audio, LevelSession& session,
              LoadedLevel& loaded, PlayerSettings settings, std::filesystem::path settingsPath,
-             PlayerProgress progress, std::filesystem::path progressPath, bool vsyncAllowed)
+             SaveSlots saves, std::filesystem::path savesPath, bool vsyncAllowed)
     : window_(window),
       input_(input),
       audio_(audio),
@@ -28,10 +28,78 @@ Shell::Shell(Window& window, Input& input, audio::Audio& audio, LevelSession& se
       loaded_(loaded),
       settings_(std::move(settings)),
       settingsPath_(std::move(settingsPath)),
-      progress_(std::move(progress)),
-      progressPath_(std::move(progressPath)),
+      saves_(std::move(saves)),
+      savesPath_(std::move(savesPath)),
       vsyncAllowed_(vsyncAllowed),
       beforeDisplayChange_(settings_) {}
+
+static_assert(kSaveSlotCount == 3, "the slot screen has a row for each of three slots");
+
+void Shell::refreshSlotSummaries() {
+    const std::vector<LevelEntry>& levels = menu_.levels();
+    const int campaignCount = std::min(menu_.campaignCount(), static_cast<int>(levels.size()));
+    for (int i = 0; i < kSaveSlotCount; ++i) {
+        const SaveSlot& slot = saves_.slots[static_cast<size_t>(i)];
+        if (!slot.used) {
+            menu_.setSlotSummary(i, nullptr, 0, 0);
+            continue;
+        }
+        int won = 0;
+        for (int level = 0; level < campaignCount; ++level) {
+            const LevelRecord* record =
+                slot.progress.find(levelProgressId(levels[static_cast<size_t>(level)].path));
+            if (record && record->wins > 0) ++won;
+        }
+        menu_.setSlotSummary(i, saveSlotDifficultyName(slot), won, campaignCount);
+    }
+}
+
+Difficulty Shell::runDifficulty() const {
+    if (activeSlot_ < 0) return Difficulty::Normal;
+    return saves_.slots[static_cast<size_t>(activeSlot_)].difficulty;
+}
+
+bool Shell::abandoningUltraHard() const {
+    return activeSlot_ >= 0 && saves_.slots[static_cast<size_t>(activeSlot_)].ultraHard &&
+           session_.mode() == AppMode::Paused;
+}
+
+void Shell::showSlotRecords() {
+    const SaveSlot* slot =
+        activeSlot_ >= 0 ? &saves_.slots[static_cast<size_t>(activeSlot_)] : nullptr;
+    for (const LevelEntry& level : menu_.levels()) {
+        const LevelRecord* record =
+            slot ? slot->progress.find(levelProgressId(level.path)) : nullptr;
+        if (record) {
+            menu_.setLevelRecord(level.path, record->runs, record->wins,
+                                 static_cast<int>(record->bestTime), record->mostRobots);
+        } else {
+            menu_.setLevelRecord(level.path, 0, 0, -1, 0);
+        }
+    }
+}
+
+void Shell::deleteSlot(int slot) {
+    if (slot < 0 || slot >= kSaveSlotCount) return;
+    saves_.slots[static_cast<size_t>(slot)] = SaveSlot{};
+    saveSaveSlots(savesPath_, saves_);
+    if (activeSlot_ == slot) activeSlot_ = -1;
+    showSlotRecords();
+    refreshSlotSummaries();
+}
+
+ShellEffect Shell::leaveToMainMenu() {
+    ShellEffect effect;
+    loaded_.tutorial.clear();
+    session_.leave();
+    menu_.showMain();
+    loaded_.contacts.clear();
+    loaded_.automap.open = false;
+    captureMouse(false);
+    effect.resetAccumulator = true;
+    effect.resyncPrevious = true;
+    return effect;
+}
 
 void Shell::applyAudioSettings() {
     audio_.setMasterGain(settings_.masterVolume);
@@ -108,6 +176,12 @@ ShellEffect Shell::handlePauseKeys(bool pausePressed, bool escapePressed, double
     if (menu_.screen() == MenuScreen::Tutorial) return effect;
 
     const bool eitherKey = pausePressed || escapePressed;
+    // Backing out of a question is answering no. Ahead of the pause key's own
+    // meaning, which over an abandon question would resume the level with the
+    // question still unanswered underneath it.
+    if (eitherKey && menu_.screen() == MenuScreen::Confirm) {
+        return applyMenuAction(MenuAction::ConfirmNo, now);
+    }
     if (eitherKey && menu_.screen() == MenuScreen::DisplayConfirmation) {
         finishDisplayConfirmation(false);
         effect.resetAccumulator = true;
@@ -144,8 +218,74 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
     ShellEffect effect;
     switch (action) {
         case MenuAction::ChooseLevel:
+            refreshSlotSummaries();
+            menu_.showSaveSlots();
+            break;
+        case MenuAction::ChooseSlot: {
+            const int slot = menu_.selectedSlot();
+            if (slot < 0 || slot >= kSaveSlotCount) break;
+            if (!saves_.slots[static_cast<size_t>(slot)].used) {
+                menu_.showNewSlot();
+                break;
+            }
+            activeSlot_ = slot;
+            showSlotRecords();
             menu_.showLevelGroups();
             break;
+        }
+        case MenuAction::CreateSlot: {
+            const int slot = menu_.selectedSlot();
+            if (slot < 0 || slot >= kSaveSlotCount) break;
+            // The rows are the three difficulties and then ultra-hard, which
+            // is hard with the slot at stake.
+            const int choice = menu_.selectedDifficulty();
+            SaveSlot created;
+            created.used = true;
+            created.ultraHard = choice >= static_cast<int>(Difficulty::Count);
+            created.difficulty = created.ultraHard
+                                     ? Difficulty::Hard
+                                     : static_cast<Difficulty>(std::max(choice, 0));
+            saves_.slots[static_cast<size_t>(slot)] = std::move(created);
+            saveSaveSlots(savesPath_, saves_);
+            activeSlot_ = slot;
+            refreshSlotSummaries();
+            showSlotRecords();
+            menu_.showLevelGroups();
+            break;
+        }
+        case MenuAction::DeleteSlot:
+            if (activeSlot_ < 0) break;
+            pending_ = Pending::DeleteSlot;
+            menu_.showConfirm("delete save", "the save and all of its records are gone for good",
+                              "delete it", "keep it");
+            break;
+        case MenuAction::ConfirmYes: {
+            const Pending pending = std::exchange(pending_, Pending::None);
+            if (pending == Pending::DeleteSlot) {
+                deleteSlot(activeSlot_);
+                menu_.showSaveSlots();
+            } else if (pending == Pending::AbandonQuit) {
+                deleteSlot(activeSlot_);
+                window_.requestClose();
+            } else if (pending != Pending::None) {
+                // Restart as well as main menu: the slot the restart would
+                // have been played on is gone, so there is nothing to restart
+                // into.
+                deleteSlot(activeSlot_);
+                effect = leaveToMainMenu();
+            }
+            break;
+        }
+        case MenuAction::ConfirmNo: {
+            const Pending pending = std::exchange(pending_, Pending::None);
+            if (pending == Pending::DeleteSlot) {
+                menu_.showLevelGroups();
+            } else {
+                menu_.showPause();
+            }
+            effect.resetAccumulator = true;
+            break;
+        }
         case MenuAction::ChooseCampaign:
             menu_.showLevelSelect(LevelGroup::Campaign);
             break;
@@ -194,6 +334,9 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
                 menu_.closeSettings();
             } else if (menu_.screen() == MenuScreen::LevelSelect) {
                 menu_.showLevelGroups();
+            } else if (menu_.screen() == MenuScreen::LevelGroups ||
+                       menu_.screen() == MenuScreen::NewSlot) {
+                menu_.showSaveSlots();
             } else {
                 menu_.showMain();
             }
@@ -206,6 +349,10 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
             }
             loaded_.tutorial.clear();
             loadLevelScript(loaded_.script, loaded_.level, loaded_.comm);
+            // Before start(), which copies the initial state over the live
+            // one. Every time, not only on a level change: the same mine
+            // opened from another slot is played at that slot's difficulty.
+            applySessionDifficulty(session_, loaded_.level, runDifficulty());
             session_.start();
             loaded_.comm.enterLevel();
             audio_.shuffleMusicTracks();
@@ -222,6 +369,12 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
             effect.resyncPrevious = true;
             break;
         case MenuAction::Restart:
+            if (abandoningUltraHard()) {
+                pending_ = Pending::AbandonRestart;
+                menu_.showConfirm("abandon run", "leaving the level deletes your ultra-hard save",
+                                  "abandon run", "keep playing");
+                break;
+            }
             // Before the reload, not after: the pane's heading and body are
             // pointers into the script that is about to be thrown away.
             loaded_.tutorial.clear();
@@ -237,16 +390,21 @@ ShellEffect Shell::applyMenuAction(MenuAction action, double now) {
             effect.resetAccumulator = true;
             break;
         case MenuAction::MainMenu:
-            loaded_.tutorial.clear();
-            session_.leave();
-            menu_.showMain();
-            loaded_.contacts.clear();
-            loaded_.automap.open = false;
-            captureMouse(false);
-            effect.resetAccumulator = true;
-            effect.resyncPrevious = true;
+            if (abandoningUltraHard()) {
+                pending_ = Pending::AbandonMainMenu;
+                menu_.showConfirm("abandon run", "leaving the level deletes your ultra-hard save",
+                                  "abandon run", "keep playing");
+                break;
+            }
+            effect = leaveToMainMenu();
             break;
         case MenuAction::Quit:
+            if (abandoningUltraHard()) {
+                pending_ = Pending::AbandonQuit;
+                menu_.showConfirm("abandon run", "quitting the level deletes your ultra-hard save",
+                                  "abandon run", "keep playing");
+                break;
+            }
             window_.requestClose();
             break;
         case MenuAction::AcknowledgeTutorial:
@@ -295,19 +453,27 @@ void Shell::toggleMute() {
 void Shell::finishRun(const sim::GameState& game, bool recordProgress) {
     const bool won = game.phase == sim::GamePhase::Won;
     const char* note = "";
-    if (recordProgress) {
-        const std::string levelId = levelProgressId(loaded_.path);
-        const RunRecordUpdate update =
-            recordRun(progress_, levelId, won, game.elapsed, game.robotsDestroyed);
-        savePlayerProgress(progressPath_, progress_);
-        if (const LevelRecord* record = progress_.find(levelId)) {
-            menu_.setLevelRecord(loaded_.path, record->runs, record->wins,
-                                 static_cast<int>(record->bestTime), record->mostRobots);
+    bool retry = true;
+    if (recordProgress && activeSlot_ >= 0) {
+        SaveSlot& slot = saves_.slots[static_cast<size_t>(activeSlot_)];
+        if (slot.ultraHard && !won) {
+            deleteSlot(activeSlot_);
+            note = "your ultra-hard save has been deleted";
+            retry = false;
+        } else {
+            const std::string levelId = levelProgressId(loaded_.path);
+            const RunRecordUpdate update =
+                recordRun(slot.progress, levelId, won, game.elapsed, game.robotsDestroyed);
+            saveSaveSlots(savesPath_, saves_);
+            if (const LevelRecord* record = slot.progress.find(levelId)) {
+                menu_.setLevelRecord(loaded_.path, record->runs, record->wins,
+                                     static_cast<int>(record->bestTime), record->mostRobots);
+            }
+            note = runRecordNote(update);
         }
-        note = runRecordNote(update);
     }
     menu_.showSummary(won, game.endReason, game.elapsed, game.robotsDestroyed,
-                      game.robotsAtStart, note);
+                      game.robotsAtStart, note, retry);
 }
 
 } // namespace dvk

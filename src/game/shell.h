@@ -41,12 +41,12 @@ struct ShellEffect {
     bool resyncPrevious = false;
 };
 
-// The player's shell: the menus, the settings they change, the run history they
-// build up, and the countdown that puts a display change back if nobody
-// confirms it.
+// The player's shell: the menus, the settings they change, the save slots
+// their run history goes into, and the countdown that puts a display change
+// back if nobody confirms it.
 //
-// It owns the menu, the settings and the progress, because nothing outside it
-// writes them. It drives the window, the input, the session and the loaded
+// It owns the menu, the settings and the save slots, because nothing outside
+// it writes them. It drives the window, the input, the session and the loaded
 // level, which belong to the application, so those are held by reference and
 // must outlive it.
 class Shell {
@@ -57,12 +57,17 @@ public:
     // opinion about why.
     Shell(Window& window, Input& input, audio::Audio& audio, LevelSession& session,
           LoadedLevel& loaded, PlayerSettings settings, std::filesystem::path settingsPath,
-          PlayerProgress progress, std::filesystem::path progressPath, bool vsyncAllowed);
+          SaveSlots saves, std::filesystem::path savesPath, bool vsyncAllowed);
 
     PlayerMenu& menu() { return menu_; }
     const PlayerMenu& menu() const { return menu_; }
     const PlayerSettings& settings() const { return settings_; }
-    const PlayerProgress& progress() const { return progress_; }
+    const SaveSlots& saves() const { return saves_; }
+
+    // Rewrites what the slot screen says about each slot. Needs the menu's
+    // level list, which is how a slot's campaign is counted, so it is called
+    // once that has been set and again whenever a slot changes.
+    void refreshSlotSummaries();
 
     // Pushes the settings at the window and the mixer. The revert goes through
     // here too, so a rejected display change is undone by the path that applied
@@ -113,10 +118,33 @@ public:
     void toggleMute();
 
     // A run that has just ended: its record, if this run counts towards one,
-    // and the summary screen either way.
+    // and the summary screen either way. A counted run that fails on an
+    // ultra-hard slot deletes the slot instead of recording anything.
     void finishRun(const sim::GameState& game, bool recordProgress);
 
 private:
+    // What the confirm screen is asking about, and so what yes does.
+    enum class Pending {
+        None,
+        DeleteSlot,
+        AbandonRestart,
+        AbandonMainMenu,
+        AbandonQuit,
+    };
+
+    // The difficulty a run started now is played at. A run with no slot open -
+    // one the command line started, or went straight to the level list for -
+    // is played at normal.
+    Difficulty runDifficulty() const;
+    // Leaving the level part way through, which on an ultra-hard slot costs
+    // the slot. Only mid-level: once the summary is up, the run is over.
+    bool abandoningUltraHard() const;
+    // Pushes the open slot's records onto the level list, or clears them when
+    // no slot is open.
+    void showSlotRecords();
+    void deleteSlot(int slot);
+    ShellEffect leaveToMainMenu();
+
     void finishDisplayConfirmation(bool keep);
     // Commits the menu's working copy to the live settings and to disk, and
     // returns whether a display change put the confirmation countdown up. It
@@ -132,8 +160,11 @@ private:
     PlayerMenu menu_;
     PlayerSettings settings_;
     std::filesystem::path settingsPath_;
-    PlayerProgress progress_;
-    std::filesystem::path progressPath_;
+    SaveSlots saves_;
+    std::filesystem::path savesPath_;
+    // -1 while no slot is open. Chosen on the slot screen, and nowhere else.
+    int activeSlot_ = -1;
+    Pending pending_ = Pending::None;
     bool vsyncAllowed_ = true;
     // What a display change is measured against, and what it is put back to.
     PlayerSettings beforeDisplayChange_;

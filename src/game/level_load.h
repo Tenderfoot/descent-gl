@@ -4,6 +4,7 @@
 
 namespace dvk {
 
+enum class Difficulty : int;
 struct Level;
 struct ScriptLoadout;
 class CommDirector;
@@ -67,6 +68,15 @@ void loadLevelScript(ScriptHost& script, const Level& level, const CommDirector&
 // so a run that never calls start() - a screenshot, a frame-limited pass -
 // still shows the loadout the level asked for.
 void applySessionLoadout(LevelSession& session, const ScriptLoadout& loadout);
+
+// Takes the pickups a run at `difficulty` does not have out of the mine, and
+// puts back any an earlier difficulty took out. Out means marked collected
+// before the run starts: the renderer, the pickup step and the automap all
+// already agree that a collected pickup is not there, so nothing else needs
+// to learn a second way for one to be missing.
+//
+// On all three states, for the reason the loadout is.
+void applySessionDifficulty(LevelSession& session, const Level& level, Difficulty difficulty);
 
 // The headlight is off at the start, so a frame-limited run has no way to show
 // it without someone pressing the key. Set on the initial state rather than the
