@@ -43,7 +43,7 @@ message {
   clip = "anothermine",
   speaker = "???",
   text = "You've made your way to another mine.\nGood.\nI'll help you through this one.",
-  seconds = 5,
+  seconds = 8,
 }
 
 message {
