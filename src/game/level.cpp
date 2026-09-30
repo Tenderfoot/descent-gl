@@ -566,6 +566,19 @@ Level loadLevel(const std::string& path) {
                 if (kind == kLegacyPurplePickupName) pickup.kind = PickupKind::KeyPurple;
                 pickup.position = readVec3(pj.at("position"));
                 pickup.segment = pj.value("segment", -1);
+                if (auto difficulty = pj.find("maxDifficulty"); difficulty != pj.end()) {
+                    const std::string name = difficulty->get<std::string>();
+                    bool known = false;
+                    for (size_t d = 0; d < kDifficultyNames.size(); ++d) {
+                        if (name != kDifficultyNames[d]) continue;
+                        pickup.maxDifficulty = static_cast<Difficulty>(d);
+                        known = true;
+                    }
+                    if (!known) {
+                        log::fatal("{}: pickup {} has unknown maxDifficulty '{}'", path,
+                                   level.pickups.size(), name);
+                    }
+                }
                 level.pickups.push_back(pickup);
             }
         }
@@ -968,10 +981,14 @@ bool saveLevel(const std::string& path, const Level& level) {
         j["grates"].push_back(gj);
     }
     for (const Pickup& pickup : level.pickups) {
-        j["pickups"].push_back(
-            {{"kind", kPickupNames[static_cast<size_t>(pickup.kind)]},
-             {"position", {pickup.position.x, pickup.position.y, pickup.position.z}},
-             {"segment", pickup.segment}});
+        nlohmann::json pj = {
+            {"kind", kPickupNames[static_cast<size_t>(pickup.kind)]},
+            {"position", {pickup.position.x, pickup.position.y, pickup.position.z}},
+            {"segment", pickup.segment}};
+        if (pickup.maxDifficulty != Difficulty::Hard) {
+            pj["maxDifficulty"] = kDifficultyNames[static_cast<size_t>(pickup.maxDifficulty)];
+        }
+        j["pickups"].push_back(pj);
     }
     for (const FloatingLightDef& def : level.floatingLights) {
         j["floatingLights"].push_back(

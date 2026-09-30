@@ -21,10 +21,36 @@ constexpr std::array<ButtonDefinition, 3> kMainButtons{{
     {MenuAction::Quit, "quit"},
 }};
 
+// A slot's row is its own index, the way a level group's is.
+constexpr std::array<ButtonDefinition, 4> kSaveSlotButtons{{
+    {MenuAction::ChooseSlot, "slot 1"},
+    {MenuAction::ChooseSlot, "slot 2"},
+    {MenuAction::ChooseSlot, "slot 3"},
+    {MenuAction::Back, "back"},
+}};
+
+// Rows 0-2 are Difficulty in order, and ultra-hard follows them.
+constexpr std::array<ButtonDefinition, 5> kNewSlotButtons{{
+    {MenuAction::CreateSlot, "easy"},
+    {MenuAction::CreateSlot, "normal"},
+    {MenuAction::CreateSlot, "hard"},
+    {MenuAction::CreateSlot, "ultra-hard"},
+    {MenuAction::Back, "back"},
+}};
+
+constexpr std::array<const char*, 5> kNewSlotSubtitles{
+    "the most supplies in every mine",
+    "fewer supplies",
+    "the fewest supplies",
+    "hard, and dying or leaving a level deletes this save",
+    "back to the save slots",
+};
+
 // Row order matches LevelGroup, so a group is its own row.
-constexpr std::array<ButtonDefinition, 3> kLevelGroupButtons{{
+constexpr std::array<ButtonDefinition, 4> kLevelGroupButtons{{
     {MenuAction::ChooseCampaign, "campaign"},
     {MenuAction::ChooseOtherMaps, "other maps"},
+    {MenuAction::DeleteSlot, "delete save"},
     {MenuAction::Back, "back"},
 }};
 
@@ -39,6 +65,17 @@ constexpr std::array<ButtonDefinition, 5> kPauseButtons{{
 constexpr std::array<ButtonDefinition, 2> kSummaryButtons{{
     {MenuAction::Restart, "retry"},
     {MenuAction::MainMenu, "main menu"},
+}};
+
+// The summary of a run that took its ultra-hard slot with it.
+constexpr std::array<ButtonDefinition, 1> kSummaryFinalButtons{{
+    {MenuAction::MainMenu, "main menu"},
+}};
+
+// Labelled by showConfirm, so these are placeholders.
+constexpr std::array<ButtonDefinition, 2> kConfirmButtons{{
+    {MenuAction::ConfirmYes, "yes"},
+    {MenuAction::ConfirmNo, "no"},
 }};
 
 // The settings root holds no values, only the way into the screens that do.
@@ -105,9 +142,15 @@ constexpr std::array<std::pair<int, int>, 4> kWindowSizes{{
     {2560, 1440},
 }};
 
-std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
+std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen, bool summaryRetry) {
     switch (screen) {
         case MenuScreen::Main: return {kMainButtons.data(), static_cast<int>(kMainButtons.size())};
+        case MenuScreen::SaveSlots:
+            return {kSaveSlotButtons.data(), static_cast<int>(kSaveSlotButtons.size())};
+        case MenuScreen::NewSlot:
+            return {kNewSlotButtons.data(), static_cast<int>(kNewSlotButtons.size())};
+        case MenuScreen::Confirm:
+            return {kConfirmButtons.data(), static_cast<int>(kConfirmButtons.size())};
         case MenuScreen::LevelGroups:
             return {kLevelGroupButtons.data(), static_cast<int>(kLevelGroupButtons.size())};
         case MenuScreen::Pause:
@@ -128,6 +171,10 @@ std::pair<const ButtonDefinition*, int> buttonsFor(MenuScreen screen) {
             return {kDisplayConfirmationButtons.data(),
                     static_cast<int>(kDisplayConfirmationButtons.size())};
         case MenuScreen::Summary:
+            if (!summaryRetry) {
+                return {kSummaryFinalButtons.data(),
+                        static_cast<int>(kSummaryFinalButtons.size())};
+            }
             return {kSummaryButtons.data(), static_cast<int>(kSummaryButtons.size())};
         case MenuScreen::LevelSelect:   // built from the level list, not a table
         case MenuScreen::Hidden: return {nullptr, 0};
@@ -306,6 +353,24 @@ void PlayerMenu::setLevelRecord(const std::string& path, int runs, int completio
     found->mostRobots = std::max(mostRobots, 0);
 }
 
+void PlayerMenu::setSlotSummary(int slot, const char* difficulty, int campaignWon,
+                                int campaignTotal) {
+    if (slot < 0 || slot >= static_cast<int>(slots_.size())) return;
+    SlotSummary& summary = slots_[static_cast<size_t>(slot)];
+    summary.used = difficulty != nullptr;
+    if (!summary.used) {
+        std::snprintf(summary.value.data(), summary.value.size(), "%s", "empty");
+        std::snprintf(summary.detail.data(), summary.detail.size(), "%s", "start a new game");
+        summary.heading[0] = '\0';
+        return;
+    }
+    std::snprintf(summary.value.data(), summary.value.size(), "%s", difficulty);
+    std::snprintf(summary.detail.data(), summary.detail.size(), "campaign %d of %d cleared",
+                  campaignWon, campaignTotal);
+    std::snprintf(summary.heading.data(), summary.heading.size(), "slot %d   %s", slot + 1,
+                  difficulty);
+}
+
 void PlayerMenu::hide() {
     screen_ = MenuScreen::Hidden;
     selection_ = 0;
@@ -324,6 +389,28 @@ void PlayerMenu::showMain() {
     tutorialText_ = "";
     screen_ = MenuScreen::Main;
     selection_ = 0;
+}
+
+void PlayerMenu::showSaveSlots() {
+    screen_ = MenuScreen::SaveSlots;
+    // Back on the slot that was last opened, so leaving it and coming back
+    // does not walk the cursor to the top.
+    selection_ = std::clamp(chosenSlot_, 0, static_cast<int>(slots_.size()) - 1);
+}
+
+void PlayerMenu::showNewSlot() {
+    screen_ = MenuScreen::NewSlot;
+    selection_ = 1;   // normal
+}
+
+void PlayerMenu::showConfirm(const char* title, const char* subtitle, const char* yes,
+                             const char* no) {
+    screen_ = MenuScreen::Confirm;
+    selection_ = 1;
+    confirmTitle_ = title;
+    confirmSubtitle_ = subtitle;
+    confirmYes_ = yes;
+    confirmNo_ = no;
 }
 
 void PlayerMenu::showLevelGroups() {
@@ -419,9 +506,10 @@ void PlayerMenu::setConfirmationSeconds(int seconds) {
 }
 
 void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int robotsDestroyed,
-                             int robotsTotal, const char* recordNote) {
+                             int robotsTotal, const char* recordNote, bool retry) {
     screen_ = MenuScreen::Summary;
     selection_ = 0;
+    summaryRetry_ = retry;
     won_ = won;
     reason_ = reason;
     recordNote_ = recordNote;
@@ -437,7 +525,7 @@ void PlayerMenu::showSummary(bool won, const char* reason, float elapsed, int ro
 int PlayerMenu::buttonCount() const {
     if (screen_ == MenuScreen::LevelSelect) return groupSize() + 1;
     if (screen_ == MenuScreen::Controls) return static_cast<int>(kPlayerActionCount) + 2;
-    return buttonsFor(screen_).second;
+    return buttonsFor(screen_, summaryRetry_).second;
 }
 
 int PlayerMenu::valueRows(MenuScreen screen) {
@@ -612,6 +700,16 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
         if (input.increase) adjustSetting(screen_, selection_, 1);
     }
 
+    // A slot row and a difficulty row are one action each, told apart by
+    // which row it was; the shell asks for that afterwards.
+    const auto pick = [&](int row) {
+        if (screen_ == MenuScreen::SaveSlots && row < static_cast<int>(slots_.size())) {
+            chosenSlot_ = row;
+        } else if (screen_ == MenuScreen::NewSlot && row < 4) {
+            chosenDifficulty_ = row;
+        }
+    };
+
     const MenuView updated = view(width, height);
     if (input.pointerPressed) {
         for (int i = 0; i < updated.buttonCount; ++i) {
@@ -641,6 +739,7 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
                 adjustSetting(screen_, i, 1);
                 return MenuAction::None;
             }
+            pick(i);
             return button.action;
         }
     }
@@ -664,8 +763,11 @@ MenuAction PlayerMenu::update(const MenuInput& input, int width, int height) {
             adjustSetting(screen_, selection_, 1);
             return MenuAction::None;
         }
-        const auto [definitions, definitionCount] = buttonsFor(screen_);
-        if (selection_ < definitionCount) return definitions[selection_].action;
+        const auto [definitions, definitionCount] = buttonsFor(screen_, summaryRetry_);
+        if (selection_ < definitionCount) {
+            pick(selection_);
+            return definitions[selection_].action;
+        }
     }
     return MenuAction::None;
 }
@@ -807,9 +909,24 @@ MenuView PlayerMenu::view(int width, int height) const {
             result.title = "descent";
             result.subtitle = "";
             break;
+        case MenuScreen::SaveSlots:
+            result.title = "play";
+            result.subtitle = "choose a save";
+            break;
+        case MenuScreen::NewSlot:
+            result.title = "difficulty";
+            result.subtitle = kNewSlotSubtitles[static_cast<size_t>(
+                std::clamp(selection_, 0, static_cast<int>(kNewSlotSubtitles.size()) - 1))];
+            break;
         case MenuScreen::LevelGroups:
             result.title = "play";
-            result.subtitle = "choose a set of maps";
+            result.subtitle = chosenSlot_ >= 0 && slots_[static_cast<size_t>(chosenSlot_)].used
+                                  ? slots_[static_cast<size_t>(chosenSlot_)].heading.data()
+                                  : "choose a set of maps";
+            break;
+        case MenuScreen::Confirm:
+            result.title = confirmTitle_;
+            result.subtitle = confirmSubtitle_;
             break;
         case MenuScreen::Pause:
             result.title = "paused";
@@ -850,7 +967,7 @@ MenuView PlayerMenu::view(int width, int height) const {
         case MenuScreen::Hidden: return result;
     }
 
-    const auto [definitions, count] = buttonsFor(screen_);
+    const auto [definitions, count] = buttonsFor(screen_, summaryRetry_);
     result.buttonCount = count;
     // The tighter row spacing is for screens that are a column of values to be
     // read against each other. The settings root is a signpost with five plain
@@ -881,6 +998,12 @@ MenuView PlayerMenu::view(int width, int height) const {
         button.label = definitions[i].label;
         button.bounds = {left, top + i * (buttonHeight + rowGap), buttonWidth, buttonHeight};
         button.selected = i == selection_;
+        if (screen_ == MenuScreen::Confirm) button.label = i == 0 ? confirmYes_ : confirmNo_;
+        if (screen_ == MenuScreen::SaveSlots && i < static_cast<int>(slots_.size())) {
+            const SlotSummary& slot = slots_[static_cast<size_t>(i)];
+            button.value = slot.value;
+            button.detail = slot.detail;
+        }
         if (i >= valueRows(screen_)) continue;
         const auto onOff = [&](bool on) {
             std::snprintf(button.value.data(), button.value.size(), "%s", on ? "on" : "off");

@@ -10,8 +10,9 @@
 // in-game light editor's Save button is pressed.
 
 import {
-    BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, KEY_NAMES, LAMP_COLOR, LEGACY_KEY_NAMES,
-    LEGACY_PICKUP_NAMES, PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, UV_MODES,
+    BALL_COLOR, BLOCK_TEXTURE_MODES, BLOCK_TYPE, DEFAULTS, DIFFICULTY_HARDEST, DIFFICULTY_NAMES,
+    KEY_NAMES, LAMP_COLOR, LEGACY_KEY_NAMES, LEGACY_PICKUP_NAMES, PICKUP_NAMES, SIDE_COUNT,
+    SIDE_NAMES, UV_MODES,
 } from './format.js';
 import { rewireDoors, rewireGrates } from './entities.js';
 import { findSegment, rebuildDerived } from './geometry.js';
@@ -139,11 +140,16 @@ export function parseLevel(json, path = '<memory>') {
     for (const pj of j.pickups ?? []) {
         const kind = PICKUP_NAMES.indexOf(LEGACY_PICKUP_NAMES[pj.kind] ?? pj.kind);
         if (kind < 0) throw new Error(`pickup has unknown kind '${pj.kind}'`);
+        const maxDifficulty = DIFFICULTY_NAMES.indexOf(pj.maxDifficulty ?? 'hard');
+        if (maxDifficulty < 0) {
+            throw new Error(`pickup has unknown maxDifficulty '${pj.maxDifficulty}'`);
+        }
         level.pickups.push({
             keyOrder: Object.keys(pj),
             kind,
             position: vec3(pj.position),
             segment: pj.segment ?? -1,
+            maxDifficulty,
         });
     }
 
@@ -389,6 +395,8 @@ export function serializeLevel(level) {
             kind: PICKUP_NAMES[p.kind],
             position: p.position.slice(),
             segment: p.segment,
+            ...(p.maxDifficulty < DIFFICULTY_HARDEST
+                ? { maxDifficulty: DIFFICULTY_NAMES[p.maxDifficulty] } : {}),
         }, p.keyOrder));
     }
 
