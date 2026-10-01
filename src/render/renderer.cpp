@@ -878,8 +878,39 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             hud_.rect(px - t * 0.5f, py - gap - arm - grow, t, a, color);
             hud_.rect(px - t * 0.5f, py + gap - grow, t, a, color);
         };
-        arms(1.0f, outline); 
+        arms(1.0f, outline);
         arms(0.0f, reticle);
+    }
+
+    // The lead marker: a small hollow square where the reticle has to go for
+    // the shot to meet the target robot. Hollow so the reticle can sit inside
+    // it, and a square so it is not mistaken for the reticle's arms or the
+    // missile bracket's corners. Nothing when the point is behind the eye or
+    // off screen; the target panel already says what is being tracked.
+    if (hud.hasLead && hud.phase < 2) {
+        const glm::vec4 clip = viewProj * glm::vec4(hud.leadPoint, 1.0f);
+        if (clip.w > 1e-3f) {
+            const float lx = std::round((clip.x / clip.w * 0.5f + 0.5f) * w);
+            const float ly = std::round((0.5f - clip.y / clip.w * 0.5f) * h);
+            if (lx >= 0.0f && lx <= w && ly >= 0.0f && ly <= h) {
+                const float half = std::round(2.2f * s);
+                const float line = std::max(1.0f, std::round(0.45f * s));
+                const glm::vec4 outline(0.0f, 0.0f, 0.0f, 0.55f);
+                const glm::vec4 lead(0.35f, 0.85f, 1.0f, 0.95f);
+                const auto box = [&](float grow, const glm::vec4& color) {
+                    const float x0 = lx - half - grow;
+                    const float y0 = ly - half - grow;
+                    const float side = half * 2.0f + grow * 2.0f;
+                    const float t = line + grow * 2.0f;
+                    hud_.rect(x0, y0, side, t, color);
+                    hud_.rect(x0, y0 + side - t, side, t, color);
+                    hud_.rect(x0, y0, t, side, color);
+                    hud_.rect(x0 + side - t, y0, t, side, color);
+                };
+                box(1.0f, outline);
+                box(0.0f, lead);
+            }
+        }
     }
 
     // The nearest robot missile coming for the ship. On screen, a pulsing

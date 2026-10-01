@@ -394,8 +394,8 @@ bool verifyPlayerMenu() {
 
     menu.showSettingsScreen(MenuScreen::SettingsGame);
     view = menu.view(1600, 900);
-    ok &= expect(view.screen == MenuScreen::SettingsGame && view.buttonCount == 6,
-                 "game settings carry four values, apply and back");
+    ok &= expect(view.screen == MenuScreen::SettingsGame && view.buttonCount == 7,
+                 "game settings carry five values, apply and back");
     ok &= expect(std::string_view(view.buttons[0].value.data()) == "1.0x" &&
                      std::string_view(view.buttons[2].value.data()) == "on",
                  "game settings show mouse sensitivity and the tutorial toggle");

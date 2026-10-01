@@ -106,6 +106,7 @@ PlayerSettings loadPlayerSettings(const std::filesystem::path& path) {
         readIf(source, "muted", settings.muted);
         readIf(source, "tutorials", settings.tutorials);
         readIf(source, "weaponHitboxes", settings.weaponHitboxes);
+        readIf(source, "leadMarker", settings.leadMarker);
         readIf(source, "fullscreen", settings.fullscreen);
         readIf(source, "vsync", settings.vsync);
         readIf(source, "windowWidth", settings.windowWidth);
@@ -164,6 +165,7 @@ bool savePlayerSettings(const std::filesystem::path& path, const PlayerSettings&
         {"muted", settings.muted},
         {"tutorials", settings.tutorials},
         {"weaponHitboxes", settings.weaponHitboxes},
+        {"leadMarker", settings.leadMarker},
         {"fullscreen", settings.fullscreen},
         {"vsync", settings.vsync},
         {"windowWidth", settings.windowWidth},

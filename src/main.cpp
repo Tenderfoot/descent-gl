@@ -786,6 +786,7 @@ int main(int argc, char** argv) {
             aim.point,
             aim.onBreakable,
             !automap.open,
+            shell.settings().leadMarker,
             playerSeen,
             commFrame,
             comm.activeClip(),

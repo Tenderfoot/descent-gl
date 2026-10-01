@@ -195,6 +195,13 @@ struct HudData {
     // knock loose. The reticle changes colour, so the shot can be timed.
     bool aimOnBreakable = false;
 
+    // Where the reticle has to be for the selected gun's shot to meet the
+    // target robot, if both keep their present velocities. Only set while the
+    // target panel is up, the lead-marker setting is on, and the gun has a
+    // flight time to lead by.
+    bool hasLead = false;
+    glm::vec3 leadPoint{0.0f};
+
     // The soundtrack, as a small marquee. The renderer is handed the finished
     // strings and never builds one: `musicTrack` points at storage the audio
     // bank owns for its lifetime, and `musicNextKey` at a buffer the game

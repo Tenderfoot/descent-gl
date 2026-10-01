@@ -59,6 +59,8 @@ struct HudBuildContext {
     // False on the automap, which has its own camera and no firing line on
     // screen to mark.
     bool aimVisible;
+    // The player setting: mark where to aim to hit the target robot.
+    bool leadMarker;
 
     const sim::PlayerVisibility& seen;
 

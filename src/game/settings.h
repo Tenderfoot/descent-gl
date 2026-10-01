@@ -24,6 +24,10 @@ struct PlayerSettings {
     // Outline the hitbox of each weapon still mounted on a robot, so the
     // player can see what to aim at to shoot it off.
     bool weaponHitboxes = true;
+    // Mark where the reticle has to be for the selected gun to meet the robot
+    // in the target panel, given both ships' velocities. Off by default: it is
+    // an aid, and the game is meant to be played without one.
+    bool leadMarker = false;
     bool fullscreen = false;
     bool vsync = true;
     int windowWidth = 1600;
