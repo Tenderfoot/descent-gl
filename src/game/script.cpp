@@ -324,6 +324,9 @@ int ScriptHost::declareLoadout(lua_State* state) {
     if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {
         host->loadout_.flares = static_cast<int>(value);
     }
+    if (optionalNumber(state, 1, "countdown", "countdown", 5.0, 600.0, value)) {
+        host->loadout_.countdown = static_cast<float>(value);
+    }
     lua_getfield(state, 1, "self_repair");
     if (!lua_isnil(state, -1)) {
         luaL_checktype(state, -1, LUA_TBOOLEAN);
