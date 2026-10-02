@@ -5833,7 +5833,7 @@
       "lightIntensity": 1.0,
       "restitution": 0.72,
       "mass": 0.45,
-      "drift": 1.4
+      "drift": 0.0
     },
     {
       "position": [
@@ -6594,6 +6594,24 @@
       ],
       "segment": 47,
       "maxDifficulty": "normal"
+    },
+    {
+      "kind": "railgun",
+      "position": [
+        -205.80790756413458,
+        219.66959888377966,
+        95.69625408459117
+      ],
+      "segment": 63
+    },
+    {
+      "kind": "homing",
+      "position": [
+        -205.80790756413458,
+        219.66959888377966,
+        73.45126077016154
+      ],
+      "segment": 63
     }
   ],
   "exit": {

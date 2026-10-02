@@ -4777,6 +4777,15 @@
       ],
       "segment": 74,
       "maxDifficulty": "normal"
+    },
+    {
+      "kind": "concussion",
+      "position": [
+        10.017354703864738,
+        10.0,
+        -27.6388555739093
+      ],
+      "segment": 2
     }
   ],
   "objects": [
