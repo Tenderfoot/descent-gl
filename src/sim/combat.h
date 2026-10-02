@@ -238,6 +238,11 @@ inline bool playerDisabled(const PlayerState& player) {
     return player.shields <= kPlayerMaxShields * kDisabledHealthFraction;
 }
 
+// Shields per second a disabled ship's emergency systems put back, until it is
+// over the threshold and flying again. Nothing once it is: this gets the
+// player out of the drift, it is not a regeneration mechanic.
+inline constexpr float kDisabledShieldRecovery = 1.0f;
+
 // The energy a ship has to be under to count as out of it.
 //
 // Not zero. Energy is spent in whole shots and nothing puts it back, so what is

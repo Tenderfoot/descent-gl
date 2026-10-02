@@ -224,6 +224,14 @@ int main(int argc, char** argv) {
     if (!opts.comm.empty() && !comm.knows(opts.comm)) {
         dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
     }
+    // The transmission for a disabled ship getting itself flying again. Not
+    // level content - a ship can be disabled in any mine - so it is raised here
+    // rather than by a script. No words of its own: the panel reads "incoming
+    // transmission" and runs for the clip's own length. Until the clip exists
+    // the recovery simply plays nothing.
+    const dvk::ScriptMessage recoveryMessage{"emergencyrecovery", "emergencyrecovery", "", "",
+                                             0.0f};
+    const bool recoveryClip = comm.knows(recoveryMessage.clip);
 
     dvk::TutorialPane tutorial(renderer, audio);
     dvk::ScriptHost script;
@@ -589,6 +597,7 @@ int main(int argc, char** argv) {
         }
         bool consumedMouse = false;
         bool runFinished = false;
+        bool regainedControl = false;
         soundEvents.clear();
         while (session.advancesSimulation() && accumulator >= kSimStep) {
             prev = cur;
@@ -603,7 +612,9 @@ int main(int argc, char** argv) {
                                   bindings);
             // Recomputed every step rather than latched, so a shield pickup
             // hands the ship straight back.
+            const bool wasDisabled = cur.ship.disabled;
             cur.ship.disabled = dvk::sim::playerDisabled(cur.combat.player);
+            if (wasDisabled && !cur.ship.disabled) regainedControl = true;
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -720,6 +731,9 @@ int main(int argc, char** argv) {
         if (const float shields = script.takeShields(); shields >= 0.0f) {
             cur.combat.player.shields = shields;
         }
+        // Before the script's own message, so a story beat landing on the
+        // same frame is the one left on screen.
+        if (regainedControl && recoveryClip) comm.play(-1, recoveryMessage, now);
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 comm.play(requested, *message, now);
@@ -786,6 +800,7 @@ int main(int argc, char** argv) {
             aim.point,
             aim.onBreakable,
             !automap.open,
+            shell.settings().leadMarker,
             playerSeen,
             commFrame,
             comm.activeClip(),
