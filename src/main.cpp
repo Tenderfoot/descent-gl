@@ -738,7 +738,8 @@ int main(int argc, char** argv) {
         // recomputed from shields at the top of every step, so the ship flies
         // again on the next one with nothing else to do.
         if (const float shields = script.takeShields(); shields >= 0.0f) {
-            cur.combat.player.shields = shields;
+            // Never over the ship's own ceiling, which a level may have lowered.
+            cur.combat.player.shields = std::min(shields, cur.combat.player.maxShields);
         }
         // Live state only, for the same reason: a restart goes back to what the
         // loadout said.

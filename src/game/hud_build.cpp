@@ -140,6 +140,8 @@ gl::HudData buildHud(const HudBuildContext& ctx, HudScratch& scratch) {
     gl::HudData hud;
     hud.show = ctx.show;
     hud.shields = player.shields;
+    hud.maxShields = player.maxShields;
+    hud.invulnerable = player.invulnerable;
     hud.energy = player.energy;
     hud.flares = player.flares;
     fillWeaponSlots(player, ctx.weapons, ctx.bindings, ctx.simStep, hud);

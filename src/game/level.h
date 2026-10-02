@@ -310,13 +310,13 @@ std::array<glm::vec3, 4> doorSlabQuad(const Door& door, const DoorFrame& frame, 
 // it, so inserting here does not invalidate a level file.
 enum class PickupKind : int {
     Shield = 0, Energy, LaserUpgrade, Concussion, Homing, Flares,
-    RailgunAmmo, LightningAmmo, VulcanAmmo,
+    RailgunAmmo, LightningAmmo, VulcanAmmo, Invulnerability,
     KeyBlue, KeyYellow, KeyPurple, Count,
 };
 
 inline constexpr std::array<const char*, static_cast<size_t>(PickupKind::Count)> kPickupNames{
     "shield", "energy", "laser", "concussion", "homing", "flares",
-    "railgun", "lightning", "vulcan",
+    "railgun", "lightning", "vulcan", "invulnerability",
     "key_blue", "key_yellow", "key_purple"};
 
 // How hard a run is. The mine is the same at every one of them; what changes
@@ -339,8 +339,10 @@ struct Pickup {
 
 // Whether a pickup is lying in the mine on a run at `difficulty`. A key always
 // is, whatever the file says: a mine whose key is missing cannot be finished.
+// So is invulnerability, which a level is built around rather than helped by.
 inline bool pickupPresent(const Pickup& pickup, Difficulty difficulty) {
-    return pickup.kind >= PickupKind::KeyBlue || difficulty <= pickup.maxDifficulty;
+    return pickup.kind >= PickupKind::KeyBlue || pickup.kind == PickupKind::Invulnerability ||
+           difficulty <= pickup.maxDifficulty;
 }
 
 // Where the level is escaped from, once the reactor is gone.

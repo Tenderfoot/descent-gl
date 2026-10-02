@@ -5,6 +5,7 @@
     "UndefinedBehaviour",
     "BufferOverflow",
     "SegmentationFault",
-    "RaceCondition"
+    "RaceCondition",
+    "NullPointerException"
   ]
 }

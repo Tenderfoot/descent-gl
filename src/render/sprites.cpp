@@ -149,7 +149,7 @@ std::vector<std::vector<uint8_t>> loadPickupSprites(int size) {
         "assets/images/laser_level_up.png",  "assets/images/concussion_missiles.png",
         "assets/images/homing_missiles.png", "assets/images/vulcan_cannon_ammo.png",
         "assets/images/railgun_ammo.png",    "assets/images/lightning_gun_ammo.png",
-        "assets/images/key.png"};
+        "assets/images/key.png",             "assets/images/invulnerability.png"};
 
     std::vector<std::vector<uint8_t>> layers;
     layers.reserve(kPaths.size());

@@ -116,6 +116,10 @@ void dressPickup(RenderState::PickupView& view, PickupKind kind, float pulse) {
             view.sprite = gl::SpriteVulcan;
             view.color = glm::vec3(1.0f);
             break;
+        case PickupKind::Invulnerability:
+            view.sprite = gl::SpriteInvulnerability;
+            view.color = glm::vec3(1.0f);
+            break;
         case PickupKind::KeyBlue:
             view.sprite = gl::SpriteKey;
             view.color = glm::vec3(0.35f, 0.55f, 1.0f);
@@ -134,9 +138,11 @@ void dressPickup(RenderState::PickupView& view, PickupKind kind, float pulse) {
     // A sprite is drawn larger than a glow of the same weight: the art
     // is padded inside its square, so the shape itself covers rather
     // less of the quad than the falloff does.
-    view.size = kind >= PickupKind::KeyBlue ? 1.6f
-                : view.sprite >= 0              ? 1.3f
-                                                : 0.85f;
+    // Invulnerability is drawn key-sized: a level is built around it, and it
+    // should be as hard to miss as the things that open the mine.
+    view.size = kind >= PickupKind::KeyBlue || kind == PickupKind::Invulnerability ? 1.6f
+                : view.sprite >= 0                                                 ? 1.3f
+                                                                                   : 0.85f;
 }
 
 } // namespace

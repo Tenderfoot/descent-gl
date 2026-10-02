@@ -112,6 +112,12 @@ struct HudWeaponSlot {
 struct HudData {
     bool show = true;
     float shields = 200.0f;
+    // The ship's own shield ceiling. The bar is drawn this long against an
+    // ordinary ship's, so a level that lowers it shows a shorter bar.
+    float maxShields = 200.0f;
+    // The invulnerability pickup is in effect: the shield bar is gold and full
+    // and says so, every count reads as infinite, and a hit flashes gold.
+    bool invulnerable = false;
     float energy = 100.0f;
 
     // The weapon strip, bottom right: the primaries in key order, then the

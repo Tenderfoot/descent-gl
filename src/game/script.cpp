@@ -289,9 +289,17 @@ int ScriptHost::declareLoadout(lua_State* state) {
     // lost, and a level that starts lost is a level file bug rather than an
     // authoring choice. Everything between there and the disabled threshold
     // is legitimate - that band is how a level starts the ship crippled.
+    //
+    // max_shields lowers the ship's ceiling for the level, and is read first
+    // so that shields can be checked against it.
     double value = 0.0;
-    if (optionalNumber(state, 1, "shields", "shields", 0.01,
+    double ceiling = static_cast<double>(sim::kPlayerMaxShields);
+    if (optionalNumber(state, 1, "max_shields", "max_shields", 1.0,
                        static_cast<double>(sim::kPlayerMaxShields), value)) {
+        host->loadout_.maxShields = static_cast<float>(value);
+        ceiling = value;
+    }
+    if (optionalNumber(state, 1, "shields", "shields", 0.01, ceiling, value)) {
         host->loadout_.shields = static_cast<float>(value);
     }
     if (optionalNumber(state, 1, "energy", "energy", 0.0, 100.0, value)) {
@@ -1053,6 +1061,11 @@ static int runOneScriptTest(const std::string& levelPath) {
 }
 
 void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player) {
+    // A lowered ceiling with no shields named starts the ship full at it.
+    if (loadout.maxShields >= 0.0f) {
+        player.maxShields = loadout.maxShields;
+        player.shields = loadout.maxShields;
+    }
     if (loadout.shields >= 0.0f) player.shields = loadout.shields;
     if (loadout.energy >= 0.0f) player.energy = loadout.energy;
     if (loadout.vulcanAmmo >= 0) player.vulcanAmmo = loadout.vulcanAmmo;
