@@ -1007,17 +1007,20 @@ function renderEntityTools(container, button, hint) {
             row(`portal → ${sd.neighbour}`);
             for (let key = -1; key < KEY_NAMES.length; ++key) {
                 const name = key < 0 ? 'no key' : KEY_NAMES[key];
+                // Offered even when the key is not placed: the level script
+                // can hand it over with give_key(). The tooltip says so, and
+                // validation warns when there is no script to do it.
                 const has = key < 0 || keys.has(key);
-                const el = button(`Add door (${name})`,
-                    has ? '' : `no ${name} key is placed in this level, so this door could never open`,
+                button(`Add door (${name})`,
+                    has ? '' : `no ${name} key is placed in this level; it opens only if the ` +
+                               'level script gives one',
                     () => edit(`door on ${segment} ${SIDE_NAMES[side]}`,
                                (level) => addDoor(level, segment, side, key)));
-                el.disabled = !has;
             }
             // Offered apart from the keys rather than as a fifth one, because
             // it is not a key: it is the other lock, and it stacks with them.
-            // Gated on there being a reactor for the same reason a key door is
-            // gated on the key existing - without one the hatch never opens.
+            // Gated on there being a reactor: without one the hatch never
+            // opens, and no script can change that.
             {
                 const reactor = hasReactor(app.level);
                 const el = button('Add emergency hatch',

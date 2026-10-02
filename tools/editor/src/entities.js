@@ -485,8 +485,7 @@ export function rewireGrates(level) {
 // --- validation helpers the UI uses ----------------------------------------
 
 // Is there a reactor to destroy? An emergency hatch in a level without one
-// can never open, which is the same trap as a key that is never placed, so
-// the door editor asks this before offering a hatch.
+// can never open, so the door editor asks this before offering a hatch.
 //
 // By robot type name, because that is all a level file says: the reactor is
 // an object whose type the robot config marks isReactor, and 'reactor' is
@@ -495,8 +494,9 @@ export function hasReactor(level) {
     return level.objects.some((object) => object.type === 'reactor');
 }
 
-// Which key colours are collectable in this level, so the door editor cannot
-// offer a key that does not exist and gate the mine shut forever.
+// Which key colours are collectable in this level. A keyed door whose colour
+// is missing here opens only if the level script gives the key; the door
+// editor says so, and validation warns when the level has no script.
 export function availableKeys(level) {
     const found = new Set();
     for (const pickup of level.pickups) {

@@ -115,6 +115,7 @@ void ScriptHost::clear() {
     requestedTutorial_ = -1;
     requestedShields_ = -1.0f;
     requestedSelfRepair_ = -1;
+    requestedKeys_ = 0;
     level_ = nullptr;
     if (state_) lua_close(state_);
     state_ = nullptr;
@@ -179,6 +180,7 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
     expose(state_, this, "set_shields", &ScriptHost::setShields);
     expose(state_, this, "set_self_repair", &ScriptHost::setSelfRepair);
+    expose(state_, this, "give_key", &ScriptHost::giveKey);
     expose(state_, this, "after", &ScriptHost::scheduleAfter);
     expose(state_, this, "event", &ScriptHost::declareEvent);
 
@@ -671,6 +673,24 @@ int ScriptHost::setSelfRepair(lua_State* state) {
     return 0;
 }
 
+// Hands the player a key without a pickup, so a level can open its keyed doors
+// on a story beat. Named the way has_key() names them. Latched like
+// set_shields(), and for the same reason; several in one callback all land.
+int ScriptHost::giveKey(lua_State* state) {
+    ScriptHost* host = self(state);
+    const char* color = luaL_checkstring(state, 1);
+    if (!host->draining_) return luaL_error(state, "give_key() is only valid inside a callback");
+    if (std::strcmp(color, kLegacyPurpleKeyName) == 0) {
+        color = kKeyNames[static_cast<size_t>(KeyColor::Purple)];
+    }
+    for (size_t i = 0; i < kKeyNames.size(); ++i) {
+        if (std::strcmp(color, kKeyNames[i]) != 0) continue;
+        host->requestedKeys_ |= 1u << i;
+        return 0;
+    }
+    return luaL_error(state, "unknown key colour '%s'", color);
+}
+
 int ScriptHost::startComm(lua_State* state) {
     ScriptHost* host = self(state);
     const char* id = luaL_checkstring(state, 1);
@@ -935,6 +955,12 @@ float ScriptHost::takeShields() {
     return shields;
 }
 
+unsigned ScriptHost::takeKeys() {
+    const unsigned keys = requestedKeys_;
+    requestedKeys_ = 0;
+    return keys;
+}
+
 int ScriptHost::takeSelfRepair() {
     const int selfRepair = requestedSelfRepair_;
     requestedSelfRepair_ = -1;
@@ -951,6 +977,7 @@ static void drainRequests(ScriptHost& host) {
     host.takeTutorial();
     host.takeShields();
     host.takeSelfRepair();
+    host.takeKeys();
 }
 
 static int runOneScriptTest(const std::string& levelPath) {

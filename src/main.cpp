@@ -745,6 +745,13 @@ int main(int argc, char** argv) {
         if (const int selfRepair = script.takeSelfRepair(); selfRepair >= 0) {
             cur.combat.player.selfRepair = selfRepair != 0;
         }
+        // Keys a callback handed over. Live state only as well: a restart takes
+        // them back, and the beat that gave them runs again.
+        if (const unsigned keys = script.takeKeys(); keys != 0) {
+            for (size_t i = 0; i < cur.game.keys.size(); ++i) {
+                if (keys & (1u << i)) cur.game.keys[i] = true;
+            }
+        }
         // Before the script's own message, so a story beat landing on the
         // same frame is the one left on screen.
         if (shipDisabled && recoveryClip) comm.play(-1, recoveryMessage, now);
