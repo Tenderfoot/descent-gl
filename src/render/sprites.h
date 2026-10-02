@@ -29,6 +29,7 @@ enum PickupSprite : int {
     SpriteRailgun,
     SpriteLightning,
     SpriteKey,      // a white template, tinted per key colour at draw time
+    SpriteInvulnerability,
     PickupSpriteCount,
 };
 

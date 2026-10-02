@@ -166,8 +166,7 @@ int applySplash(const Level& level, CombatState& state, RobotState* robots, Body
         float d = 0.0f;
         if (exposed(player->position, &d)) {
             const auto [hurt, shove] = share(d);
-            state.player.shields -= hurt;
-            if (hurt > 0.0f) state.player.hurtTimer = kHurtFlashTime;
+            hurtPlayer(state.player, hurt);
             applyImpulse(*player, away(player->position), shove, playerMass);
             ++hits;
         }
@@ -480,6 +479,9 @@ const int* weaponAmmoPool(const PlayerState& player, int weaponId) {
 
 bool weaponReady(const PlayerState& player, const WeaponConfig& cfg, int weaponId, float dt) {
     if (weaponId < 0 || weaponId >= WeaponCount) return false;
+    // Nothing is spent while invulnerable, so nothing can run out either - a
+    // gun already empty when the pickup was taken fires too.
+    if (player.invulnerable) return true;
     const WeaponDef& def = cfg.weapons[static_cast<size_t>(weaponId)];
     const bool continuous = weaponFire(weaponId) == WeaponFire::Continuous;
     const float meter = continuous ? dt : 1.0f;
@@ -540,7 +542,9 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     }
 
     // --- resources -------------------------------------------------------
-    if (player.headlightOn) {
+    // An invulnerable ship spends nothing: not the headlight's energy here,
+    // nor a shot's energy or rounds, nor a flare, below.
+    if (player.headlightOn && !player.invulnerable) {
         player.energy = std::max(0.0f, player.energy - cfg.headlightDrain * dt);
         // Out of energy, the light goes out. In a game with no ambient term
         // that is a real consequence, which is the point of it costing
@@ -650,8 +654,8 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
             if (slot < 0) return;
         }
 
-        if (def.energyCost > 0.0f) player.energy -= energyCost;
-        if (def.ammoCost > 0 && ammo) {
+        if (def.energyCost > 0.0f && !player.invulnerable) player.energy -= energyCost;
+        if (def.ammoCost > 0 && ammo && !player.invulnerable) {
             if (mode == WeaponFire::Continuous) {
                 // Per second, paid in whole rounds: the step's fraction goes on
                 // the carry and comes off the count as it crosses one. See
@@ -875,10 +879,11 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
     if (controls.primary && !disabled) fire(player.primaryWeapon);
     if (controls.secondary && !disabled) fire(player.secondaryWeapon);
-    if (controls.flare && !disabled && player.flareCooldown <= 0.0f && player.flares > 0) {
+    if (controls.flare && !disabled && player.flareCooldown <= 0.0f &&
+        (player.flares > 0 || player.invulnerable)) {
         const int slot = state.projectiles.spawn();
         if (slot >= 0) {
-            --player.flares;
+            if (!player.invulnerable) --player.flares;
             player.flareCooldown = 0.35f;
             Projectile& p = state.projectiles.items[static_cast<size_t>(slot)];
             p.kind = ProjectileKind::Flare;
@@ -958,8 +963,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
 
         switch (hit.kind) {
             case CombatHit::Kind::Player:
-                state.player.shields -= p.damage;
-                state.player.hurtTimer = kHurtFlashTime;
+                hurtPlayer(state.player, p.damage);
                 applyImpulse(ship, dir, p.impactImpulse, cfg.playerMass);
                 spawnEffect(state, hit.point, p.segment, p.color, 1.4f, 0.18f, 8.0f, 2.0f);
                 emitLocal(events, Cue::PlayerHurt);
@@ -1121,7 +1125,7 @@ bool checkPlayerDeath(const Level& level, CombatState& state, Body& ship,
     ship.velocity = glm::vec3(0.0f);
     shipOrientation = level.start.orientation;
 
-    state.player.shields = kPlayerMaxShields;
+    state.player.shields = state.player.maxShields;
     state.player.energy = 100.0f;
     state.player.lastTargetRobot = -1;
     state.player.targetHudTime = 0.0f;
