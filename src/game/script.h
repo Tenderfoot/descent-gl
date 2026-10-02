@@ -142,6 +142,9 @@ public:
     // Whether a callback switched self-repair this frame: 1 on, 0 off, -1 if
     // none did. Read once and cleared, exactly like takeShields().
     int takeSelfRepair();
+    // The keys callbacks handed over this frame, as a mask with bit i for
+    // kKeyNames[i], or 0. Read once and cleared, exactly like takeShields().
+    unsigned takeKeys();
     bool loaded() const { return state_ != nullptr; }
     int callbackErrors() const { return callbackErrors_; }
 
@@ -205,6 +208,7 @@ private:
     static int showTutorial(lua_State* state);
     static int setShields(lua_State* state);
     static int setSelfRepair(lua_State* state);
+    static int giveKey(lua_State* state);
     static int scheduleAfter(lua_State* state);
 
     static ScriptHost* self(lua_State* state);
@@ -233,6 +237,7 @@ private:
     int requestedTutorial_ = -1;
     float requestedShields_ = -1.0f;
     int requestedSelfRepair_ = -1;
+    unsigned requestedKeys_ = 0;
     ScriptLoadout loadout_;
     bool loadoutDeclared_ = false;
     sim::TriggerSet triggers_;

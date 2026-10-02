@@ -11,8 +11,8 @@
 // catch things the game loads happily and then behaves strangely about, which
 // is exactly the kind of bug an editor exists to prevent.
 
-import { PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
-import { lampPosition } from './entities.js';
+import { KEY_NAMES, PICKUP_NAMES, SIDE_COUNT, SIDE_NAMES, SIDE_VERTICES } from './format.js';
+import { availableKeys, lampPosition } from './entities.js';
 import { findSegment, insideSegment, sideCorners } from './geometry.js';
 
 const finding = (severity, rule, message, where = {}) => ({ severity, rule, message, ...where });
@@ -344,6 +344,22 @@ function checkReachability(level, out) {
     }
 }
 
+// A keyed door whose key is never placed opens only if the level script hands
+// the key over with give_key(). A level with no script cannot, so there the
+// door is shut for good. With a script it may well be deliberate, and the
+// editor cannot read Lua to tell, so it says nothing.
+function checkDoorKeys(level, out) {
+    if (level.script) return;
+    const keys = availableKeys(level);
+    for (let di = 0; di < level.doors.length; ++di) {
+        const door = level.doors[di];
+        if (door.key < 0 || keys.has(door.key)) continue;
+        out.push(finding('warning', 'door-key-unplaced',
+            `door ${di} needs the ${KEY_NAMES[door.key]} key, which is not placed in this level, ` +
+            'and the level has no script to give it', { segment: door.segment, side: door.side }));
+    }
+}
+
 // --- entry point -----------------------------------------------------------
 
 // Returns { findings, closure, ok }. `ok` is false when anything the game
@@ -365,10 +381,11 @@ export function validateLevel(level) {
         closure = checkWallSurface(level, findings);
         checkOverlaps(level, findings);
         checkReachability(level, findings);
+        checkDoorKeys(level, findings);
     }
 
     return { findings, closure, ok: findings.every((f) => f.severity !== 'error') };
 }
 
 export const EDITOR_ONLY_RULES = new Set(['segment-overlap', 'segment-unreachable',
-                                          'lamp-swing-outside']);
+                                          'lamp-swing-outside', 'door-key-unplaced']);
