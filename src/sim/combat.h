@@ -209,10 +209,6 @@ struct PlayerState {
     // kDisabledShieldRecovery. A level whose script holds the ship disabled
     // until it chooses to hand it back turns this off in its loadout.
     bool selfRepair = true;
-    // How many times self-repair has brought the ship back under its own
-    // control. Only ever counts up; the game layer watches it change to know
-    // the recovery was the ship's doing and not a pickup's or a script's.
-    int selfRepairs = 0;
 
     // The last robot directly damaged by the player's weapon. Splash damage
     // deliberately never writes this: a blast can hurt several robots and

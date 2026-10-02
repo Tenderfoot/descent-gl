@@ -537,7 +537,6 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     // dead, not disabled, and gets nothing.
     if (disabled && player.selfRepair && player.shields > 0.0f) {
         player.shields += kDisabledShieldRecovery * dt;
-        if (!playerDisabled(player)) ++player.selfRepairs;
     }
 
     // --- resources -------------------------------------------------------
