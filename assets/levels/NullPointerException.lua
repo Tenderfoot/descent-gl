@@ -4,7 +4,7 @@
 -- invulnerable and makes every count endless for the rest of the level.
 loadout {
   max_shields = 50,
-  countdown = 120,  -- two minutes to get out, against the usual 45 seconds
+  countdown = 300,  -- 5 minutes to get out, against the usual 45 seconds
   vulcan = 0,
   concussion = 0,
   homing = 0,
