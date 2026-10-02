@@ -84,6 +84,10 @@ struct ScriptLoadout {
     int railgunAmmo = -1;
     int lightningAmmo = -1;
     int flares = -1;
+    // Whether a disabled ship repairs itself; -1 unmentioned, else 0 or 1.
+    // Off for a level whose script holds the ship disabled through an opening
+    // and hands it back with set_self_repair(true) when it is done.
+    int selfRepair = -1;
 };
 
 // Copies whatever the loadout actually declared onto a player. Fields the
@@ -135,6 +139,9 @@ public:
     // The shields a callback asked for this frame, or negative if none did.
     // Read once and cleared, exactly like takeMessage().
     float takeShields();
+    // Whether a callback switched self-repair this frame: 1 on, 0 off, -1 if
+    // none did. Read once and cleared, exactly like takeShields().
+    int takeSelfRepair();
     bool loaded() const { return state_ != nullptr; }
     int callbackErrors() const { return callbackErrors_; }
 
@@ -197,6 +204,7 @@ private:
     static int declareTutorial(lua_State* state);
     static int showTutorial(lua_State* state);
     static int setShields(lua_State* state);
+    static int setSelfRepair(lua_State* state);
     static int scheduleAfter(lua_State* state);
 
     static ScriptHost* self(lua_State* state);
@@ -224,6 +232,7 @@ private:
     int requestedMessage_ = -1;
     int requestedTutorial_ = -1;
     float requestedShields_ = -1.0f;
+    int requestedSelfRepair_ = -1;
     ScriptLoadout loadout_;
     bool loadoutDeclared_ = false;
     sim::TriggerSet triggers_;

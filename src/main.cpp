@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
     if (!opts.comm.empty() && !comm.knows(opts.comm)) {
         dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
     }
-    // The transmission for a disabled ship getting itself flying again. Not
+    // The transmission for a disabled ship repairing itself enough to fly. Not
     // level content - a ship can be disabled in any mine - so it is raised here
     // rather than by a script. No words of its own: the panel reads "incoming
     // transmission" and runs for the clip's own length. Until the clip exists
@@ -612,9 +612,7 @@ int main(int argc, char** argv) {
                                   bindings);
             // Recomputed every step rather than latched, so a shield pickup
             // hands the ship straight back.
-            const bool wasDisabled = cur.ship.disabled;
             cur.ship.disabled = dvk::sim::playerDisabled(cur.combat.player);
-            if (wasDisabled && !cur.ship.disabled) regainedControl = true;
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -667,9 +665,14 @@ int main(int argc, char** argv) {
                 fire.eyeLocal = ray.eye;
                 fire.aimLocal = ray.direction;
             }
+            const int selfRepairsBefore = cur.combat.player.selfRepairs;
             dvk::sim::stepCombat(level, cur.combat, cur.ship.body, cur.ship.orientation, weapons,
                                  fire, static_cast<float>(kSimStep), &cur.robots, &solidDoors,
                                  &soundEvents, &cur.props);
+            // Only the ship's own recovery is announced. A pickup or a script
+            // handing the ship back has its own reason, and the script that
+            // does it is usually mid-scene.
+            if (cur.combat.player.selfRepairs != selfRepairsBefore) regainedControl = true;
             if (!consumedMouse) {
                 pendingFlare = false;
                 pendingWeaponSelection = -1;
@@ -730,6 +733,11 @@ int main(int argc, char** argv) {
         // again on the next one with nothing else to do.
         if (const float shields = script.takeShields(); shields >= 0.0f) {
             cur.combat.player.shields = shields;
+        }
+        // Live state only, for the same reason: a restart goes back to what the
+        // loadout said.
+        if (const int selfRepair = script.takeSelfRepair(); selfRepair >= 0) {
+            cur.combat.player.selfRepair = selfRepair != 0;
         }
         // Before the script's own message, so a story beat landing on the
         // same frame is the one left on screen.
