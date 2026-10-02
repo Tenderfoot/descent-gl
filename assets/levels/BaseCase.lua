@@ -48,14 +48,6 @@ message {
 }
 
 message {
-  id = "unlockthewayforward",
-  clip = "basecase_unlockthewayforward",
-  speaker = "???",
-  text = "Excellent. I'll unlock the way forward.",
-  seconds = 3.5,
-}
-
-message {
   id = "recovershields",
   clip = "basecase_recovershields",
   speaker = "???",
@@ -129,15 +121,6 @@ timer {
   end,
 }
 
--- Room 1. Finishing the brute with static charge drops its battery and a
--- concussion pickup; taking the missiles is what opens the blue door.
-pickup {
-  kind = "concussion",
-  on_pickup = function()
-    comm("unlockthewayforward")
-    give_key("blue")
-  end,
-}
 
 -- Room 2. The drones are already disabled, and a missile kill drops shields.
 -- The yellow door opens once none of them are left, however they died.
