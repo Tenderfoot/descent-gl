@@ -47,7 +47,7 @@ export const LEGACY_PICKUP_NAMES = { key_red: 'key_purple' };
 // is what stops a kind the game gains from going missing here again.
 export const PICKUP_NAMES = [
     'shield', 'energy', 'laser', 'concussion', 'homing', 'flares',
-    'railgun', 'lightning', 'vulcan',
+    'railgun', 'lightning', 'vulcan', 'invulnerability',
     'key_blue', 'key_yellow', 'key_purple',
 ];
 

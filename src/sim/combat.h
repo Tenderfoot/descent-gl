@@ -159,13 +159,22 @@ using FlarePool = Pool<Flare, kMaxFlares>;
 using EffectPool = Pool<Effect, kMaxEffects>;
 using BeamPool = Pool<Beam, kMaxBeams>;
 
-// Full shields. The number the disabled threshold is a fraction of, and what
-// the ship starts a level with.
+// Full shields for an ordinary ship, and the length the HUD's shield bar is
+// drawn at. A level can lower the ship's own ceiling - PlayerState::maxShields
+// - and every rule that means "full" reads that instead of this.
 inline constexpr float kPlayerMaxShields = 200.0f;
 
 // The player's resources and loadout.
 struct PlayerState {
     float shields = kPlayerMaxShields;
+    // The most shields this ship can hold: what a pickup tops it up to, what
+    // a respawn restores, and what the disabled threshold is a fraction of.
+    // A loadout can set it below kPlayerMaxShields, and the HUD draws the bar
+    // shorter in proportion.
+    float maxShields = kPlayerMaxShields;
+    // Set by the invulnerability pickup and held until the level ends. Nothing
+    // hurts the ship, and nothing it fires, lights or drops costs anything.
+    bool invulnerable = false;
     float energy = 100.0f;
     int primaryWeapon = WeaponLaser;
     int secondaryWeapon = WeaponConcussion;
@@ -240,7 +249,7 @@ inline constexpr int kStaticChargeCapacity = 10;
 // player has no thrust, no steering, no guns and no headlight: the ship drifts
 // on what it had. Robots use the same fraction - see kDisabledHealthFraction.
 inline bool playerDisabled(const PlayerState& player) {
-    return player.shields <= kPlayerMaxShields * kDisabledHealthFraction;
+    return player.shields <= player.maxShields * kDisabledHealthFraction;
 }
 
 // Shields per second a disabled ship's emergency systems put back, until it is
@@ -270,6 +279,17 @@ inline constexpr float kEmptyClickInterval = 0.4f;
 inline constexpr float kHurtFlashTime = 0.45f;
 inline constexpr float kRecoilTime = 0.18f;
 inline constexpr float kTargetHudTime = 4.0f;
+
+// The one way anything takes shields off the player. An invulnerable ship
+// still flinches - the hit is shown, in gold rather than red - but loses
+// nothing. Returns whether shields were actually lost.
+inline bool hurtPlayer(PlayerState& player, float damage) {
+    if (damage <= 0.0f) return false;
+    player.hurtTimer = kHurtFlashTime;
+    if (player.invulnerable) return false;
+    player.shields -= damage;
+    return true;
+}
 
 // Health of each level object, indexed the same as Level::objects. Zero or
 // below is destroyed.

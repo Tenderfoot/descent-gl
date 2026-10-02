@@ -818,8 +818,7 @@ void fireSpecial(const Level& level, const RobotDef& def, Robot& robot, int slot
 
     switch (hit.kind) {
         case CombatHit::Kind::Player:
-            combat.player.shields -= sp.damage;
-            combat.player.hurtTimer = kHurtFlashTime;
+            hurtPlayer(combat.player, sp.damage);
             applyImpulse(player, dir, sp.impulse, weapons.playerMass);
             spawnEffect(combat, hit.point, player.segment, sp.color, 2.2f, 0.25f, 14.0f, 3.5f);
             emitLocal(events, Cue::PlayerHurt);

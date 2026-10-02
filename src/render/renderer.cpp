@@ -766,6 +766,11 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
                              0.55f + 0.45f * std::sin(hud.shipDisabledTime * 5.5f));
         }
         if (flash <= 0.0f) return;
+        // Gold rather than red while invulnerable: the ship was hit and took
+        // nothing for it, and the flinch should say both.
+        const glm::vec3 tint = hud.invulnerable && !hud.shipDisabled
+                                   ? glm::vec3(1.0f, 0.78f, 0.2f)
+                                   : glm::vec3(0.9f, 0.12f, 0.1f);
         const float w = static_cast<float>(target_.width());
         const float h = static_cast<float>(target_.height());
         const float depth = h * 0.16f;
@@ -775,11 +780,11 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
         for (int b = 0; b < kBands; ++b) {
             const float t = static_cast<float>(b) / kBands;
             const float band = depth * (1.0f - t);
-            const glm::vec4 red(0.9f, 0.12f, 0.1f, flash * 0.055f * (1.0f - t * 0.5f));
-            hud_.rect(0.0f, 0.0f, w, band, red);
-            hud_.rect(0.0f, h - band, w, band, red);
-            hud_.rect(0.0f, 0.0f, band, h, red);
-            hud_.rect(w - band, 0.0f, band, h, red);
+            const glm::vec4 color(tint, flash * 0.055f * (1.0f - t * 0.5f));
+            hud_.rect(0.0f, 0.0f, w, band, color);
+            hud_.rect(0.0f, h - band, w, band, color);
+            hud_.rect(0.0f, 0.0f, band, h, color);
+            hud_.rect(w - band, 0.0f, band, h, color);
         }
     };
 
@@ -987,8 +992,20 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
     hud_.text("energy", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
     hud_.bar(left, y, barW, barH, hud.energy / 100.0f, glm::vec4(0.3f, 0.75f, 1.0f, 0.9f));
     y -= barH + 12.0f * s;
-    hud_.text("shields", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
-    hud_.bar(left, y, barW, barH, hud.shields / sim::kPlayerMaxShields, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
+    // The shield bar is as long as the ship's ceiling against an ordinary
+    // ship's, so a level that starts it on a quarter of the shields starts it
+    // on a quarter of the bar - full, but short. Invulnerable, it is back to
+    // full length, full, gold, and named for what it is now.
+    if (hud.invulnerable) {
+        hud_.text("invulnerable", left, y - 7.0f * s - 2.0f * s, s * 0.7f,
+                  glm::vec4(1.0f, 0.82f, 0.3f, 0.95f));
+        hud_.bar(left, y, barW, barH, 1.0f, glm::vec4(1.0f, 0.78f, 0.2f, 0.95f));
+    } else {
+        const float ceiling = std::max(1.0f, hud.maxShields);
+        const float shieldW = barW * std::clamp(ceiling / sim::kPlayerMaxShields, 0.0f, 1.0f);
+        hud_.text("shields", left, y - 7.0f * s - 2.0f * s, s * 0.7f, dim);
+        hud_.bar(left, y, shieldW, barH, hud.shields / ceiling, glm::vec4(0.4f, 1.0f, 0.55f, 0.9f));
+    }
 
     // Darkness, as a third gauge on the same stack. It belongs with energy and
     // shields rather than off on its own: the mine has no ambient term, so the
@@ -1105,6 +1122,29 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             *result.ptr = '\0';
             return out;
         };
+        // The count an invulnerable ship shows in place of a number. The font
+        // stops at 'Z' and has no infinity sign, so it is drawn here a pixel at
+        // a time in the font's own grid: seven wide, five tall, sitting where
+        // the middle five rows of a seven-row glyph would.
+        constexpr int kInfinityW = 7;
+        constexpr std::array<const char*, 5> kInfinity{
+            ".#...#.",
+            "#.#.#.#",
+            "#..#..#",
+            "#.#.#.#",
+            ".#...#.",
+        };
+        const auto infinity = [&](float x, float y, float scale, const glm::vec4& color) {
+            for (size_t row = 0; row < kInfinity.size(); ++row) {
+                for (int col = 0; col < kInfinityW; ++col) {
+                    if (kInfinity[row][col] != '#') continue;
+                    hud_.rect(x + static_cast<float>(col) * scale,
+                              y + static_cast<float>(row + 1) * scale, scale, scale, color);
+                }
+            }
+        };
+        const auto infinityWidth = [](float scale) { return kInfinityW * scale; };
+
         // "(1)", "(G)". The font runs 32..90 and stops at 'Z', so there are no
         // brackets to put a key in and it wears parentheses instead.
         const auto parens = [](const char* key, char* out, size_t size) -> const char* {
@@ -1146,17 +1186,23 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             // there is a gun missing and which key would reach for it.
             if (!slot.available) return;
 
+            // The laser keeps its level: that is not something it spends.
+            const bool endless = hud.invulnerable && slot.ammo >= 0 && slot.level == 0;
             char countBuf[12];
             const char* count = "";
-            if (counted(slot)) {
+            if (counted(slot) && !endless) {
                 count = digits(slot.level > 0 ? slot.level : slot.ammo, countBuf,
                                sizeof(countBuf));
             }
             const float nameW = hud_.textWidth(slot.name, nameScale);
-            const float countTextW = count[0] ? space + hud_.textWidth(count, nameScale) : 0.0f;
+            const float countTextW = endless    ? space + infinityWidth(nameScale)
+                                     : count[0] ? space + hud_.textWidth(count, nameScale)
+                                                : 0.0f;
             const float textX = x + (cw - nameW - countTextW) * 0.5f;
             hud_.text(slot.name, textX, top + nameY, nameScale, color);
-            if (count[0]) {
+            if (endless) {
+                infinity(textX + nameW + space, top + nameY, nameScale, color);
+            } else if (count[0]) {
                 hud_.text(count, textX + nameW + space, top + nameY, nameScale, color);
             }
             if (slot.selected) {
@@ -1205,10 +1251,15 @@ void Renderer::buildHud(const HudData& hud, const glm::mat4& viewProj) {
             cellPad * 2.0f + std::max({hud_.textWidth(flareKey, keyScale), countW,
                                        hud_.textWidth("flare", capScale)});
         const auto drawChip = [&](float x, float top) {
-            const glm::vec4 color = hud.flares > 0 ? ready : spent;
+            const glm::vec4 color = hud.flares > 0 || hud.invulnerable ? ready : spent;
             hud_.text("flare", x + cellPad, top + capY, capScale, caption);
             hud_.text(flareKey, x + (chipW - hud_.textWidth(flareKey, keyScale)) * 0.5f,
                       top + keyY, keyScale, color);
+            if (hud.invulnerable) {
+                infinity(x + (chipW - infinityWidth(nameScale)) * 0.5f, top + nameY, nameScale,
+                         color);
+                return;
+            }
             char countBuf[12];
             const char* count = digits(hud.flares, countBuf, sizeof(countBuf));
             hud_.text(count, x + (chipW - hud_.textWidth(count, nameScale)) * 0.5f, top + nameY,

@@ -76,6 +76,8 @@ struct ScriptTutorial {
 // a level may quite reasonably start the ship with no energy, no missiles and
 // no flares at all.
 struct ScriptLoadout {
+    // The ship's shield ceiling for the level; see PlayerState::maxShields.
+    float maxShields = -1.0f;
     float shields = -1.0f;
     float energy = -1.0f;
     int vulcanAmmo = -1;
