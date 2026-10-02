@@ -90,6 +90,10 @@ struct ScriptLoadout {
     // Off for a level whose script holds the ship disabled through an opening
     // and hands it back with set_self_repair(true) when it is done.
     int selfRepair = -1;
+    // Seconds to get out once the reactor is gone, for this level only; -1
+    // leaves the game's default. Not about the ship, but it is a condition the
+    // run starts from, which is what a loadout is.
+    float countdown = -1.0f;
 };
 
 // Copies whatever the loadout actually declared onto a player. Fields the

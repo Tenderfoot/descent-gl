@@ -38,6 +38,11 @@ void applySessionLoadout(LevelSession& session, const ScriptLoadout& loadout) {
     applyLoadout(loadout, session.initial().combat.player);
     applyLoadout(loadout, session.previous().combat.player);
     applyLoadout(loadout, session.current().combat.player);
+    if (loadout.countdown > 0.0f) {
+        for (SimState* state : {&session.initial(), &session.previous(), &session.current()}) {
+            state->game.countdownSeconds = loadout.countdown;
+        }
+    }
 }
 
 void applySessionDifficulty(LevelSession& session, const Level& level, Difficulty difficulty) {
