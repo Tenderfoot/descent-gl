@@ -15,6 +15,12 @@ namespace dvk::sim {
 
 namespace {
 
+// The escape countdown for this run: the level's own, or the game's default.
+float countdownLength(const GameState& state, const GameConfig& cfg) {
+    return state.countdownSeconds > 0.0f ? state.countdownSeconds : cfg.countdownSeconds;
+}
+
+
 // How close the ship's hull has to come to a pickup to take it.
 constexpr float kPickupReach = 2.4f;
 
@@ -390,7 +396,7 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         }
         if (reactorGone) {
             state.phase = GamePhase::Countdown;
-            state.countdown = cfg.countdownSeconds;
+            state.countdown = countdownLength(state, cfg);
             state.exitOpen = true;
             // At the listener: the reactor going up is the whole mine, and
             // attenuating it by how far the player had already run from the
@@ -413,10 +419,9 @@ void stepGame(const Level& level, const GameConfig& cfg, GameState& state, Comba
         }
         // Shake ramps from nothing to full over the countdown, so the mine
         // coming apart is a clock the player can feel without reading it.
+        const float length = countdownLength(state, cfg);
         const float fraction =
-            cfg.countdownSeconds > 0.0f
-                ? std::clamp(1.0f - state.countdown / cfg.countdownSeconds, 0.0f, 1.0f)
-                : 1.0f;
+            length > 0.0f ? std::clamp(1.0f - state.countdown / length, 0.0f, 1.0f) : 1.0f;
         state.shake = fraction * fraction;
 
         if (level.exitTrigger.present &&

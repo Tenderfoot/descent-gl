@@ -83,6 +83,9 @@ inline constexpr int kMaxPickups = 96;
 struct GameState {
     GamePhase phase = GamePhase::Playing;
     float countdown = 0.0f;         // seconds left once the reactor is gone
+    // How long this level gives the player to get out, when its script says;
+    // 0 is GameConfig::countdownSeconds. See countdownLength().
+    float countdownSeconds = 0.0f;
     float elapsed = 0.0f;           // seconds since the level started
     float shake = 0.0f;             // 0..1, how hard the mine is coming apart
     int robotsDestroyed = 0;
