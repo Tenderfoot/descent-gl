@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
     if (!opts.comm.empty() && !comm.knows(opts.comm)) {
         dvk::log::fatal("--comm names unknown clip '{}'", opts.comm);
     }
-    // The transmission for a disabled ship getting itself flying again. Not
+    // The transmission for the ship being disabled and starting to repair. Not
     // level content - a ship can be disabled in any mine - so it is raised here
     // rather than by a script. No words of its own: the panel reads "incoming
     // transmission" and runs for the clip's own length. Until the clip exists
@@ -597,7 +597,7 @@ int main(int argc, char** argv) {
         }
         bool consumedMouse = false;
         bool runFinished = false;
-        bool regainedControl = false;
+        bool shipDisabled = false;
         soundEvents.clear();
         while (session.advancesSimulation() && accumulator >= kSimStep) {
             prev = cur;
@@ -612,9 +612,7 @@ int main(int argc, char** argv) {
                                   bindings);
             // Recomputed every step rather than latched, so a shield pickup
             // hands the ship straight back.
-            const bool wasDisabled = cur.ship.disabled;
             cur.ship.disabled = dvk::sim::playerDisabled(cur.combat.player);
-            if (wasDisabled && !cur.ship.disabled) regainedControl = true;
             dvk::sim::stepShip(cur.ship, controls, flight, static_cast<float>(kSimStep));
 
             // Collision runs after integration, every step, and owns the
@@ -700,6 +698,17 @@ int main(int argc, char** argv) {
             dvk::sim::stepGame(level, gameConfig, cur.game, cur.combat, cur.robots, robotConfig,
                                cur.ship.body, static_cast<float>(kSimStep), &soundEvents,
                                &script.triggers(), &script.timers(), &script.pickupHooks());
+            // The moment this step's damage disabled the ship, while it can
+            // still repair itself: the transmission is the ship telling the
+            // player it is on it. Measured against the step before, so a level
+            // that starts the ship disabled, or a script that sets shields
+            // between steps, announces nothing. A ship knocked straight to zero
+            // is dead, not disabled.
+            if (!dvk::sim::playerDisabled(prev.combat.player) &&
+                dvk::sim::playerDisabled(cur.combat.player) &&
+                cur.combat.player.shields > 0.0f && cur.combat.player.selfRepair) {
+                shipDisabled = true;
+            }
             // In M5 zero shields respawned you on the spot. From M7 it ends
             // the level, and the end screen offers a restart.
             consumedMouse = true;
@@ -731,9 +740,14 @@ int main(int argc, char** argv) {
         if (const float shields = script.takeShields(); shields >= 0.0f) {
             cur.combat.player.shields = shields;
         }
+        // Live state only, for the same reason: a restart goes back to what the
+        // loadout said.
+        if (const int selfRepair = script.takeSelfRepair(); selfRepair >= 0) {
+            cur.combat.player.selfRepair = selfRepair != 0;
+        }
         // Before the script's own message, so a story beat landing on the
         // same frame is the one left on screen.
-        if (regainedControl && recoveryClip) comm.play(-1, recoveryMessage, now);
+        if (shipDisabled && recoveryClip) comm.play(-1, recoveryMessage, now);
         if (const int requested = script.takeMessage(); requested >= 0) {
             if (const dvk::ScriptMessage* message = script.message(requested)) {
                 comm.play(requested, *message, now);

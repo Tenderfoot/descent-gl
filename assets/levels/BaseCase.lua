@@ -10,6 +10,7 @@ loadout {
   railgun = 0, 
   lightning = 0, 
   flares = 0,
+  self_repair = false,  -- held disabled until the script hands the ship back
 }
 
 message {
@@ -62,6 +63,7 @@ timer {
         comm("help")
         after(10.0, function()      -- lands as the last line ends
           set_shields(22)           -- back over the 10% cutoff: control returns
+          set_self_repair(true)     -- from here on a disabled ship recovers itself
           show_tutorial("shipcontroltutorial")
         end)
       end)

@@ -205,6 +205,11 @@ struct PlayerState {
     bool headlightOn = false;
     int deaths = 0;
 
+    // Whether a disabled ship climbs back out on its own - see
+    // kDisabledShieldRecovery. A level whose script holds the ship disabled
+    // until it chooses to hand it back turns this off in its loadout.
+    bool selfRepair = true;
+
     // The last robot directly damaged by the player's weapon. Splash damage
     // deliberately never writes this: a blast can hurt several robots and
     // has no single honest target for the HUD to name.

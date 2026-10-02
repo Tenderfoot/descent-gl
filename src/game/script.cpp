@@ -114,6 +114,7 @@ void ScriptHost::clear() {
     requestedMessage_ = -1;
     requestedTutorial_ = -1;
     requestedShields_ = -1.0f;
+    requestedSelfRepair_ = -1;
     level_ = nullptr;
     if (state_) lua_close(state_);
     state_ = nullptr;
@@ -177,6 +178,7 @@ void ScriptHost::load(const Level& level) {
     expose(state_, this, "tutorial", &ScriptHost::declareTutorial);
     expose(state_, this, "show_tutorial", &ScriptHost::showTutorial);
     expose(state_, this, "set_shields", &ScriptHost::setShields);
+    expose(state_, this, "set_self_repair", &ScriptHost::setSelfRepair);
     expose(state_, this, "after", &ScriptHost::scheduleAfter);
     expose(state_, this, "event", &ScriptHost::declareEvent);
 
@@ -312,6 +314,12 @@ int ScriptHost::declareLoadout(lua_State* state) {
     if (optionalNumber(state, 1, "flares", "flare count", 0.0, 999.0, value)) {
         host->loadout_.flares = static_cast<int>(value);
     }
+    lua_getfield(state, 1, "self_repair");
+    if (!lua_isnil(state, -1)) {
+        luaL_checktype(state, -1, LUA_TBOOLEAN);
+        host->loadout_.selfRepair = lua_toboolean(state, -1) ? 1 : 0;
+    }
+    lua_pop(state, 1);
 
     host->loadoutDeclared_ = true;
     return 0;
@@ -651,6 +659,18 @@ int ScriptHost::setShields(lua_State* state) {
     return 0;
 }
 
+// Lets a disabled ship repair itself again, or stops it. Latched like
+// set_shields(), and for the same reason.
+int ScriptHost::setSelfRepair(lua_State* state) {
+    ScriptHost* host = self(state);
+    luaL_checktype(state, 1, LUA_TBOOLEAN);
+    if (!host->draining_) {
+        return luaL_error(state, "set_self_repair() is only valid inside a callback");
+    }
+    host->requestedSelfRepair_ = lua_toboolean(state, 1) ? 1 : 0;
+    return 0;
+}
+
 int ScriptHost::startComm(lua_State* state) {
     ScriptHost* host = self(state);
     const char* id = luaL_checkstring(state, 1);
@@ -915,6 +935,12 @@ float ScriptHost::takeShields() {
     return shields;
 }
 
+int ScriptHost::takeSelfRepair() {
+    const int selfRepair = requestedSelfRepair_;
+    requestedSelfRepair_ = -1;
+    return selfRepair;
+}
+
 // What the frame loop does after every drain, and the reason it matters here:
 // the latches are read once and cleared, so a test that never reads them makes
 // one frame's request look like it is still outstanding on the next. A second
@@ -924,6 +950,7 @@ static void drainRequests(ScriptHost& host) {
     host.takeMessage();
     host.takeTutorial();
     host.takeShields();
+    host.takeSelfRepair();
 }
 
 static int runOneScriptTest(const std::string& levelPath) {
@@ -1007,6 +1034,7 @@ void applyLoadout(const ScriptLoadout& loadout, sim::PlayerState& player) {
     if (loadout.railgunAmmo >= 0) player.railgunAmmo = loadout.railgunAmmo;
     if (loadout.lightningAmmo >= 0) player.lightningAmmo = loadout.lightningAmmo;
     if (loadout.flares >= 0) player.flares = loadout.flares;
+    if (loadout.selfRepair >= 0) player.selfRepair = loadout.selfRepair != 0;
 }
 
 int runScriptTest(const std::string& levelPath) {

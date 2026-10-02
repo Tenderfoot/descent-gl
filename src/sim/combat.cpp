@@ -535,7 +535,7 @@ void stepCombat(const Level& level, CombatState& state, Body& ship,
     if (disabled) player.headlightOn = false;
     // And it climbs back out on its own, slowly. A ship already at zero is
     // dead, not disabled, and gets nothing.
-    if (disabled && player.shields > 0.0f) {
+    if (disabled && player.selfRepair && player.shields > 0.0f) {
         player.shields += kDisabledShieldRecovery * dt;
     }
 
