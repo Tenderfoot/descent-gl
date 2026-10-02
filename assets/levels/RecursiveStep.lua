@@ -24,13 +24,6 @@ tutorial {
 }
 
 tutorial {
-  id = "projvelinherit",
-  clip = "projvelinherit",
-  title = "Velocity Inheritance",
-  text = "When firing your primary weapon projectiles, they'll inherit your velocity. You'll need to compensate with your crosshair.\n\nWhen using secondary fire missiles, they fire straight toward their trajectory.",
-}
-
-tutorial {
   id = "automapinfo",
   clip = "automapinfo",
   title = "Automap Navigation",
@@ -91,14 +84,6 @@ trigger {
   once = true,
   on_enter = function()
     show_tutorial("besneaky")
-  end,
-}
-
-pickup {
-  kind = "concussion",
-  once = true,              
-  on_pickup = function(kind)
-    show_tutorial("projvelinherit")
   end,
 }
 
