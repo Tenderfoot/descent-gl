@@ -6,7 +6,7 @@
 --   27-28  disabled brute    static charge -> its battery and a missile drop
 --                            missile pickup gives the blue key
 --   19-17  disabled drones   missiles -> shield drops
---                            shield pickup gives the yellow key
+--                            the last drone dying gives the yellow key
 --   15-13  gunner hallway    velocity inheritance
 --   10     the gunner        the purple key is in here
 --   0      the reactor       then out through the hatch
@@ -139,17 +139,8 @@ pickup {
   end,
 }
 
--- Room 2. The drones are already disabled; a missile kill always drops shields,
--- and taking the first one opens the yellow door.
---
--- Asks has_key() rather than keeping a Lua flag: the Lua state outlives a
--- restart, and the key does not.
-local function openYellow()
-  if has_key("yellow") then return end
-  comm("hostilesahead")
-  give_key("yellow")
-end
-
+-- Room 2. The drones are already disabled, and a missile kill drops shields.
+-- The yellow door opens once none of them are left, however they died.
 trigger {
   segment = 19,             -- first segment past the door into the drone room
   once = true,
@@ -157,25 +148,19 @@ trigger {
     comm("recovershields")
     -- TODO shields tutorial: needs a clip and its text.
 
-    -- The fallback. A drone finished by anything but a missile drops no
-    -- shields, and missiles fired at the walls are gone, so either could leave
-    -- the yellow door shut for good. Once every drone is dead, open it anyway.
+    -- Checked once a second rather than on a pickup, so a drone finished by
+    -- anything but a missile, which drops no shields, cannot leave the door
+    -- shut. A restart cancels the pending check and this trigger starts it
+    -- again.
     local function checkDrones()
-      if has_key("yellow") then return end
       if robots_alive("drone") == 0 then
-        openYellow()
+        comm("hostilesahead")
+        give_key("yellow")
       else
         after(1.0, checkDrones)
       end
     end
     after(1.0, checkDrones)
-  end,
-}
-
-pickup {
-  kind = "shield",
-  on_pickup = function()
-    openYellow()
   end,
 }
 
