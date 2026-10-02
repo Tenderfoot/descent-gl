@@ -181,11 +181,10 @@ pickup {
   end,
 }
 
--- On the way to the reactor, just before the door into its chamber.
-trigger {
-  segment = 2,
-  once = true,
-  on_enter = function()
+-- The reactor going up opens the hatch.
+event {
+  kind = "reactor_destroyed",
+  on_event = function()
     comm("escapehatch")
   end,
 }
